@@ -488,6 +488,11 @@ pub async fn sling(
             }
             Err(e) => {
                 success_route = None;
+                plugin
+                    .state()
+                    .pays
+                    .write()
+                    .remove(&send_response.payment_hash);
                 let mut special_stop = false;
                 match e.code {
                     Some(c) => {
@@ -646,8 +651,6 @@ pub async fn sling(
                                 }
                             };
                         }
-                        // TODO: actually check for error here and refactor wsp, this can be "PAID" after timeout
-                        // delinvoice(&rpc_path, label, DelinvoiceStatus::UNPAID).await?;
                         let delpay_timer = Instant::now();
                         while delpay_timer.elapsed() < Duration::from_secs(120) {
                             match delpay(&networkdir, send_response.payment_hash, "failed").await {
