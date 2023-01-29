@@ -1,3 +1,4 @@
+use std::io;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::{collections::HashMap, path::Path};
@@ -198,7 +199,7 @@ pub async fn read_jobs(
     let jobfilecontent = fs::read_to_string(jobfile.clone()).await;
     let mut jobs: HashMap<String, Job>;
 
-    fs::create_dir(sling_dir.clone()).await;
+    create_sling_dir(sling_dir).await?;
     match jobfilecontent {
         Ok(file) => jobs = serde_json::from_str(&file).unwrap_or(HashMap::new()),
         Err(e) => {
@@ -390,7 +391,7 @@ pub async fn read_excepts(plugin: Plugin<PluginState>) -> Result<(), Error> {
     let excepts_tostring: Vec<String>;
     let mut excepts: Vec<ShortChannelId> = Vec::new();
 
-    fs::create_dir(sling_dir.clone()).await;
+    create_sling_dir(&sling_dir).await?;
     match exceptsfilecontent {
         Ok(file) => excepts_tostring = serde_json::from_str(&file).unwrap_or(Vec::new()),
         Err(e) => {
@@ -418,7 +419,7 @@ pub async fn read_graph(sling_dir: &PathBuf) -> Result<LnGraph, Error> {
     let graphfilecontent = fs::read_to_string(graphfile.clone()).await;
     let graph: LnGraph;
 
-    fs::create_dir(sling_dir.clone()).await;
+    create_sling_dir(sling_dir).await?;
     match graphfilecontent {
         Ok(file) => {
             graph = match serde_json::from_str(&file) {
@@ -455,4 +456,14 @@ pub async fn write_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
         now.elapsed().as_millis().to_string()
     );
     Ok(())
+}
+
+async fn create_sling_dir(sling_dir: &PathBuf) -> Result<(), Error> {
+    match fs::create_dir(sling_dir).await {
+        Ok(_) => Ok(()),
+        Err(e) => match e.kind() {
+            io::ErrorKind::AlreadyExists => Ok(()),
+            _ => Err(anyhow!("error: {}, could not create sling folder", e)),
+        },
+    }
 }

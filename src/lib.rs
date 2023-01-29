@@ -6,15 +6,14 @@ use std::{
 
 use anyhow::{anyhow, Error};
 use cln_plugin::Plugin;
-use cln_rpc::model::requests::DelinvoiceStatus;
 use cln_rpc::{
     model::*,
-    primitives::{AmountOrAny, PublicKey, Secret, ShortChannelId},
+    primitives::{PublicKey, Secret, ShortChannelId},
     ClnRpc,
 };
 use log::debug;
 use model::{JobState, LnGraph};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use tokio::{process::Command, time::Instant};
 
 use crate::config::Config;
@@ -22,6 +21,7 @@ use crate::errors::*;
 use cln_rpc::primitives::*;
 pub mod config;
 pub mod errors;
+pub mod htlc;
 pub mod jobs;
 pub mod model;
 pub mod scored;
@@ -46,6 +46,7 @@ pub struct PluginState {
     pub config: Arc<Mutex<Config>>,
     pub peers: Arc<Mutex<Vec<ListpeersPeers>>>,
     pub graph: Arc<Mutex<LnGraph>>,
+    pub pays: Arc<RwLock<HashMap<String, String>>>,
     pub alias_peer_map: Arc<Mutex<HashMap<PublicKey, String>>>,
     pub pull_jobs: Arc<Mutex<HashSet<String>>>,
     pub push_jobs: Arc<Mutex<HashSet<String>>>,
@@ -59,6 +60,7 @@ impl PluginState {
             config: Arc::new(Mutex::new(Config::new())),
             peers: Arc::new(Mutex::new(Vec::new())),
             graph: Arc::new(Mutex::new(LnGraph::new())),
+            pays: Arc::new(RwLock::new(HashMap::new())),
             alias_peer_map: Arc::new(Mutex::new(HashMap::new())),
             pull_jobs: Arc::new(Mutex::new(HashSet::new())),
             push_jobs: Arc::new(Mutex::new(HashSet::new())),
@@ -166,53 +168,6 @@ pub async fn list_forwards(
     match listforwards_request {
         Response::ListForwards(info) => Ok(info),
         e => Err(anyhow!("Unexpected result in list_forwards: {:?}", e)),
-    }
-}
-
-pub async fn invoice(
-    rpc_path: &PathBuf,
-    amount_msat: AmountOrAny,
-    label: String,
-    description: String,
-) -> Result<InvoiceResponse, Error> {
-    let mut rpc = ClnRpc::new(&rpc_path).await?;
-    let invoice_request = rpc
-        .call(Request::Invoice(InvoiceRequest {
-            amount_msat,
-            description,
-            label,
-            expiry: None,
-            fallbacks: None,
-            preimage: None,
-            exposeprivatechannels: None,
-            cltv: None,
-            deschashonly: None,
-        }))
-        .await
-        .map_err(|e| anyhow!("Error calling invoice: {:?}", e))?;
-    match invoice_request {
-        Response::Invoice(info) => Ok(info),
-        e => Err(anyhow!("Unexpected result in invoice: {:?}", e)),
-    }
-}
-
-pub async fn delinvoice(
-    rpc_path: &PathBuf,
-    label: String,
-    status: DelinvoiceStatus,
-) -> Result<DelinvoiceResponse, Error> {
-    let mut rpc = ClnRpc::new(&rpc_path).await?;
-    let delinvoice_request = rpc
-        .call(Request::DelInvoice(DelinvoiceRequest {
-            label,
-            status,
-            desconly: None,
-        }))
-        .await
-        .map_err(|e| anyhow!("Error calling delinvoice: {:?}", e))?;
-    match delinvoice_request {
-        Response::DelInvoice(info) => Ok(info),
-        e => Err(anyhow!("Unexpected result in delinvoice: {:?}", e)),
     }
 }
 

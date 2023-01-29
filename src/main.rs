@@ -6,6 +6,7 @@ use log::{debug, info, warn};
 use sling::{
     config::*,
     get_info,
+    htlc::htlc_handler,
     jobs::{slinggo, slingstop},
     make_rpc_path,
     stats::slingstats,
@@ -64,6 +65,7 @@ async fn main() -> Result<(), anyhow::Error> {
             "channels to avoid for all jobs",
             slingexcept,
         )
+        .hook("htlc_accepted", htlc_handler)
         .dynamic()
         .configure()
         .await?

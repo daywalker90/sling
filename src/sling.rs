@@ -1,12 +1,14 @@
 use anyhow::{anyhow, Error};
 
+use bitcoin::consensus::encode::serialize_hex;
+use bitcoin::hashes::{Hash, HashEngine};
 use cln_plugin::Plugin;
 
 use cln_rpc::{model::*, primitives::*};
 
 use log::{debug, info, warn};
 
-use rand::random;
+use rand::{thread_rng, Rng};
 
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::{BinaryHeap, HashSet};
@@ -19,14 +21,13 @@ use std::{
 };
 use std::{path::PathBuf, str::FromStr};
 
-use cln_rpc::model::requests::DelinvoiceStatus;
-
 use tokio::time::{self, Instant};
 
 use crate::model::{DijkstraNode, FailureReb, Job, JobMessage, LnGraph, SatDirection, SuccessReb};
-use crate::slingsend;
-use crate::{delinvoice, delpay, get_normal_channel_from_listpeers, PluginState};
-use crate::{invoice, scored::*, waitsendpay, PLUGIN_NAME};
+use crate::{
+    delpay, get_normal_channel_from_listpeers, scored::*, slingsend, waitsendpay, PluginState,
+    PLUGIN_NAME,
+};
 
 pub async fn sling(
     rpc_path: &PathBuf,
@@ -334,41 +335,35 @@ pub async fn sling(
             now.elapsed().as_millis().to_string()
         );
         let send_response;
-        let label;
         if feeppm_effective_from_amts(
             Amount::msat(&route.first().unwrap().amount_msat),
             Amount::msat(&route.last().unwrap().amount_msat),
         ) <= job.maxppm
         {
-            label = String::from(PLUGIN_NAME.to_string() + "_" + &chan_id.to_string() + "_")
-                + &random::<u64>().to_string();
+            let mut preimage = [0u8; 32];
+            thread_rng().fill(&mut preimage[..]);
+
+            let pi_str = serialize_hex(&preimage);
+
+            let mut hasher = Sha256::engine();
+            hasher.input(&preimage);
+            let payment_hash = Sha256::from_engine(hasher);
             debug!(
-                "{}: Generated label. Total: {}ms",
+                "{}: Made payment hash: {} Total: {}ms",
                 chan_id.to_string(),
+                payment_hash.to_string(),
                 now.elapsed().as_millis().to_string()
             );
-            let new_invoice = invoice(
-                &rpc_path,
-                cln_rpc::primitives::AmountOrAny::Amount(Amount::from_msat(job.amount)),
-                label.clone(),
-                "".to_string(),
-            )
-            .await?;
-            debug!(
-                "{}: Created invoice. Total: {}ms",
-                chan_id.to_string(),
-                now.elapsed().as_millis().to_string()
-            );
-            match slingsend(
-                &rpc_path,
-                route.clone(),
-                new_invoice.payment_hash,
-                Some(new_invoice.payment_secret),
-                Some(label.clone()),
-            )
-            .await
-            {
-                Ok(resp) => send_response = resp,
+
+            match slingsend(&rpc_path, route.clone(), payment_hash, None, None).await {
+                Ok(resp) => {
+                    plugin
+                        .state()
+                        .pays
+                        .write()
+                        .insert(payment_hash.to_string(), pi_str);
+                    send_response = resp;
+                }
                 Err(e) => {
                     if e.to_string().contains("First peer not ready") {
                         info!(
@@ -382,7 +377,7 @@ pub async fn sling(
                                 .unwrap()
                                 .as_secs(),
                         );
-                        delinvoice(&rpc_path, label, DelinvoiceStatus::UNPAID).await?;
+                        // delinvoice(&rpc_path, label, DelinvoiceStatus::UNPAID).await?;
                         success_route = None;
                         FailureReb {
                             amount_msat: job.amount,
@@ -416,11 +411,6 @@ pub async fn sling(
                     }
                 }
             };
-            debug!(
-                "{}: payment_hash:{}",
-                chan_id.to_string(),
-                send_response.payment_hash
-            );
             debug!(
                 "{}: Sent on route. Total: {}ms",
                 chan_id.to_string(),
@@ -477,7 +467,7 @@ pub async fn sling(
                     Amount::msat(&o.amount_sent_msat) - Amount::msat(&o.amount_msat.unwrap()),
                     prettyroute
                 );
-                delinvoice(&rpc_path, o.label.unwrap(), DelinvoiceStatus::PAID).await?;
+                // delinvoice(&rpc_path, o.label.unwrap(), DelinvoiceStatus::PAID).await?;
                 delpay(&networkdir, send_response.payment_hash, "complete").await?;
                 SuccessReb {
                     amount_msat: Amount::msat(&o.amount_msat.unwrap()),
@@ -657,7 +647,7 @@ pub async fn sling(
                             };
                         }
                         // TODO: actually check for error here and refactor wsp, this can be "PAID" after timeout
-                        delinvoice(&rpc_path, label, DelinvoiceStatus::UNPAID).await?;
+                        // delinvoice(&rpc_path, label, DelinvoiceStatus::UNPAID).await?;
                         let delpay_timer = Instant::now();
                         while delpay_timer.elapsed() < Duration::from_secs(120) {
                             match delpay(&networkdir, send_response.payment_hash, "failed").await {
