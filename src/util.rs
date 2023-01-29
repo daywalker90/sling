@@ -1,0 +1,458 @@
+use std::path::PathBuf;
+use std::str::FromStr;
+use std::{collections::HashMap, path::Path};
+
+use crate::jobs::slingstop;
+use crate::model::{Job, LnGraph, SatDirection};
+
+use crate::{
+    get_all_normal_channels_from_listpeers, get_normal_channel_from_listpeers, list_peers,
+    make_rpc_path, PluginState, EXCEPTS_FILE_NAME, GRAPH_FILE_NAME, JOB_FILE_NAME, PLUGIN_NAME,
+};
+use anyhow::{anyhow, Error};
+use cln_plugin::Plugin;
+
+use cln_rpc::model::ListpeersPeers;
+use cln_rpc::primitives::ShortChannelId;
+use log::{debug, info, warn};
+
+use serde_json::json;
+use tokio::fs::{self, File};
+
+use tokio::time::Instant;
+
+pub async fn slingjob(
+    p: Plugin<PluginState>,
+    v: serde_json::Value,
+) -> Result<serde_json::Value, Error> {
+    let sling_dir = Path::new(&p.configuration().lightning_dir).join(PLUGIN_NAME);
+
+    match v {
+        serde_json::Value::Array(ar) => {
+            if ar.len() < 5 {
+                return Err(anyhow!("Missing arguments"));
+            }
+
+            let chan_id = ShortChannelId::from_str(
+                &ar.get(0)
+                    .unwrap()
+                    .as_str()
+                    .ok_or(anyhow!("invalid string for channel id"))?,
+            )?;
+
+            let sat_direction = SatDirection::from_str(
+                &ar.get(1)
+                    .unwrap()
+                    .as_str()
+                    .ok_or(anyhow!("invalid string for direction"))?,
+            )?;
+
+            //also convert to msat
+            let amount = ar
+                .get(2)
+                .unwrap()
+                .as_u64()
+                .ok_or(anyhow!("amount must be a positive integer"))?
+                * 1_000;
+            if amount == 0 {
+                return Err(anyhow!("amount must be greater than 0"));
+            }
+
+            let outppm =
+                ar.get(3)
+                    .unwrap()
+                    .as_u64()
+                    .ok_or(anyhow!("outppm must be a positive integer"))? as u32;
+
+            let maxppm =
+                ar.get(4)
+                    .unwrap()
+                    .as_u64()
+                    .ok_or(anyhow!("maxppm must be a positive integer"))? as u32;
+
+            let candidatelist = {
+                let mut tmpcandidatelist = Vec::new();
+                match ar.get(5) {
+                    Some(candidates) => {
+                        for candidate in candidates
+                            .as_array()
+                            .ok_or(anyhow!("Invalid array for candidate list"))?
+                        {
+                            tmpcandidatelist.push(ShortChannelId::from_str(
+                                candidate.as_str().ok_or(anyhow!(
+                                    "invalid string for channel id in candidate list"
+                                ))?,
+                            )?);
+                        }
+                        Some(tmpcandidatelist)
+                    }
+                    None => None,
+                }
+            };
+            let target = match ar.get(6) {
+                Some(t) => Some(
+                    t.as_f64()
+                        .ok_or(anyhow!("target must be a floating point"))?,
+                ),
+                None => None,
+            };
+            let maxhops = match ar.get(7) {
+                Some(h) => Some(
+                    h.as_u64()
+                        .ok_or(anyhow!("maxhops must be a positive integer"))?
+                        as u8,
+                ),
+                None => None,
+            };
+            let peers = p.state().peers.lock().clone();
+            let job = Job {
+                sat_direction,
+                amount,
+                outppm,
+                maxppm,
+                candidatelist,
+                target,
+                maxhops,
+            };
+            let our_listpeers_channel = get_normal_channel_from_listpeers(&peers, &chan_id);
+            if let Some(_channel) = our_listpeers_channel {
+                write_job(p.clone(), sling_dir, chan_id.to_string(), Some(job), false).await?;
+                Ok(json!({"result":"success"}))
+            } else {
+                Err(anyhow!(
+                    "Could not find channel or not in CHANNELD_NORMAL state: {}",
+                    chan_id.to_string()
+                ))
+            }
+        }
+        other => Err(anyhow!("Invalid arguments: {}", other.to_string())),
+    }
+}
+
+pub async fn refresh_joblists(p: Plugin<PluginState>) -> Result<(), Error> {
+    let now = Instant::now();
+    let peers = list_peers(&make_rpc_path(&p.clone())).await?.peers;
+    let jobs = read_jobs(
+        &Path::new(&p.configuration().lightning_dir).join(PLUGIN_NAME),
+        &peers,
+    )
+    .await?;
+    let mut pull_jobs = p.state().pull_jobs.lock();
+    let mut push_jobs = p.state().push_jobs.lock();
+
+    for (chan_id, job) in jobs {
+        match job.sat_direction {
+            SatDirection::Pull => pull_jobs.insert(chan_id.to_string()),
+            SatDirection::Push => push_jobs.insert(chan_id.to_string()),
+        };
+    }
+    debug!(
+        "Read {} pull jobs and {} push jobs in {}ms",
+        pull_jobs.len(),
+        push_jobs.len(),
+        now.elapsed().as_millis().to_string(),
+    );
+
+    Ok(())
+}
+
+pub async fn slingdeletejob(
+    p: Plugin<PluginState>,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, Error> {
+    let sling_dir = Path::new(&p.configuration().lightning_dir).join(PLUGIN_NAME);
+    match args {
+        serde_json::Value::Array(a) => {
+            if a.len() != 1 {
+                return Err(anyhow!(
+                    "Please provide exactly one short_channel_id or `all`"
+                ));
+            } else {
+                match a.first().unwrap() {
+                    serde_json::Value::String(i) => match i {
+                        inp if inp.eq("all") => {
+                            slingstop(p.clone(), serde_json::Value::Array(vec![])).await?;
+                            let jobfile = sling_dir.join(JOB_FILE_NAME);
+                            fs::remove_file(jobfile).await?;
+                            info!("Deleted all jobs");
+                        }
+                        _ => {
+                            write_job(p, sling_dir, i.clone(), None, true).await?;
+                        }
+                    },
+                    _ => return Err(anyhow!("invalid string for deleting job(s)")),
+                };
+            }
+        }
+        _ => return Err(anyhow!("invalid arguments")),
+    };
+
+    Ok(json!({ "result": "success" }))
+}
+
+pub async fn read_jobs(
+    sling_dir: &PathBuf,
+    peers: &Vec<ListpeersPeers>,
+) -> Result<HashMap<String, Job>, Error> {
+    let jobfile = sling_dir.join(JOB_FILE_NAME);
+    let jobfilecontent = fs::read_to_string(jobfile.clone()).await;
+    let mut jobs: HashMap<String, Job>;
+
+    fs::create_dir(sling_dir.clone()).await;
+    match jobfilecontent {
+        Ok(file) => jobs = serde_json::from_str(&file).unwrap_or(HashMap::new()),
+        Err(e) => {
+            warn!(
+                "Could not open {}: {}. Maybe this is the first time using sling? Creating new file.",
+                jobfile.to_str().unwrap(), e.to_string()
+            );
+            File::create(jobfile.clone()).await?;
+            jobs = HashMap::new();
+        }
+    };
+    let channels = get_all_normal_channels_from_listpeers(peers);
+    let channels = channels.keys().collect::<Vec<&String>>();
+
+    jobs.retain(|c, _j| channels.contains(&c));
+    Ok(jobs)
+}
+
+async fn write_job(
+    p: Plugin<PluginState>,
+    sling_dir: PathBuf,
+    chan_id: String,
+    job: Option<Job>,
+    remove: bool,
+) -> Result<HashMap<String, Job>, Error> {
+    let peers = p.state().peers.lock().clone();
+    let mut jobs = read_jobs(&sling_dir, &peers).await?;
+    let job_change;
+    let my_job;
+    let jobstates = p.state().job_state.lock().clone();
+    if jobstates.contains_key(&chan_id) && jobstates.get(&chan_id).unwrap().is_active() {
+        slingstop(
+            p.clone(),
+            serde_json::Value::Array(vec![serde_json::Value::String(chan_id.clone())]),
+        )
+        .await?;
+    }
+    {
+        let mut job_states = p.state().job_state.lock();
+        if jobs.contains_key(&chan_id) {
+            if remove {
+                jobs.remove(&chan_id);
+                job_states.remove(&chan_id);
+                job_change = "Removing";
+            } else {
+                job_change = "Updating";
+            }
+        } else {
+            job_change = "Creating";
+        }
+    }
+    if remove {
+        info!("{} job for {}", job_change, &chan_id);
+    } else {
+        my_job = job.unwrap();
+        info!(
+            "{} job for {} with amount {}msat, outppm {}, maxppm {}, candidatelist {:?} and target: {:?}",
+            job_change,
+            &chan_id,
+            &my_job.amount,
+            &my_job.outppm,
+            &my_job.maxppm,
+            &my_job.candidatelist,
+            &my_job.target
+        );
+        jobs.insert(chan_id, my_job);
+    }
+    let mut jobs_to_remove = Vec::new();
+    if peers.len() > 0 {
+        for (chan_id, _job) in &jobs {
+            if let None =
+                get_normal_channel_from_listpeers(&peers, &ShortChannelId::from_str(&chan_id)?)
+            {
+                jobs_to_remove.push(chan_id.clone());
+            }
+        }
+    }
+    jobs.retain(|i, _j| !jobs_to_remove.contains(i));
+    refresh_joblists(p.clone()).await?;
+    fs::write(
+        sling_dir.join(JOB_FILE_NAME),
+        serde_json::to_string_pretty(&jobs)?,
+    )
+    .await?;
+    Ok(jobs)
+}
+
+pub async fn slingexcept(
+    plugin: Plugin<PluginState>,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, Error> {
+    let peers = plugin.state().peers.lock().clone();
+    match args {
+        serde_json::Value::Array(a) => {
+            if a.len() != 2 {
+                return Err(anyhow!(
+                    "Please provide exactly two arguments: add/remove and a short_channel_id"
+                ));
+            } else {
+                match a.get(0).unwrap() {
+                    serde_json::Value::String(i) => {
+                        let scid;
+                        match a.get(1).unwrap() {
+                            serde_json::Value::String(s) => {
+                                scid = ShortChannelId::from_str(&s)?;
+                            }
+                            o => return Err(anyhow!("not a vaild short_channel_id: {}", o)),
+                        }
+                        let mut excepts = plugin.state().excepts.lock();
+                        let mut contains = false;
+                        for chan_id in excepts.clone() {
+                            if chan_id.to_string() == scid.to_string() {
+                                contains = true;
+                            }
+                        }
+                        match i {
+                            opt if opt.eq("add") => {
+                                if contains {
+                                    // excepts.retain(|&x| x.to_string() != scid.to_string());
+                                    return Err(anyhow!(
+                                        "{} is already in excepts",
+                                        scid.to_string()
+                                    ));
+                                } else {
+                                    let pull_jobs = plugin.state().pull_jobs.lock().clone();
+                                    let push_jobs = plugin.state().push_jobs.lock().clone();
+                                    let peer_channel = peers
+                                        .iter()
+                                        .flat_map(|peer| &peer.channels)
+                                        .find(|channel| channel.short_channel_id == Some(scid));
+                                    if let Some(_) = peer_channel {
+                                        if pull_jobs.contains(&scid.to_string())
+                                            || push_jobs.contains(&scid.to_string())
+                                        {
+                                            return Err(anyhow!(
+                                        "this channel has a job already and can't be an except too"
+                                    ));
+                                        } else {
+                                            excepts.push(scid);
+                                        }
+                                    } else {
+                                        excepts.push(scid);
+                                    }
+                                }
+                            }
+                            opt if opt.eq("remove") => {
+                                if contains {
+                                    excepts.retain(|&x| x.to_string() != scid.to_string());
+                                } else {
+                                    return Err(anyhow!(
+                                        "short_channel_id {} not in excepts, nothing to remove",
+                                        scid.to_string()
+                                    ));
+                                }
+                            }
+                            _ => return Err(anyhow!("unknown commmand, add or remove only")),
+                        }
+                    }
+                    _ => return Err(anyhow!("invalid command, add or remove only")),
+                }
+                write_excepts(plugin.clone()).await?;
+                Ok(json!({ "result": "success" }))
+            }
+        }
+        _ => Err(anyhow!("invalid arguments")),
+    }
+}
+
+async fn write_excepts(plugin: Plugin<PluginState>) -> Result<(), Error> {
+    let excepts = plugin.state().excepts.lock().clone();
+    let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
+    let excepts_tostring = excepts
+        .into_iter()
+        .map(|x| x.to_string())
+        .collect::<Vec<_>>();
+
+    fs::write(
+        sling_dir.join(EXCEPTS_FILE_NAME),
+        serde_json::to_string(&excepts_tostring)?,
+    )
+    .await?;
+
+    Ok(())
+}
+pub async fn read_excepts(plugin: Plugin<PluginState>) -> Result<(), Error> {
+    let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
+    let exceptsfile = sling_dir.join(EXCEPTS_FILE_NAME);
+    let exceptsfilecontent = fs::read_to_string(exceptsfile.clone()).await;
+    let excepts_tostring: Vec<String>;
+    let mut excepts: Vec<ShortChannelId> = Vec::new();
+
+    fs::create_dir(sling_dir.clone()).await;
+    match exceptsfilecontent {
+        Ok(file) => excepts_tostring = serde_json::from_str(&file).unwrap_or(Vec::new()),
+        Err(e) => {
+            warn!(
+                "Could not open {}: {}. Maybe this is the first time using sling? Creating new file.",
+                exceptsfile.to_str().unwrap(), e.to_string()
+            );
+            File::create(exceptsfile.clone()).await?;
+            excepts_tostring = Vec::new();
+        }
+    };
+
+    for except in excepts_tostring {
+        match ShortChannelId::from_str(&except) {
+            Ok(id) => excepts.push(id),
+            Err(_e) => warn!("excepts file contains invalid short_channel_id: {}", except),
+        }
+    }
+    *plugin.state().excepts.lock() = excepts;
+    Ok(())
+}
+
+pub async fn read_graph(sling_dir: &PathBuf) -> Result<LnGraph, Error> {
+    let graphfile = sling_dir.join(GRAPH_FILE_NAME);
+    let graphfilecontent = fs::read_to_string(graphfile.clone()).await;
+    let graph: LnGraph;
+
+    fs::create_dir(sling_dir.clone()).await;
+    match graphfilecontent {
+        Ok(file) => {
+            graph = match serde_json::from_str(&file) {
+                Ok(o) => o,
+                Err(e) => {
+                    warn!("could not read graph: {}", e.to_string());
+                    LnGraph::new()
+                }
+            }
+        }
+        Err(e) => {
+            warn!(
+                "Could not open {}: {}. Maybe this is the first time using sling? Creating new file.",
+                graphfile.to_str().unwrap(), e.to_string()
+            );
+            File::create(graphfile.clone()).await?;
+            graph = LnGraph::new();
+        }
+    };
+
+    Ok(graph)
+}
+pub async fn write_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
+    let graph = plugin.state().graph.lock().clone();
+    let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
+    let now = Instant::now();
+    fs::write(
+        sling_dir.join(GRAPH_FILE_NAME),
+        serde_json::to_string(&graph)?,
+    )
+    .await?;
+    debug!(
+        "Wrote graph to disk in {}ms",
+        now.elapsed().as_millis().to_string()
+    );
+    Ok(())
+}
