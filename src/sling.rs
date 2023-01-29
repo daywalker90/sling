@@ -492,7 +492,7 @@ pub async fn sling(
                     .state()
                     .pays
                     .write()
-                    .remove(&send_response.payment_hash);
+                    .remove(&send_response.payment_hash.to_string());
                 let mut special_stop = false;
                 match e.code {
                     Some(c) => {
