@@ -86,6 +86,7 @@ pub async fn slingstop(
                                 let jobstate = job_states.get_mut(i).unwrap();
                                 jobstate.stop();
                                 jobstate.statechange(JobMessage::Stopping);
+                                jobstate.set_active(false);
                                 debug!("{}: Stopping job...", i.to_string());
                             } else {
                                 return Err(anyhow!("no job running for {}", i));
@@ -98,6 +99,7 @@ pub async fn slingstop(
                     for (chan_id, jobstate) in job_states.iter_mut() {
                         jobstate.stop();
                         jobstate.statechange(JobMessage::Stopping);
+                        jobstate.set_active(false);
                         debug!("{}: Stopping job...", chan_id.to_string());
                     }
                 }
