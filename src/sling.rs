@@ -102,7 +102,7 @@ pub async fn sling(
                     .get_mut(&chan_id.to_string())
                     .unwrap()
                     .statechange(JobMessage::HTLCcapped);
-                time::sleep(Duration::from_secs(600)).await;
+                time::sleep(Duration::from_secs(120)).await;
                 continue 'outer;
             } else {
                 match peers.iter().find(|x| x.id == other_peer) {
@@ -116,7 +116,7 @@ pub async fn sling(
                                 .get_mut(&chan_id.to_string())
                                 .unwrap()
                                 .statechange(JobMessage::Disconnected);
-                            time::sleep(Duration::from_secs(600)).await;
+                            time::sleep(Duration::from_secs(120)).await;
                             continue 'outer;
                         }
                     }
@@ -426,7 +426,7 @@ pub async fn sling(
                 let jobstate = jobstates.get_mut(&chan_id.to_string()).unwrap();
                 jobstate.statechange(JobMessage::NoRoute);
             }
-            time::sleep(Duration::from_secs(600)).await;
+            time::sleep(Duration::from_secs(120)).await;
             success_route = None;
             continue;
         }
