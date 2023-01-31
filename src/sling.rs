@@ -634,6 +634,14 @@ pub async fn sling(
                                                 None
                                             }
                                         });
+                                    if data.erring_channel == route.last().unwrap().channel {
+                                        warn!(
+                                            "{}: Peer has a problem or just updated their fees? {}",
+                                            chan_id.to_string(),
+                                            data.failcodename
+                                        );
+                                        time::sleep(Duration::from_secs(20)).await;
+                                    }
                                 }
                                 None => {
                                     let mut jobstates = plugin.state().job_state.lock();
