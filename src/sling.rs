@@ -8,12 +8,14 @@ use cln_rpc::{model::*, primitives::*};
 
 use log::{debug, info, warn};
 
+use parking_lot::Mutex;
 use rand::{thread_rng, Rng};
 
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::{BinaryHeap, HashSet};
 
 use std::path::Path;
+use std::sync::Arc;
 use std::time::SystemTime;
 use std::{
     collections::HashMap,
@@ -23,7 +25,10 @@ use std::{path::PathBuf, str::FromStr};
 
 use tokio::time::{self, Instant};
 
-use crate::model::{DijkstraNode, FailureReb, Job, JobMessage, LnGraph, SatDirection, SuccessReb};
+use crate::model::{
+    DijkstraNode, FailureReb, Job, JobMessage, JobState, LnGraph, SatDirection, SuccessReb,
+};
+use crate::util::channel_jobstate_update;
 use crate::{
     delpay, get_normal_channel_from_listpeers, scored::*, slingsend, waitsendpay, PluginState,
     PLUGIN_NAME,
@@ -50,98 +55,37 @@ pub async fn sling(
             .should_stop();
         if should_stop {
             info!("{}: Stopped job!", chan_id.to_string());
-            let mut jobstates = plugin.state().job_state.lock();
-            let jobstate = jobstates.get_mut(&chan_id.to_string()).unwrap();
-            jobstate.statechange(JobMessage::Stopped);
-            jobstate.set_active(false);
+            channel_jobstate_update(
+                plugin.state().job_state.clone(),
+                chan_id,
+                JobMessage::Stopped,
+                Some(false),
+                None,
+            );
             break;
         }
 
         let peers = plugin.state().peers.lock().clone();
 
-        let our_listpeers_channel = get_normal_channel_from_listpeers(&peers, &chan_id);
-
         let other_peer = get_peer_id_from_chan_id(&peers, chan_id)?;
 
-        if let Some(channel) = our_listpeers_channel {
-            if job.is_balanced(&channel, &chan_id)
-                || match job.sat_direction {
-                    SatDirection::Pull => {
-                        Amount::msat(&channel.receivable_msat.unwrap()) < job.amount
-                    }
-                    SatDirection::Push => {
-                        Amount::msat(&channel.spendable_msat.unwrap()) < job.amount
-                    }
-                }
-            {
-                info!(
-                    "{}: already balanced. Taking a break...",
-                    chan_id.to_string()
-                );
-                plugin
-                    .state()
-                    .job_state
-                    .lock()
-                    .get_mut(&chan_id.to_string())
-                    .unwrap()
-                    .statechange(JobMessage::Balanced);
-                time::sleep(Duration::from_secs(120)).await;
-                continue 'outer;
-            } else if match job.sat_direction {
-                SatDirection::Pull => false,
-                SatDirection::Push => get_out_htlc_count(&channel) > 5,
-            } {
-                info!(
-                    "{}: already more than 5 pending htlcs. Taking a break...",
-                    chan_id.to_string()
-                );
-                plugin
-                    .state()
-                    .job_state
-                    .lock()
-                    .get_mut(&chan_id.to_string())
-                    .unwrap()
-                    .statechange(JobMessage::HTLCcapped);
-                time::sleep(Duration::from_secs(120)).await;
-                continue 'outer;
-            } else {
-                match peers.iter().find(|x| x.id == other_peer) {
-                    Some(p) => {
-                        if !p.connected {
-                            info!("{}: not connected. Taking a break...", chan_id.to_string());
-                            plugin
-                                .state()
-                                .job_state
-                                .lock()
-                                .get_mut(&chan_id.to_string())
-                                .unwrap()
-                                .statechange(JobMessage::Disconnected);
-                            time::sleep(Duration::from_secs(120)).await;
-                            continue 'outer;
-                        }
-                    }
-                    None => {
-                        let mut jobstates = plugin.state().job_state.lock();
-                        let jobstate = jobstates.get_mut(&chan_id.to_string()).unwrap();
-                        jobstate.statechange(JobMessage::PeerNotFound);
-                        jobstate.set_active(false);
-
-                        warn!("{}: peer not found. Stopping job.", chan_id.to_string());
-                        break 'outer;
-                    }
+        match health_check(
+            chan_id,
+            &job,
+            &peers,
+            other_peer,
+            plugin.state().job_state.clone(),
+        )
+        .await
+        {
+            Some(r) => {
+                if r {
+                    continue 'outer;
+                } else {
+                    break 'outer;
                 }
             }
-        } else {
-            warn!(
-                "{}: not in CHANNELD_NORMAL state. Stopping Job.",
-                chan_id.to_string()
-            );
-            let mut jobstates = plugin.state().job_state.lock();
-            let jobstate = jobstates.get_mut(&chan_id.to_string()).unwrap();
-            jobstate.statechange(JobMessage::ChanNotNormal);
-            jobstate.set_active(false);
-
-            break 'outer;
+            None => (),
         }
 
         let graph = plugin.state().graph.lock().clone();
@@ -677,6 +621,98 @@ pub async fn sling(
     }
 
     Ok(())
+}
+
+async fn health_check(
+    chan_id: ShortChannelId,
+    job: &Job,
+    peers: &Vec<ListpeersPeers>,
+    other_peer: PublicKey,
+    job_states: Arc<Mutex<HashMap<String, JobState>>>,
+) -> Option<bool> {
+    let our_listpeers_channel = get_normal_channel_from_listpeers(peers, chan_id);
+    if let Some(channel) = our_listpeers_channel {
+        if job.is_balanced(&channel, &chan_id)
+            || match job.sat_direction {
+                SatDirection::Pull => Amount::msat(&channel.receivable_msat.unwrap()) < job.amount,
+                SatDirection::Push => Amount::msat(&channel.spendable_msat.unwrap()) < job.amount,
+            }
+        {
+            info!(
+                "{}: already balanced. Taking a break...",
+                chan_id.to_string()
+            );
+            channel_jobstate_update(
+                job_states.clone(),
+                chan_id,
+                JobMessage::Balanced,
+                None,
+                None,
+            );
+            time::sleep(Duration::from_secs(120)).await;
+            Some(true)
+        } else if match job.sat_direction {
+            SatDirection::Pull => false,
+            SatDirection::Push => get_out_htlc_count(&channel) > 5,
+        } {
+            info!(
+                "{}: already more than 5 pending htlcs. Taking a break...",
+                chan_id.to_string()
+            );
+            channel_jobstate_update(
+                job_states.clone(),
+                chan_id,
+                JobMessage::HTLCcapped,
+                None,
+                None,
+            );
+            time::sleep(Duration::from_secs(120)).await;
+            Some(true)
+        } else {
+            match peers.iter().find(|x| x.id == other_peer) {
+                Some(p) => {
+                    if !p.connected {
+                        info!("{}: not connected. Taking a break...", chan_id.to_string());
+                        channel_jobstate_update(
+                            job_states.clone(),
+                            chan_id,
+                            JobMessage::Disconnected,
+                            None,
+                            None,
+                        );
+                        time::sleep(Duration::from_secs(120)).await;
+                        Some(true)
+                    } else {
+                        None
+                    }
+                }
+                None => {
+                    channel_jobstate_update(
+                        job_states.clone(),
+                        chan_id,
+                        JobMessage::PeerNotFound,
+                        Some(false),
+                        None,
+                    );
+                    warn!("{}: peer not found. Stopping job.", chan_id.to_string());
+                    Some(false)
+                }
+            }
+        }
+    } else {
+        warn!(
+            "{}: not in CHANNELD_NORMAL state. Stopping Job.",
+            chan_id.to_string()
+        );
+        channel_jobstate_update(
+            job_states.clone(),
+            chan_id,
+            JobMessage::ChanNotNormal,
+            Some(false),
+            None,
+        );
+        Some(false)
+    }
 }
 
 fn build_candidatelist(

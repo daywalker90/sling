@@ -273,12 +273,12 @@ pub fn is_channel_normal(channel: &ListpeersPeersChannels) -> bool {
 
 pub fn get_normal_channel_from_listpeers(
     peers: &Vec<ListpeersPeers>,
-    chan_id: &ShortChannelId,
+    chan_id: ShortChannelId,
 ) -> Option<ListpeersPeersChannels> {
     peers
         .iter()
         .flat_map(|peer| &peer.channels)
-        .find(|channel| channel.short_channel_id == Some(*chan_id) && is_channel_normal(channel))
+        .find(|channel| channel.short_channel_id == Some(chan_id) && is_channel_normal(channel))
         .cloned()
 }
 pub fn get_all_normal_channels_from_listpeers(

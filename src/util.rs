@@ -1,10 +1,11 @@
 use std::io;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::{collections::HashMap, path::Path};
 
 use crate::jobs::slingstop;
-use crate::model::{Job, LnGraph, SatDirection};
+use crate::model::{Job, JobMessage, JobState, LnGraph, SatDirection};
 
 use crate::{
     get_all_normal_channels_from_listpeers, get_normal_channel_from_listpeers, list_peers,
@@ -17,6 +18,7 @@ use cln_rpc::model::ListpeersPeers;
 use cln_rpc::primitives::ShortChannelId;
 use log::{debug, info, warn};
 
+use parking_lot::Mutex;
 use serde_json::json;
 use tokio::fs::{self, File};
 
@@ -115,7 +117,7 @@ pub async fn slingjob(
                 target,
                 maxhops,
             };
-            let our_listpeers_channel = get_normal_channel_from_listpeers(&peers, &chan_id);
+            let our_listpeers_channel = get_normal_channel_from_listpeers(&peers, chan_id);
             if let Some(_channel) = our_listpeers_channel {
                 write_job(p.clone(), sling_dir, chan_id.to_string(), Some(job), false).await?;
                 Ok(json!({"result":"success"}))
@@ -271,7 +273,7 @@ async fn write_job(
     if peers.len() > 0 {
         for (chan_id, _job) in &jobs {
             if let None =
-                get_normal_channel_from_listpeers(&peers, &ShortChannelId::from_str(&chan_id)?)
+                get_normal_channel_from_listpeers(&peers, ShortChannelId::from_str(&chan_id)?)
             {
                 jobs_to_remove.push(chan_id.clone());
             }
@@ -465,5 +467,29 @@ async fn create_sling_dir(sling_dir: &PathBuf) -> Result<(), Error> {
             io::ErrorKind::AlreadyExists => Ok(()),
             _ => Err(anyhow!("error: {}, could not create sling folder", e)),
         },
+    }
+}
+
+pub fn channel_jobstate_update(
+    jobstates: Arc<Mutex<HashMap<String, JobState>>>,
+    chan_id: ShortChannelId,
+    latest_state: JobMessage,
+    active: Option<bool>,
+    should_stop: Option<bool>,
+) {
+    let mut jobstates_mut = jobstates.lock();
+    let jobstate = jobstates_mut.get_mut(&chan_id.to_string()).unwrap();
+    jobstate.statechange(latest_state);
+    match active {
+        Some(a) => jobstate.set_active(a),
+        None => (),
+    }
+    match should_stop {
+        Some(s) => {
+            if s {
+                jobstate.stop()
+            }
+        }
+        None => (),
     }
 }
