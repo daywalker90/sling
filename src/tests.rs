@@ -1,6 +1,6 @@
 #[test]
 fn test_effective_feeppm() {
-    use crate::sling::feeppm_effective;
+    use crate::util::feeppm_effective;
     assert_eq!(feeppm_effective(0, 0, 1_000), 0);
     assert_eq!(feeppm_effective(0, 0, 200_000), 0);
     assert_eq!(feeppm_effective(0, 0, 9_999_999_999), 0);
@@ -83,7 +83,7 @@ fn test_effective_feeppm() {
 
 #[test]
 fn test_fee_total() {
-    use crate::sling::fee_total_msat_precise;
+    use crate::util::fee_total_msat_precise;
     assert_eq!(fee_total_msat_precise(0, 0, 1_000).ceil() as u64, 0);
 
     assert_eq!(fee_total_msat_precise(1, 0, 1_000).ceil() as u64, 1);
@@ -139,7 +139,7 @@ fn test_fee_total() {
 
 #[test]
 fn test_feeppm_effective_from_amts() {
-    use crate::sling::feeppm_effective_from_amts;
+    use crate::util::feeppm_effective_from_amts;
     assert_eq!(feeppm_effective_from_amts(1_000, 1_000), 0);
     assert_eq!(feeppm_effective_from_amts(u64::MAX, u64::MAX), 0);
 

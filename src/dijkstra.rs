@@ -1,5 +1,5 @@
 use crate::model::{DijkstraNode, Job, LnGraph, SatDirection};
-use crate::sling::{edge_cost, fee_total_msat_precise};
+use crate::util::{edge_cost, fee_total_msat_precise};
 use anyhow::Error;
 use cln_rpc::{model::*, primitives::*};
 use std::collections::hash_map::Entry::{Occupied, Vacant};

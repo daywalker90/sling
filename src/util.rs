@@ -1,3 +1,9 @@
+use bitcoin::hashes::Hash;
+use bitcoin::hashes::HashEngine;
+use cln_rpc::model::ListchannelsChannels;
+use cln_rpc::primitives::PublicKey;
+use cln_rpc::primitives::Sha256;
+use rand::Rng;
 use std::io;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -12,13 +18,17 @@ use crate::{
     make_rpc_path, PluginState, EXCEPTS_FILE_NAME, GRAPH_FILE_NAME, JOB_FILE_NAME, PLUGIN_NAME,
 };
 use anyhow::{anyhow, Error};
+use bitcoin::consensus::encode::serialize_hex;
 use cln_plugin::Plugin;
 
-use cln_rpc::model::ListpeersPeers;
+use cln_rpc::model::{
+    ListpeersPeers, ListpeersPeersChannels, ListpeersPeersChannelsHtlcsDirection,
+};
 use cln_rpc::primitives::ShortChannelId;
 use log::{debug, info, warn};
 
 use parking_lot::Mutex;
+use rand::thread_rng;
 use serde_json::json;
 use tokio::fs::{self, File};
 
@@ -492,4 +502,93 @@ pub fn channel_jobstate_update(
         }
         None => (),
     }
+}
+
+pub fn get_preimage_paymend_hash_pair() -> (String, Sha256) {
+    let mut preimage = [0u8; 32];
+    thread_rng().fill(&mut preimage[..]);
+
+    let pi_str = serialize_hex(&preimage);
+
+    let mut hasher = Sha256::engine();
+    hasher.input(&preimage);
+    let payment_hash = Sha256::from_engine(hasher);
+    (pi_str, payment_hash)
+}
+
+pub fn get_out_htlc_count(channel: &ListpeersPeersChannels) -> u64 {
+    match &channel.htlcs {
+        Some(htlcs) => htlcs
+            .into_iter()
+            .filter(|htlc| match htlc.direction {
+                ListpeersPeersChannelsHtlcsDirection::OUT => true,
+                ListpeersPeersChannelsHtlcsDirection::IN => false,
+            })
+            .count() as u64,
+        None => 0,
+    }
+}
+pub fn get_in_htlc_count(channel: &ListpeersPeersChannels) -> u64 {
+    match &channel.htlcs {
+        Some(htlcs) => htlcs
+            .into_iter()
+            .filter(|htlc| match htlc.direction {
+                ListpeersPeersChannelsHtlcsDirection::OUT => false,
+                ListpeersPeersChannelsHtlcsDirection::IN => true,
+            })
+            .count() as u64,
+        None => 0,
+    }
+}
+
+pub fn get_peer_id_from_chan_id(
+    peers: &Vec<ListpeersPeers>,
+    channel: ShortChannelId,
+) -> Result<PublicKey, Error> {
+    let now = Instant::now();
+    let peer = peers.iter().find(|peer| {
+        peer.channels
+            .iter()
+            .any(|chan| chan.short_channel_id == Some(channel))
+    });
+    match peer {
+        Some(p) => Ok(p.id),
+        None => {
+            debug!(
+                "get_peer_id_from_chan_id in {}ms",
+                now.elapsed().as_millis().to_string()
+            );
+            Err(anyhow!("{} disappeard from peers", channel.to_string()))
+        }
+    }
+}
+
+pub fn edge_cost(edge: &ListchannelsChannels, amount: u64) -> u64 {
+    // debug!(
+    //     "edge cost for {} source:{} is {}",
+    //     edge.short_channel_id.to_string(),
+    //     edge.source,
+    //     (edge.base_fee_millisatoshi as f64
+    //         + edge.fee_per_millionth as f64 / 1_000_000.0 * amount as f64) as u64
+    // );
+    fee_total_msat_precise(edge.fee_per_millionth, edge.base_fee_millisatoshi, amount).ceil() as u64
+}
+
+pub fn feeppm_effective(feeppm: u32, basefee_msat: u32, amount_msat: u64) -> u64 {
+    (fee_total_msat_precise(feeppm, basefee_msat, amount_msat) / amount_msat as f64 * 1_000_000.0)
+        .ceil() as u64
+}
+
+pub fn fee_total_msat_precise(feeppm: u32, basefee_msat: u32, amount_msat: u64) -> f64 {
+    basefee_msat as f64 + (feeppm as f64 / 1_000_000.0 * amount_msat as f64)
+}
+
+pub fn feeppm_effective_from_amts(amount_msat_start: u64, amount_msat_end: u64) -> u32 {
+    if amount_msat_start < amount_msat_end {
+        panic!(
+            "CRITICAL ERROR: amount_msat_start should be greater than or equal to amount_msat_end"
+        )
+    }
+    ((amount_msat_start - amount_msat_end) as f64 / amount_msat_end as f64 * 1_000_000.0).ceil()
+        as u32
 }
