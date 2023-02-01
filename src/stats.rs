@@ -112,14 +112,19 @@ pub async fn slingstats(
                         Some(o) => o.completed_at,
                         None => 0,
                     };
-                    let last_route_taken = Local
-                        .timestamp_opt(
-                            std::cmp::max(last_route_success, last_route_failure) as i64,
-                            0,
-                        )
-                        .unwrap()
-                        .format("%Y-%m-%d %H:%M:%S")
-                        .to_string();
+                    let last_route_taken =
+                        if std::cmp::max(last_route_success, last_route_failure) == 0 {
+                            "Never".to_string()
+                        } else {
+                            Local
+                                .timestamp_opt(
+                                    std::cmp::max(last_route_success, last_route_failure) as i64,
+                                    0,
+                                )
+                                .unwrap()
+                                .format("%Y-%m-%d %H:%M:%S")
+                                .to_string()
+                        };
                     let last_success_reb = if last_route_success == 0 {
                         "Never".to_string()
                     } else {
