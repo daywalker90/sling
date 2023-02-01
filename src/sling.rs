@@ -22,13 +22,13 @@ use std::{path::PathBuf, str::FromStr};
 
 use tokio::time::{self, Instant};
 
+use crate::dijkstra::dijkstra;
 use crate::model::{
     DijkstraNode, FailureReb, Job, JobMessage, JobState, LnGraph, SatDirection, SuccessReb,
 };
 use crate::util::channel_jobstate_update;
 use crate::{
-    delpay, get_normal_channel_from_listpeers, scored::*, slingsend, waitsendpay, PluginState,
-    PLUGIN_NAME,
+    delpay, get_normal_channel_from_listpeers, slingsend, waitsendpay, PluginState, PLUGIN_NAME,
 };
 
 pub async fn sling(
