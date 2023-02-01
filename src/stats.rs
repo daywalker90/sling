@@ -12,11 +12,12 @@ use num_format::{Locale, ToFormattedString};
 use serde_json::json;
 use tabled::TableIteratorExt;
 
-use crate::model::{JobState, StatSummary};
-use crate::{get_all_normal_channels_from_listpeers, NO_ALIAS_SET};
+use crate::model::{JobState, PluginState, StatSummary};
+use crate::util::get_all_normal_channels_from_listpeers;
+use crate::NO_ALIAS_SET;
 use crate::{
     model::{FailureReb, SuccessReb},
-    PluginState, PLUGIN_NAME,
+    PLUGIN_NAME,
 };
 
 pub async fn slingstats(

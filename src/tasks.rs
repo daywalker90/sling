@@ -5,10 +5,10 @@ use std::{
 };
 
 use crate::{
-    list_channels, list_nodes, list_peers, make_rpc_path,
-    model::{DirectedChannel, LnGraph},
-    util::{read_graph, read_jobs, write_graph},
-    PluginState, PLUGIN_NAME,
+    list_channels, list_nodes, list_peers,
+    model::{DirectedChannel, LnGraph, PluginState},
+    util::{make_rpc_path, read_graph, read_jobs, write_graph},
+    PLUGIN_NAME,
 };
 use anyhow::Error;
 use cln_plugin::Plugin;

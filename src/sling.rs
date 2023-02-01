@@ -21,15 +21,15 @@ use tokio::time::{self, Instant};
 
 use crate::dijkstra::dijkstra;
 use crate::model::{
-    DijkstraNode, FailureReb, Job, JobMessage, JobState, LnGraph, SatDirection, SuccessReb,
+    DijkstraNode, FailureReb, Job, JobMessage, JobState, LnGraph, PluginState, SatDirection,
+    SuccessReb,
 };
 use crate::util::{
     channel_jobstate_update, feeppm_effective, feeppm_effective_from_amts, get_in_htlc_count,
-    get_out_htlc_count, get_peer_id_from_chan_id, get_preimage_paymend_hash_pair,
+    get_normal_channel_from_listpeers, get_out_htlc_count, get_peer_id_from_chan_id,
+    get_preimage_paymend_hash_pair,
 };
-use crate::{
-    delpay, get_normal_channel_from_listpeers, slingsend, waitsendpay, PluginState, PLUGIN_NAME,
-};
+use crate::{delpay, slingsend, waitsendpay, PLUGIN_NAME};
 
 pub async fn sling(
     rpc_path: &PathBuf,

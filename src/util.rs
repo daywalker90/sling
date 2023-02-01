@@ -1,8 +1,10 @@
 use bitcoin::hashes::Hash;
 use bitcoin::hashes::HashEngine;
 use cln_rpc::model::ListchannelsChannels;
+use cln_rpc::model::ListpeersPeersChannelsState;
 use cln_rpc::primitives::PublicKey;
 use cln_rpc::primitives::Sha256;
+use parking_lot::Mutex;
 use rand::Rng;
 use std::io;
 use std::path::PathBuf;
@@ -11,12 +13,10 @@ use std::sync::Arc;
 use std::{collections::HashMap, path::Path};
 
 use crate::jobs::slingstop;
+use crate::model::PluginState;
 use crate::model::{Job, JobMessage, JobState, LnGraph, SatDirection};
 
-use crate::{
-    get_all_normal_channels_from_listpeers, get_normal_channel_from_listpeers, list_peers,
-    make_rpc_path, PluginState, EXCEPTS_FILE_NAME, GRAPH_FILE_NAME, JOB_FILE_NAME, PLUGIN_NAME,
-};
+use crate::{list_peers, EXCEPTS_FILE_NAME, GRAPH_FILE_NAME, JOB_FILE_NAME, PLUGIN_NAME};
 use anyhow::{anyhow, Error};
 use bitcoin::consensus::encode::serialize_hex;
 use cln_plugin::Plugin;
@@ -27,7 +27,6 @@ use cln_rpc::model::{
 use cln_rpc::primitives::ShortChannelId;
 use log::{debug, info, warn};
 
-use parking_lot::Mutex;
 use rand::thread_rng;
 use serde_json::json;
 use tokio::fs::{self, File};
@@ -591,4 +590,42 @@ pub fn feeppm_effective_from_amts(amount_msat_start: u64, amount_msat_end: u64) 
     }
     ((amount_msat_start - amount_msat_end) as f64 / amount_msat_end as f64 * 1_000_000.0).ceil()
         as u32
+}
+
+pub fn make_rpc_path(plugin: &Plugin<PluginState>) -> PathBuf {
+    Path::new(&plugin.configuration().lightning_dir).join(plugin.configuration().rpc_file)
+}
+
+pub fn is_channel_normal(channel: &ListpeersPeersChannels) -> bool {
+    match channel.state {
+        ListpeersPeersChannelsState::CHANNELD_NORMAL => true,
+        _ => false,
+    }
+}
+
+pub fn get_normal_channel_from_listpeers(
+    peers: &Vec<ListpeersPeers>,
+    chan_id: ShortChannelId,
+) -> Option<ListpeersPeersChannels> {
+    peers
+        .iter()
+        .flat_map(|peer| &peer.channels)
+        .find(|channel| channel.short_channel_id == Some(chan_id) && is_channel_normal(channel))
+        .cloned()
+}
+pub fn get_all_normal_channels_from_listpeers(
+    peers: &Vec<ListpeersPeers>,
+) -> HashMap<String, PublicKey> {
+    let mut scid_peer_map = HashMap::new();
+    for peer in peers {
+        for channel in &peer.channels {
+            if is_channel_normal(channel) {
+                scid_peer_map.insert(
+                    channel.short_channel_id.unwrap().to_string(),
+                    peer.id.clone(),
+                );
+            }
+        }
+    }
+    scid_peer_map
 }

@@ -1,22 +1,14 @@
-use std::{
-    collections::{HashMap, HashSet},
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::path::PathBuf;
 
 use anyhow::{anyhow, Error};
-use cln_plugin::Plugin;
 use cln_rpc::{
     model::*,
     primitives::{PublicKey, Secret, ShortChannelId},
     ClnRpc,
 };
 use log::debug;
-use model::{JobState, LnGraph};
-use parking_lot::{Mutex, RwLock};
 use tokio::{process::Command, time::Instant};
 
-use crate::config::Config;
 use crate::errors::*;
 use cln_rpc::primitives::*;
 pub mod config;
@@ -40,36 +32,6 @@ pub const EXCEPTS_FILE_NAME: &str = "excepts.json";
 
 #[cfg(test)]
 mod tests;
-
-#[derive(Clone)]
-pub struct PluginState {
-    pub config: Arc<Mutex<Config>>,
-    pub peers: Arc<Mutex<Vec<ListpeersPeers>>>,
-    pub graph: Arc<Mutex<LnGraph>>,
-    pub pays: Arc<RwLock<HashMap<String, String>>>,
-    pub alias_peer_map: Arc<Mutex<HashMap<PublicKey, String>>>,
-    pub pull_jobs: Arc<Mutex<HashSet<String>>>,
-    pub push_jobs: Arc<Mutex<HashSet<String>>>,
-    pub excepts: Arc<Mutex<Vec<ShortChannelId>>>,
-    pub tempbans: Arc<Mutex<HashMap<String, u64>>>,
-    pub job_state: Arc<Mutex<HashMap<String, JobState>>>,
-}
-impl PluginState {
-    pub fn new() -> PluginState {
-        PluginState {
-            config: Arc::new(Mutex::new(Config::new())),
-            peers: Arc::new(Mutex::new(Vec::new())),
-            graph: Arc::new(Mutex::new(LnGraph::new())),
-            pays: Arc::new(RwLock::new(HashMap::new())),
-            alias_peer_map: Arc::new(Mutex::new(HashMap::new())),
-            pull_jobs: Arc::new(Mutex::new(HashSet::new())),
-            push_jobs: Arc::new(Mutex::new(HashSet::new())),
-            excepts: Arc::new(Mutex::new(Vec::new())),
-            tempbans: Arc::new(Mutex::new(HashMap::new())),
-            job_state: Arc::new(Mutex::new(HashMap::new())),
-        }
-    }
-}
 
 pub async fn list_funds(rpc_path: &PathBuf) -> Result<ListfundsResponse, Error> {
     let mut rpc = ClnRpc::new(&rpc_path).await?;
@@ -258,42 +220,4 @@ pub async fn waitsendpay(
             data: None,
         }),
     }
-}
-
-pub fn make_rpc_path(plugin: &Plugin<PluginState>) -> PathBuf {
-    Path::new(&plugin.configuration().lightning_dir).join(plugin.configuration().rpc_file)
-}
-
-pub fn is_channel_normal(channel: &ListpeersPeersChannels) -> bool {
-    match channel.state {
-        ListpeersPeersChannelsState::CHANNELD_NORMAL => true,
-        _ => false,
-    }
-}
-
-pub fn get_normal_channel_from_listpeers(
-    peers: &Vec<ListpeersPeers>,
-    chan_id: ShortChannelId,
-) -> Option<ListpeersPeersChannels> {
-    peers
-        .iter()
-        .flat_map(|peer| &peer.channels)
-        .find(|channel| channel.short_channel_id == Some(chan_id) && is_channel_normal(channel))
-        .cloned()
-}
-pub fn get_all_normal_channels_from_listpeers(
-    peers: &Vec<ListpeersPeers>,
-) -> HashMap<String, PublicKey> {
-    let mut scid_peer_map = HashMap::new();
-    for peer in peers {
-        for channel in &peer.channels {
-            if is_channel_normal(channel) {
-                scid_peer_map.insert(
-                    channel.short_channel_id.unwrap().to_string(),
-                    peer.id.clone(),
-                );
-            }
-        }
-    }
-    scid_peer_map
 }

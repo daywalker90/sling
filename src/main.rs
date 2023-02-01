@@ -8,11 +8,11 @@ use sling::{
     get_info,
     htlc::htlc_handler,
     jobs::{slinggo, slingstop},
-    make_rpc_path,
+    model::{Config, PluginState},
     stats::slingstats,
     tasks,
-    util::{read_excepts, refresh_joblists, slingdeletejob, slingexcept, slingjob},
-    PluginState, PLUGIN_NAME,
+    util::{make_rpc_path, read_excepts, refresh_joblists, slingdeletejob, slingexcept, slingjob},
+    PLUGIN_NAME,
 };
 use tokio::{self};
 #[cfg(all(not(windows), not(target_env = "musl")))]

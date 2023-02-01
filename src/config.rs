@@ -1,26 +1,11 @@
 use anyhow::{anyhow, Error};
 use cln_plugin::{options, ConfiguredPlugin};
-use cln_rpc::primitives::PublicKey;
 use log::warn;
 use std::path::Path;
 
 use tokio::fs;
 
-use crate::{PluginState, PLUGIN_NAME};
-
-#[derive(Clone, Debug)]
-pub struct Config {
-    pub pubkey: Option<PublicKey>,
-    pub utf8: (String, bool),
-}
-impl Config {
-    pub fn new() -> Config {
-        Config {
-            pubkey: None,
-            utf8: (PLUGIN_NAME.to_string() + "-utf8", true),
-        }
-    }
-}
+use crate::model::{Config, PluginState};
 
 pub fn validateargs(args: serde_json::Value, mut config: Config) -> Result<Config, Error> {
     match args {

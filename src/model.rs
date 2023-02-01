@@ -2,21 +2,69 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::{self, Display, Formatter},
     path::PathBuf,
+    sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{anyhow, Error};
 use cln_rpc::{
-    model::{ListchannelsChannels, ListpeersPeersChannels},
+    model::{ListchannelsChannels, ListpeersPeers, ListpeersPeersChannels},
     primitives::{Amount, PublicKey, ShortChannelId},
 };
 use log::debug;
+use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use tabled::Tabled;
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 
+use crate::PLUGIN_NAME;
+
 const SUCCESSES_SUFFIX: &str = "_successes.json";
 const FAILURES_SUFFIX: &str = "_failures.json";
+
+#[derive(Clone)]
+pub struct PluginState {
+    pub config: Arc<Mutex<Config>>,
+    pub peers: Arc<Mutex<Vec<ListpeersPeers>>>,
+    pub graph: Arc<Mutex<LnGraph>>,
+    pub pays: Arc<RwLock<HashMap<String, String>>>,
+    pub alias_peer_map: Arc<Mutex<HashMap<PublicKey, String>>>,
+    pub pull_jobs: Arc<Mutex<HashSet<String>>>,
+    pub push_jobs: Arc<Mutex<HashSet<String>>>,
+    pub excepts: Arc<Mutex<Vec<ShortChannelId>>>,
+    pub tempbans: Arc<Mutex<HashMap<String, u64>>>,
+    pub job_state: Arc<Mutex<HashMap<String, JobState>>>,
+}
+impl PluginState {
+    pub fn new() -> PluginState {
+        PluginState {
+            config: Arc::new(Mutex::new(Config::new())),
+            peers: Arc::new(Mutex::new(Vec::new())),
+            graph: Arc::new(Mutex::new(LnGraph::new())),
+            pays: Arc::new(RwLock::new(HashMap::new())),
+            alias_peer_map: Arc::new(Mutex::new(HashMap::new())),
+            pull_jobs: Arc::new(Mutex::new(HashSet::new())),
+            push_jobs: Arc::new(Mutex::new(HashSet::new())),
+            excepts: Arc::new(Mutex::new(Vec::new())),
+            tempbans: Arc::new(Mutex::new(HashMap::new())),
+            job_state: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Config {
+    pub pubkey: Option<PublicKey>,
+    pub utf8: (String, bool),
+}
+impl Config {
+    pub fn new() -> Config {
+        Config {
+            pubkey: None,
+            utf8: (PLUGIN_NAME.to_string() + "-utf8", true),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct JobState {
