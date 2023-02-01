@@ -527,35 +527,7 @@ pub async fn sling(
                                         );
                                         break 'outer;
                                     }
-                                    debug!(
-                                        "{}: Adjusting liquidity for {}.",
-                                        chan_id.to_string(),
-                                        data.erring_channel.to_string()
-                                    );
-                                    plugin
-                                        .state()
-                                        .graph
-                                        .lock()
-                                        .graph
-                                        .get_mut(&data.erring_node)
-                                        .unwrap()
-                                        .iter_mut()
-                                        .find_map(|x| {
-                                            if x.channel.short_channel_id == data.erring_channel
-                                                && x.channel.destination != mypubkey
-                                                && x.channel.source != mypubkey
-                                            {
-                                                x.liquidity =
-                                                    Amount::msat(&data.amount_msat.unwrap()) - 1;
-                                                x.timestamp = SystemTime::now()
-                                                    .duration_since(UNIX_EPOCH)
-                                                    .unwrap()
-                                                    .as_secs();
-                                                Some(x)
-                                            } else {
-                                                None
-                                            }
-                                        });
+
                                     if data.erring_channel == route.last().unwrap().channel {
                                         warn!(
                                             "{}: Peer has a problem or just updated their fees? {}",
@@ -563,6 +535,37 @@ pub async fn sling(
                                             data.failcodename
                                         );
                                         time::sleep(Duration::from_secs(20)).await;
+                                    } else {
+                                        debug!(
+                                            "{}: Adjusting liquidity for {}.",
+                                            chan_id.to_string(),
+                                            data.erring_channel.to_string()
+                                        );
+                                        plugin
+                                            .state()
+                                            .graph
+                                            .lock()
+                                            .graph
+                                            .get_mut(&data.erring_node)
+                                            .unwrap()
+                                            .iter_mut()
+                                            .find_map(|x| {
+                                                if x.channel.short_channel_id == data.erring_channel
+                                                    && x.channel.destination != mypubkey
+                                                    && x.channel.source != mypubkey
+                                                {
+                                                    x.liquidity =
+                                                        Amount::msat(&data.amount_msat.unwrap())
+                                                            - 1;
+                                                    x.timestamp = SystemTime::now()
+                                                        .duration_since(UNIX_EPOCH)
+                                                        .unwrap()
+                                                        .as_secs();
+                                                    Some(x)
+                                                } else {
+                                                    None
+                                                }
+                                            });
                                     }
                                 }
                                 None => {
@@ -735,6 +738,7 @@ fn build_candidatelist(
                                 job.amount,
                             ) >= job.outppm as u64
                                 && total_msat - to_us_msat > (0.2 * total_msat as f64) as u64
+                                && get_in_htlc_count(channel) < 5
                         }
                     } && !tempbans.contains_key(&scid.to_string())
                     {
@@ -767,6 +771,18 @@ fn get_out_htlc_count(channel: &ListpeersPeersChannels) -> u64 {
             .filter(|htlc| match htlc.direction {
                 ListpeersPeersChannelsHtlcsDirection::OUT => true,
                 ListpeersPeersChannelsHtlcsDirection::IN => false,
+            })
+            .count() as u64,
+        None => 0,
+    }
+}
+fn get_in_htlc_count(channel: &ListpeersPeersChannels) -> u64 {
+    match &channel.htlcs {
+        Some(htlcs) => htlcs
+            .into_iter()
+            .filter(|htlc| match htlc.direction {
+                ListpeersPeersChannelsHtlcsDirection::OUT => false,
+                ListpeersPeersChannelsHtlcsDirection::IN => true,
             })
             .count() as u64,
         None => 0,
@@ -892,8 +908,6 @@ fn dijkstra(
         visited.insert(node);
     }
 
-    //TODO remove this line
-    // route_fix.get_mut(0).unwrap().amount_msat = route_fix.get(1).unwrap().amount_msat.clone();
     Ok(build_route(
         &predecessor,
         &goal,
@@ -940,9 +954,6 @@ fn build_route(
     let mut prev_amount_msat;
     let mut amount_msat = Amount::from_msat(0);
     let mut delay = 20;
-
-    // dijkstra_path.remove(0);
-    // let mut i = 0;
     for hop in &dijkstra_path {
         if hop == dijkstra_path.first().unwrap() {
             sendpay_route.insert(
@@ -955,16 +966,6 @@ fn build_route(
                 },
             );
         } else {
-            // let delay = prev.delay + hop.channel.delay as u16;
-            // let amount_msat = Amount::from_msat(
-            //     Amount::msat(&prev.amount_msat)
-            //         + fee_total_msat_precise(
-            //             hop.channel.fee_per_millionth,
-            //             hop.channel.base_fee_millisatoshi,
-            //             Amount::msat(&prev.amount_msat),
-            //         )
-            //         .ceil() as u64,
-            // );
             sendpay_route.insert(
                 0,
                 SendpayRoute {
@@ -974,7 +975,6 @@ fn build_route(
                     channel: hop.channel.short_channel_id,
                 },
             );
-            // i += 1;
         }
         prev_amount_msat = sendpay_route.get(0).unwrap().amount_msat;
         amount_msat = Amount::from_msat(
