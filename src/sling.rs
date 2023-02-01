@@ -43,6 +43,10 @@ pub async fn sling(
     let config = plugin.state().config.lock().clone();
     let mypubkey = config.pubkey.unwrap().clone();
 
+    let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
+    let mut networkdir = PathBuf::from_str(&plugin.configuration().lightning_dir.clone()).unwrap();
+    networkdir.pop();
+
     let mut success_route: Option<Vec<SendpayRoute>> = None;
     'outer: loop {
         let now = Instant::now();
@@ -92,24 +96,25 @@ pub async fn sling(
 
         if graph.graph.len() == 0 {
             info!("{}: graph is still empty. Sleeping...", chan_id.to_string());
-            plugin
-                .state()
-                .job_state
-                .lock()
-                .get_mut(&chan_id.to_string())
-                .unwrap()
-                .statechange(JobMessage::GraphEmpty);
-
+            channel_jobstate_update(
+                plugin.state().job_state.clone(),
+                chan_id,
+                JobMessage::GraphEmpty,
+                None,
+                None,
+            );
             time::sleep(Duration::from_secs(10)).await;
             continue 'outer;
         }
-        plugin
-            .state()
-            .job_state
-            .lock()
-            .get_mut(&chan_id.to_string())
-            .unwrap()
-            .statechange(JobMessage::Rebalancing);
+
+        channel_jobstate_update(
+            plugin.state().job_state.clone(),
+            chan_id,
+            JobMessage::Rebalancing,
+            None,
+            None,
+        );
+
         let tempbans = plugin.state().tempbans.lock().clone();
         let candidatelist;
         match job.candidatelist {
@@ -131,33 +136,51 @@ pub async fn sling(
                 .collect::<Vec<String>>()
                 .join(", ")
         );
+        debug!(
+            "{}: Tempbans: {}",
+            chan_id.to_string(),
+            plugin
+                .state()
+                .tempbans
+                .lock()
+                .clone()
+                .keys()
+                .map(|y| y.to_owned())
+                .collect::<Vec<String>>()
+                .join(", ")
+        );
+
         if candidatelist.len() == 0 {
             info!(
                 "{}: No candidates found. Adjust out_ppm or wait for liquidity. Sleeping...",
                 chan_id.to_string()
             );
-            plugin
-                .state()
-                .job_state
-                .lock()
-                .get_mut(&chan_id.to_string())
-                .unwrap()
-                .statechange(JobMessage::NoCandidates);
-            time::sleep(Duration::from_secs(10)).await;
+            channel_jobstate_update(
+                plugin.state().job_state.clone(),
+                chan_id,
+                JobMessage::NoCandidates,
+                None,
+                None,
+            );
+            time::sleep(Duration::from_secs(20)).await;
             continue 'outer;
         }
 
         let mut route = Vec::new();
         match success_route {
-            Some(e) => {
+            Some(prev_route) => {
                 if match job.sat_direction {
-                    SatDirection::Pull => !candidatelist.contains(&e.first().unwrap().channel),
-                    SatDirection::Push => !candidatelist.contains(&e.last().unwrap().channel),
+                    SatDirection::Pull => {
+                        candidatelist.contains(&prev_route.first().unwrap().channel)
+                    }
+                    SatDirection::Push => {
+                        candidatelist.contains(&prev_route.last().unwrap().channel)
+                    }
                 } {
+                    route = prev_route
+                } else {
                     success_route = None;
                     continue;
-                } else {
-                    route = e
                 }
             }
             None => {
@@ -165,8 +188,8 @@ pub async fn sling(
                 let slingchan_out = graph.get_channel(mypubkey, chan_id)?;
 
                 let maxhops = match job.maxhops {
-                    Some(h) => h,
-                    None => 8,
+                    Some(h) => h + 1,
+                    None => 9,
                 };
                 let mut hops = 3;
 
@@ -227,191 +250,145 @@ pub async fn sling(
                 }
             }
         }
-        debug!(
-            "{}: Found route. Total: {}ms",
-            chan_id.to_string(),
-            now.elapsed().as_millis().to_string()
-        );
+
         if route.len() == 0 {
             info!(
                 "{}: could not find a route. Sleeping...",
                 chan_id.to_string()
             );
-            plugin
-                .state()
-                .job_state
-                .lock()
-                .get_mut(&chan_id.to_string())
-                .unwrap()
-                .statechange(JobMessage::NoRoute);
-
+            channel_jobstate_update(
+                plugin.state().job_state.clone(),
+                chan_id,
+                JobMessage::NoRoute,
+                None,
+                None,
+            );
             success_route = None;
             time::sleep(Duration::from_secs(10)).await;
             continue 'outer;
         }
 
-        let alias_map = plugin.state().alias_peer_map.lock().clone();
-        for r in &route {
-            debug!(
-                "{} found route: {} {} {} {}",
-                chan_id.to_string(),
-                Amount::msat(&r.amount_msat),
-                r.delay,
-                alias_map.get(&r.id).unwrap_or(&r.id.to_string()),
-                r.channel.to_string()
-            );
-        }
-        let prettyroute = route
-            .iter()
-            .map(|x| x.channel.to_string())
-            .collect::<Vec<_>>()
-            .join(" -> ")
-            + " NODES: "
-            + &route
-                .iter()
-                .map(|x| alias_map.get(&x.id).unwrap_or(&x.id.to_string()).clone())
-                .collect::<Vec<_>>()
-                .join(" -> ");
-        let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
-        debug!(
-            "{}: Made pretty route. Total: {}ms",
-            chan_id.to_string(),
-            now.elapsed().as_millis().to_string()
-        );
-        let send_response;
         if feeppm_effective_from_amts(
             Amount::msat(&route.first().unwrap().amount_msat),
             Amount::msat(&route.last().unwrap().amount_msat),
-        ) <= job.maxppm
+        ) > job.maxppm
         {
-            let mut preimage = [0u8; 32];
-            thread_rng().fill(&mut preimage[..]);
-
-            let pi_str = serialize_hex(&preimage);
-
-            let mut hasher = Sha256::engine();
-            hasher.input(&preimage);
-            let payment_hash = Sha256::from_engine(hasher);
-            debug!(
-                "{}: Made payment hash: {} Total: {}ms",
-                chan_id.to_string(),
-                payment_hash.to_string(),
-                now.elapsed().as_millis().to_string()
-            );
-
-            match slingsend(&rpc_path, route.clone(), payment_hash, None, None).await {
-                Ok(resp) => {
-                    plugin
-                        .state()
-                        .pays
-                        .write()
-                        .insert(payment_hash.to_string(), pi_str);
-                    send_response = resp;
-                }
-                Err(e) => {
-                    if e.to_string().contains("First peer not ready") {
-                        info!(
-                            "{}: First peer not ready, banning it for now...",
-                            chan_id.to_string()
-                        );
-                        plugin.state().tempbans.lock().insert(
-                            route.first().unwrap().channel.to_string(),
-                            SystemTime::now()
-                                .duration_since(UNIX_EPOCH)
-                                .unwrap()
-                                .as_secs(),
-                        );
-                        // delinvoice(&rpc_path, label, DelinvoiceStatus::UNPAID).await?;
-                        success_route = None;
-                        FailureReb {
-                            amount_msat: job.amount,
-                            failure_reason: "FIRST_PEER_NOT_READY".to_string(),
-                            failure_node: route.first().unwrap().id.clone(),
-                            channel_partner: match job.sat_direction {
-                                SatDirection::Pull => route.first().unwrap().channel,
-                                SatDirection::Push => route.last().unwrap().channel,
-                            },
-                            hops: (route.len() - 1) as u8,
-                            created_at: SystemTime::now()
-                                .duration_since(UNIX_EPOCH)
-                                .unwrap()
-                                .as_secs(),
-                        }
-                        .write_to_file(chan_id, &sling_dir)
-                        .await?;
-                        continue;
-                    } else {
-                        let mut jobstates = plugin.state().job_state.lock();
-                        let jobstate = jobstates.get_mut(&chan_id.to_string()).unwrap();
-                        jobstate.statechange(JobMessage::Error);
-                        jobstate.set_active(false);
-
-                        warn!(
-                            "{}: Unexpected sendpay error: {}",
-                            chan_id.to_string(),
-                            e.to_string()
-                        );
-                        break 'outer;
-                    }
-                }
-            };
-            debug!(
-                "{}: Sent on route. Total: {}ms",
-                chan_id.to_string(),
-                now.elapsed().as_millis().to_string()
-            );
-        } else {
             info!(
                 "{}: no cheap enough route found! Sleeping...",
                 chan_id.to_string()
             );
-            {
-                let mut jobstates = plugin.state().job_state.lock();
-                let jobstate = jobstates.get_mut(&chan_id.to_string()).unwrap();
-                jobstate.statechange(JobMessage::NoRoute);
-            }
+            channel_jobstate_update(
+                plugin.state().job_state.clone(),
+                chan_id,
+                JobMessage::TooExp,
+                None,
+                None,
+            );
             time::sleep(Duration::from_secs(120)).await;
             success_route = None;
-            continue;
+            continue 'outer;
         }
-        let mut networkdir =
-            PathBuf::from_str(&plugin.configuration().lightning_dir.clone()).unwrap();
-        networkdir.pop();
-        // let waitsendpay_timeout_start = Instant::now();
-        // while waitsendpay_timeout_start.elapsed() < Duration::from_secs(120) {
-        //     match waitsendpay(&networkdir, send_response.payment_hash, None, None).await {
-        //         Ok(_o) => break,
-        //         Err(e) => match e.code {
-        //             Some(c) => match c {
-        //                 208 => {
-        //                     time::sleep(Duration::from_secs(1)).await;
-        //                     continue;
-        //                 }
-        //                 204 => break,
-        //                 _ => {
-        //                     time::sleep(Duration::from_secs(1)).await;
-        //                     continue;
-        //                 }
-        //             },
-        //             None => {
-        //                 time::sleep(Duration::from_secs(1)).await;
-        //                 continue;
-        //             }
-        //         },
-        //     }
-        // }
+
+        info!(
+            "{}: Found route with {} hops. Total: {}ms",
+            chan_id.to_string(),
+            route.len() - 1,
+            now.elapsed().as_millis().to_string()
+        );
+
+        let alias_map = plugin.state().alias_peer_map.lock().clone();
+        for r in &route {
+            debug!(
+                "{}: route: {} {:3} {:17} {}",
+                chan_id.to_string(),
+                Amount::msat(&r.amount_msat),
+                r.delay,
+                r.channel.to_string(),
+                alias_map.get(&r.id).unwrap_or(&r.id.to_string()),
+            );
+        }
+
+        let (preimage, payment_hash) = get_preimage_paymend_hash_pair();
+        debug!(
+            "{}: Made preimage and payment_hash: {} Total: {}ms",
+            chan_id.to_string(),
+            payment_hash.to_string(),
+            now.elapsed().as_millis().to_string()
+        );
+
+        let send_response;
+        match slingsend(&rpc_path, route.clone(), payment_hash, None, None).await {
+            Ok(resp) => {
+                plugin
+                    .state()
+                    .pays
+                    .write()
+                    .insert(payment_hash.to_string(), preimage);
+                send_response = resp;
+            }
+            Err(e) => {
+                if e.to_string().contains("First peer not ready") {
+                    info!(
+                        "{}: First peer not ready, banning it for now...",
+                        chan_id.to_string()
+                    );
+                    plugin.state().tempbans.lock().insert(
+                        route.first().unwrap().channel.to_string(),
+                        SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs(),
+                    );
+                    success_route = None;
+                    FailureReb {
+                        amount_msat: job.amount,
+                        failure_reason: "FIRST_PEER_NOT_READY".to_string(),
+                        failure_node: route.first().unwrap().id.clone(),
+                        channel_partner: match job.sat_direction {
+                            SatDirection::Pull => route.first().unwrap().channel,
+                            SatDirection::Push => route.last().unwrap().channel,
+                        },
+                        hops: (route.len() - 1) as u8,
+                        created_at: SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs(),
+                    }
+                    .write_to_file(chan_id, &sling_dir)
+                    .await?;
+                    continue;
+                } else {
+                    channel_jobstate_update(
+                        plugin.state().job_state.clone(),
+                        chan_id,
+                        JobMessage::Error,
+                        None,
+                        Some(false),
+                    );
+                    warn!(
+                        "{}: Unexpected sendpay error: {}",
+                        chan_id.to_string(),
+                        e.to_string()
+                    );
+                    break 'outer;
+                }
+            }
+        };
+        info!(
+            "{}: Sent on route. Total: {}ms",
+            chan_id.to_string(),
+            now.elapsed().as_millis().to_string()
+        );
 
         match waitsendpay(&networkdir, send_response.payment_hash, None, None).await {
             Ok(o) => {
                 info!(
-                    "{}: Rebalance successfull after {}s. Sent {}sats plus {}msats as fee over CHANNELS: {}",
+                    "{}: Rebalance SUCCESSFULL after {}s. Sent {}sats plus {}msats fee",
                     chan_id.to_string(),
                     now.elapsed().as_secs().to_string(),
                     Amount::msat(&o.amount_msat.unwrap()) / 1_000,
                     Amount::msat(&o.amount_sent_msat) - Amount::msat(&o.amount_msat.unwrap()),
-                    prettyroute
                 );
-                // delinvoice(&rpc_path, o.label.unwrap(), DelinvoiceStatus::PAID).await?;
                 delpay(&networkdir, send_response.payment_hash, "complete").await?;
                 SuccessReb {
                     amount_msat: Amount::msat(&o.amount_msat.unwrap()),
@@ -535,12 +512,13 @@ pub async fn sling(
                                     .write_to_file(chan_id, &sling_dir)
                                     .await?;
                                     if special_stop {
-                                        let mut jobstates = plugin.state().job_state.lock();
-                                        let jobstate =
-                                            jobstates.get_mut(&chan_id.to_string()).unwrap();
-                                        jobstate.statechange(JobMessage::Error);
-                                        jobstate.set_active(false);
-
+                                        channel_jobstate_update(
+                                            plugin.state().job_state.clone(),
+                                            chan_id,
+                                            JobMessage::Error,
+                                            None,
+                                            Some(false),
+                                        );
                                         warn!(
                                             "{}: UNEXPECTED waitsendpay failure after {}s: {:?}",
                                             chan_id.to_string(),
@@ -588,11 +566,13 @@ pub async fn sling(
                                     }
                                 }
                                 None => {
-                                    let mut jobstates = plugin.state().job_state.lock();
-                                    let jobstate = jobstates.get_mut(&chan_id.to_string()).unwrap();
-                                    jobstate.statechange(JobMessage::Error);
-                                    jobstate.set_active(false);
-
+                                    channel_jobstate_update(
+                                        plugin.state().job_state.clone(),
+                                        chan_id,
+                                        JobMessage::Error,
+                                        None,
+                                        Some(false),
+                                    );
                                     warn!(
                                         "{}: UNEXPECTED waitsendpay failure after {}s: {:?}",
                                         chan_id.to_string(),
@@ -766,6 +746,18 @@ fn build_candidatelist(
     }
 
     candidatelist
+}
+
+fn get_preimage_paymend_hash_pair() -> (String, Sha256) {
+    let mut preimage = [0u8; 32];
+    thread_rng().fill(&mut preimage[..]);
+
+    let pi_str = serialize_hex(&preimage);
+
+    let mut hasher = Sha256::engine();
+    hasher.input(&preimage);
+    let payment_hash = Sha256::from_engine(hasher);
+    (pi_str, payment_hash)
 }
 
 fn get_out_htlc_count(channel: &ListpeersPeersChannels) -> u64 {
