@@ -110,7 +110,11 @@ pub async fn slingjob(
                     None => None,
                 }
             };
-
+            if outppm.is_none() && candidatelist.is_none() {
+                return Err(anyhow!(
+                    "Atleast one of outppm and candidatelist need to be set"
+                ));
+            }
             let peers = p.state().peers.lock().clone();
             let job = Job {
                 sat_direction,
