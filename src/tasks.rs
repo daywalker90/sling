@@ -137,10 +137,17 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
 }
 
 pub async fn refresh_liquidity(plugin: Plugin<PluginState>) -> Result<(), Error> {
+    let interval = plugin
+        .state()
+        .config
+        .lock()
+        .clone()
+        .refresh_liquidity_interval
+        .1;
     loop {
         {
             let now = Instant::now();
-            plugin.state().graph.lock().refresh_liquidity();
+            plugin.state().graph.lock().refresh_liquidity(interval);
             info!(
                 "Refreshed Liquidity in {}ms!",
                 now.elapsed().as_millis().to_string()

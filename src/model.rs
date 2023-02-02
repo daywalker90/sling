@@ -59,6 +59,7 @@ pub struct Config {
     pub refresh_peers_interval: (String, u64),
     pub refresh_aliasmap_interval: (String, u64),
     pub refresh_graph_interval: (String, u64),
+    pub refresh_liquidity_interval: (String, u64),
 }
 impl Config {
     pub fn new() -> Config {
@@ -71,6 +72,10 @@ impl Config {
                 3600,
             ),
             refresh_graph_interval: (PLUGIN_NAME.to_string() + "-refresh-graph-interval", 600),
+            refresh_liquidity_interval: (
+                PLUGIN_NAME.to_string() + "-refresh-liquidity-interval",
+                21_600,
+            ),
         }
     }
 }
@@ -297,14 +302,14 @@ impl LnGraph {
         let new_nodes: HashSet<&PublicKey> = new_graph.graph.keys().collect();
         self.graph.retain(|k, _| new_nodes.contains(k));
     }
-    pub fn refresh_liquidity(&mut self) {
+    pub fn refresh_liquidity(&mut self, interval: u64) {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
         for (_node, channels) in self.graph.iter_mut() {
             for channel in channels {
-                if channel.timestamp <= now - 21_600 {
+                if channel.timestamp <= now - interval {
                     debug!(
                         "{}: resetting liquidity",
                         channel.channel.short_channel_id.to_string()
