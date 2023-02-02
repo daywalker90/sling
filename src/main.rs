@@ -66,6 +66,22 @@ async fn main() -> Result<(), anyhow::Error> {
                 defaultconfig.refresh_liquidity_interval.1
             ),
         ))
+        .option(options::ConfigOption::new(
+            &defaultconfig.depleteuptopercent.0,
+            options::Value::OptString,
+            &format!(
+                "Refresh interval for aliasmap task. Default is {}",
+                defaultconfig.depleteuptopercent.1
+            ),
+        ))
+        .option(options::ConfigOption::new(
+            &defaultconfig.depleteuptoamount.0,
+            options::Value::OptInteger,
+            &format!(
+                "Refresh interval for aliasmap task. Default is {}",
+                defaultconfig.depleteuptoamount.1
+            ),
+        ))
         .rpcmethod(
             &(PLUGIN_NAME.to_string() + "-job"),
             "add sling job",

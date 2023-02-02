@@ -150,6 +150,38 @@ pub async fn read_config(
                             }
                         }
                     }
+                    opt if opt.eq(&config.depleteuptopercent.0) => match value.parse::<f64>() {
+                        Ok(n) => {
+                            if n >= 0.0 && n <= 1.0 {
+                                config.depleteuptopercent.1 = n
+                            } else {
+                                return Err(anyhow!(
+                                    "Error: Number needs to be between 0 and 1 for {}.",
+                                    config.depleteuptopercent.0
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            return Err(anyhow!(
+                                "Error: Could not parse a positive number from `{}` for {}: {}",
+                                value,
+                                config.depleteuptopercent.0,
+                                e
+                            ))
+                        }
+                    },
+                    opt if opt.eq(&config.depleteuptoamount.0) => match value.parse::<u64>() {
+                        Ok(n) => config.depleteuptoamount.1 = n,
+                        Err(e) => {
+                            return Err(anyhow!(
+                                "Error: Could not parse a positive number from `{}` for {}: {}",
+                                value,
+                                config.depleteuptoamount.0,
+                                e
+                            ))
+                        }
+                    },
+
                     _ => (),
                 }
             }
@@ -229,6 +261,35 @@ pub fn get_startup_options(
         }
         Some(_) => config.refresh_liquidity_interval.1,
         None => config.refresh_liquidity_interval.1,
+    };
+    config.depleteuptopercent.1 = match plugin.option(&config.depleteuptopercent.0) {
+        Some(options::Value::String(i)) => match i.parse::<f64>() {
+            Ok(f) => {
+                if f >= 0.0 && f <= 1.0 {
+                    f
+                } else {
+                    return Err(anyhow!(
+                        "Error: {} needs to be greater than 0 and not `{}`.",
+                        config.depleteuptopercent.0,
+                        f
+                    ));
+                }
+            }
+            Err(e) => {
+                return Err(anyhow!(
+                    "Error: {} could not parse a floating point for `{}`.",
+                    e,
+                    config.depleteuptopercent.0,
+                ))
+            }
+        },
+        Some(_) => config.depleteuptopercent.1,
+        None => config.depleteuptopercent.1,
+    };
+    config.depleteuptoamount.1 = match plugin.option(&config.depleteuptoamount.0) {
+        Some(options::Value::Integer(i)) => i as u64,
+        Some(_) => config.depleteuptoamount.1,
+        None => config.depleteuptoamount.1,
     };
 
     Ok(())

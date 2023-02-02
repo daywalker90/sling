@@ -60,6 +60,8 @@ pub struct Config {
     pub refresh_aliasmap_interval: (String, u64),
     pub refresh_graph_interval: (String, u64),
     pub refresh_liquidity_interval: (String, u64),
+    pub depleteuptopercent: (String, f64),
+    pub depleteuptoamount: (String, u64),
 }
 impl Config {
     pub fn new() -> Config {
@@ -74,8 +76,10 @@ impl Config {
             refresh_graph_interval: (PLUGIN_NAME.to_string() + "-refresh-graph-interval", 600),
             refresh_liquidity_interval: (
                 PLUGIN_NAME.to_string() + "-refresh-liquidity-interval",
-                21_600,
+                360,
             ),
+            depleteuptopercent: (PLUGIN_NAME.to_string() + "-depleteuptopercent", 0.2),
+            depleteuptoamount: (PLUGIN_NAME.to_string() + "-depleteuptoamount", 2_000_000),
         }
     }
 }
@@ -309,7 +313,7 @@ impl LnGraph {
             .as_secs();
         for (_node, channels) in self.graph.iter_mut() {
             for channel in channels {
-                if channel.timestamp <= now - interval {
+                if channel.timestamp <= now - interval * 60 {
                     debug!(
                         "{}: resetting liquidity",
                         channel.channel.short_channel_id.to_string()

@@ -119,10 +119,26 @@ pub async fn sling(
                 if c.len() > 0 {
                     candidatelist = c.clone()
                 } else {
-                    candidatelist = build_candidatelist(&peers, &job, &graph, tempbans)
+                    candidatelist = build_candidatelist(
+                        &peers,
+                        &job,
+                        &graph,
+                        tempbans,
+                        config.depleteuptopercent.1,
+                        config.depleteuptoamount.1,
+                    )
                 }
             }
-            None => candidatelist = build_candidatelist(&peers, &job, &graph, tempbans),
+            None => {
+                candidatelist = build_candidatelist(
+                    &peers,
+                    &job,
+                    &graph,
+                    tempbans,
+                    config.depleteuptopercent.1,
+                    config.depleteuptoamount.1,
+                )
+            }
         }
         debug!(
             "{}: Candidates: {}",
@@ -700,6 +716,8 @@ fn build_candidatelist(
     job: &Job,
     graph: &LnGraph,
     tempbans: HashMap<String, u64>,
+    depleteuptopercent: f64,
+    depleteuptoamount: u64,
 ) -> Vec<ShortChannelId> {
     let mut candidatelist = Vec::<ShortChannelId>::new();
     for peer in peers {
@@ -725,7 +743,11 @@ fn build_candidatelist(
                                 Amount::msat(&channel.fee_base_msat.unwrap()) as u32,
                                 job.amount,
                             ) <= job.outppm as u64
-                                && to_us_msat > (0.2 * total_msat as f64) as u64
+                                && to_us_msat
+                                    > std::cmp::min(
+                                        (depleteuptopercent * total_msat as f64) as u64,
+                                        depleteuptoamount,
+                                    )
                                 && get_out_htlc_count(channel) < 5
                         }
                         SatDirection::Push => {
@@ -734,7 +756,11 @@ fn build_candidatelist(
                                 chan_from_peer.base_fee_millisatoshi,
                                 job.amount,
                             ) >= job.outppm as u64
-                                && total_msat - to_us_msat > (0.2 * total_msat as f64) as u64
+                                && total_msat - to_us_msat
+                                    > std::cmp::min(
+                                        (depleteuptopercent * total_msat as f64) as u64,
+                                        depleteuptoamount,
+                                    )
                                 && get_in_htlc_count(channel) < 5
                         }
                     } && !tempbans.contains_key(&scid.to_string())
