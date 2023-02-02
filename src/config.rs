@@ -128,15 +128,15 @@ pub async fn read_config(
                             ))
                         }
                     },
-                    opt if opt.eq(&config.refresh_liquidity_interval.0) => {
+                    opt if opt.eq(&config.reset_liquidity_interval.0) => {
                         match value.parse::<u64>() {
                             Ok(n) => {
                                 if n > 0 {
-                                    config.refresh_liquidity_interval.1 = n
+                                    config.reset_liquidity_interval.1 = n
                                 } else {
                                     return Err(anyhow!(
                                         "Error: Number needs to be greater than 0 for {}.",
-                                        config.refresh_liquidity_interval.0
+                                        config.reset_liquidity_interval.0
                                     ));
                                 }
                             }
@@ -144,7 +144,7 @@ pub async fn read_config(
                                 return Err(anyhow!(
                                     "Error: Could not parse a positive number from `{}` for {}: {}",
                                     value,
-                                    config.refresh_liquidity_interval.0,
+                                    config.reset_liquidity_interval.0,
                                     e
                                 ))
                             }
@@ -265,21 +265,20 @@ pub fn get_startup_options(
         Some(_) => config.refresh_graph_interval.1,
         None => config.refresh_graph_interval.1,
     };
-    config.refresh_liquidity_interval.1 = match plugin.option(&config.refresh_liquidity_interval.0)
-    {
+    config.reset_liquidity_interval.1 = match plugin.option(&config.reset_liquidity_interval.0) {
         Some(options::Value::Integer(i)) => {
             if i > 0 {
                 i as u64
             } else {
                 return Err(anyhow!(
                     "Error: {} needs to be greater than 0 and not `{}`.",
-                    config.refresh_liquidity_interval.0,
+                    config.reset_liquidity_interval.0,
                     i
                 ));
             }
         }
-        Some(_) => config.refresh_liquidity_interval.1,
-        None => config.refresh_liquidity_interval.1,
+        Some(_) => config.reset_liquidity_interval.1,
+        None => config.reset_liquidity_interval.1,
     };
     config.depleteuptopercent.1 = match plugin.option(&config.depleteuptopercent.0) {
         Some(options::Value::String(i)) => match i.parse::<f64>() {

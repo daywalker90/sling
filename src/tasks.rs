@@ -142,7 +142,7 @@ pub async fn refresh_liquidity(plugin: Plugin<PluginState>) -> Result<(), Error>
         .config
         .lock()
         .clone()
-        .refresh_liquidity_interval
+        .reset_liquidity_interval
         .1;
     loop {
         {

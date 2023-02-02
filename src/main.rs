@@ -59,11 +59,11 @@ async fn main() -> Result<(), anyhow::Error> {
             ),
         ))
         .option(options::ConfigOption::new(
-            &defaultconfig.refresh_liquidity_interval.0,
+            &defaultconfig.reset_liquidity_interval.0,
             options::Value::OptInteger,
             &format!(
-                "Refresh interval for liquidity refresh task. Default is {}",
-                defaultconfig.refresh_liquidity_interval.1
+                "Refresh interval for liquidity reset task. Default is {}",
+                defaultconfig.reset_liquidity_interval.1
             ),
         ))
         .option(options::ConfigOption::new(
