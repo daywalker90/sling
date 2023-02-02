@@ -90,6 +90,14 @@ pub async fn slingjob(
                 Some(h) => h.as_u64(),
                 None => None,
             };
+            match maxhops {
+                Some(h) => {
+                    if h < 2 {
+                        return Err(anyhow!("maxhops must be atleast 2"));
+                    }
+                }
+                None => (),
+            }
 
             let candidatelist = {
                 let mut tmpcandidatelist = Vec::new();
