@@ -82,9 +82,26 @@ pub async fn slingjob(
                     .as_u64()
                     .ok_or(anyhow!("maxppm must be a positive integer"))? as u32;
 
+            let target = match ar.get(5) {
+                Some(t) => Some(
+                    t.as_f64()
+                        .ok_or(anyhow!("target must be a floating point"))?,
+                ),
+                None => None,
+            };
+
+            let maxhops = match ar.get(6) {
+                Some(h) => Some(
+                    h.as_u64()
+                        .ok_or(anyhow!("maxhops must be a positive integer"))?
+                        as u8,
+                ),
+                None => None,
+            };
+
             let candidatelist = {
                 let mut tmpcandidatelist = Vec::new();
-                match ar.get(5) {
+                match ar.get(7) {
                     Some(candidates) => {
                         for candidate in candidates
                             .as_array()
@@ -101,21 +118,7 @@ pub async fn slingjob(
                     None => None,
                 }
             };
-            let target = match ar.get(6) {
-                Some(t) => Some(
-                    t.as_f64()
-                        .ok_or(anyhow!("target must be a floating point"))?,
-                ),
-                None => None,
-            };
-            let maxhops = match ar.get(7) {
-                Some(h) => Some(
-                    h.as_u64()
-                        .ok_or(anyhow!("maxhops must be a positive integer"))?
-                        as u8,
-                ),
-                None => None,
-            };
+
             let peers = p.state().peers.lock().clone();
             let job = Job {
                 sat_direction,
