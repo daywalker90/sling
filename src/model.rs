@@ -189,7 +189,7 @@ pub struct DijkstraNode {
     pub score: u64,
     pub channel: ListchannelsChannels,
     pub destination: PublicKey,
-    pub hops: u8,
+    pub hops: u64,
 }
 impl PartialEq for DijkstraNode {
     fn eq(&self, other: &Self) -> bool {
@@ -206,11 +206,11 @@ impl PartialEq for DijkstraNode {
 pub struct Job {
     pub sat_direction: SatDirection,
     pub amount: u64,
-    pub outppm: u32,
+    pub outppm: Option<u64>,
     pub maxppm: u32,
     pub candidatelist: Option<Vec<ShortChannelId>>,
     pub target: Option<f64>,
-    pub maxhops: Option<u8>,
+    pub maxhops: Option<u64>,
 }
 
 impl Job {

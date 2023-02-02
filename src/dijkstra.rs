@@ -18,7 +18,7 @@ pub fn dijkstra(
     job: &Job,
     candidatelist: &Vec<ShortChannelId>,
     exclude: &HashSet<String>,
-    hops: u8,
+    hops: u64,
 ) -> Result<Vec<SendpayRoute>, Error> {
     let mut visited = HashSet::with_capacity(lngraph.graph.len());
     let mut scores = HashMap::new();

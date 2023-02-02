@@ -70,32 +70,24 @@ pub async fn slingjob(
                 return Err(anyhow!("amount must be greater than 0"));
             }
 
-            let outppm =
-                ar.get(3)
-                    .unwrap()
-                    .as_u64()
-                    .ok_or(anyhow!("outppm must be a positive integer"))? as u32;
-
             let maxppm =
-                ar.get(4)
+                ar.get(3)
                     .unwrap()
                     .as_u64()
                     .ok_or(anyhow!("maxppm must be a positive integer"))? as u32;
 
+            let outppm = match ar.get(4) {
+                Some(o) => o.as_u64(),
+                None => None,
+            };
+
             let target = match ar.get(5) {
-                Some(t) => Some(
-                    t.as_f64()
-                        .ok_or(anyhow!("target must be a floating point"))?,
-                ),
+                Some(t) => t.as_f64(),
                 None => None,
             };
 
             let maxhops = match ar.get(6) {
-                Some(h) => Some(
-                    h.as_u64()
-                        .ok_or(anyhow!("maxhops must be a positive integer"))?
-                        as u8,
-                ),
+                Some(h) => h.as_u64(),
                 None => None,
             };
 
@@ -270,14 +262,14 @@ async fn write_job(
     } else {
         my_job = job.unwrap();
         info!(
-            "{} job for {} with amount {}msat, outppm {}, maxppm {}, candidatelist {:?} and target: {:?}",
+            "{} job for {} with amount {}msat, maxppm {}, outppm {:?}, target: {:?} and candidatelist {:?}",
             job_change,
             &chan_id,
             &my_job.amount,
-            &my_job.outppm,
             &my_job.maxppm,
+            &my_job.outppm,
+            &my_job.target,
             &my_job.candidatelist,
-            &my_job.target
         );
         jobs.insert(chan_id, my_job);
     }

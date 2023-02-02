@@ -118,12 +118,16 @@ pub async fn sling(
         match job.candidatelist {
             Some(ref c) => {
                 if c.len() > 0 {
-                    candidatelist = c.clone()
+                    candidatelist =
+                        build_candidatelist(&peers, &job, &graph, tempbans, &config, Some(c))
                 } else {
-                    candidatelist = build_candidatelist(&peers, &job, &graph, tempbans, &config)
+                    candidatelist =
+                        build_candidatelist(&peers, &job, &graph, tempbans, &config, None)
                 }
             }
-            None => candidatelist = build_candidatelist(&peers, &job, &graph, tempbans, &config),
+            None => {
+                candidatelist = build_candidatelist(&peers, &job, &graph, tempbans, &config, None)
+            }
         }
         debug!(
             "{}: Candidates: {}",
@@ -704,8 +708,10 @@ fn build_candidatelist(
     graph: &LnGraph,
     tempbans: HashMap<String, u64>,
     config: &Config,
+    custom_candidates: Option<&Vec<ShortChannelId>>,
 ) -> Vec<ShortChannelId> {
     let mut candidatelist = Vec::<ShortChannelId>::new();
+
     for peer in peers {
         for channel in &peer.channels {
             if let Some(scid) = channel.short_channel_id {
@@ -713,6 +719,10 @@ fn build_candidatelist(
                     ListpeersPeersChannelsState::CHANNELD_NORMAL => true,
                     _ => false,
                 } && peer.connected
+                    && match custom_candidates {
+                        Some(c) => c.contains(&scid),
+                        None => true,
+                    }
                 {
                     let chan_from_peer = match graph.get_channel(peer.id, scid) {
                         Ok(chan) => chan.channel,
@@ -724,29 +734,39 @@ fn build_candidatelist(
 
                     if match job.sat_direction {
                         SatDirection::Pull => {
-                            feeppm_effective(
-                                channel.fee_proportional_millionths.unwrap(),
-                                Amount::msat(&channel.fee_base_msat.unwrap()) as u32,
-                                job.amount,
-                            ) <= job.outppm as u64
-                                && to_us_msat
-                                    > std::cmp::min(
-                                        (config.depleteuptopercent.1 * total_msat as f64) as u64,
-                                        config.depleteuptoamount.1,
-                                    )
+                            to_us_msat
+                                > std::cmp::min(
+                                    (config.depleteuptopercent.1 * total_msat as f64) as u64,
+                                    config.depleteuptoamount.1,
+                                )
+                                && match job.outppm {
+                                    Some(out) => {
+                                        feeppm_effective(
+                                            channel.fee_proportional_millionths.unwrap(),
+                                            Amount::msat(&channel.fee_base_msat.unwrap()) as u32,
+                                            job.amount,
+                                        ) <= out
+                                    }
+                                    None => true,
+                                }
                                 && get_out_htlc_count(channel) <= config.max_htlc_count.1
                         }
                         SatDirection::Push => {
-                            feeppm_effective(
-                                chan_from_peer.fee_per_millionth,
-                                chan_from_peer.base_fee_millisatoshi,
-                                job.amount,
-                            ) >= job.outppm as u64
-                                && total_msat - to_us_msat
-                                    > std::cmp::min(
-                                        (config.depleteuptopercent.1 * total_msat as f64) as u64,
-                                        config.depleteuptoamount.1,
-                                    )
+                            total_msat - to_us_msat
+                                > std::cmp::min(
+                                    (config.depleteuptopercent.1 * total_msat as f64) as u64,
+                                    config.depleteuptoamount.1,
+                                )
+                                && match job.outppm {
+                                    Some(out) => {
+                                        feeppm_effective(
+                                            chan_from_peer.fee_per_millionth,
+                                            chan_from_peer.base_fee_millisatoshi,
+                                            job.amount,
+                                        ) >= out
+                                    }
+                                    None => true,
+                                }
                                 && get_in_htlc_count(channel) <= config.max_htlc_count.1
                         }
                     } && !tempbans.contains_key(&scid.to_string())
