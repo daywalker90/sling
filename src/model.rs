@@ -57,6 +57,7 @@ pub struct Config {
     pub pubkey: Option<PublicKey>,
     pub utf8: (String, bool),
     pub refresh_peers_interval: (String, u64),
+    pub refresh_aliasmap_interval: (String, u64),
 }
 impl Config {
     pub fn new() -> Config {
@@ -64,6 +65,10 @@ impl Config {
             pubkey: None,
             utf8: (PLUGIN_NAME.to_string() + "-utf8", true),
             refresh_peers_interval: (PLUGIN_NAME.to_string() + "-refresh-peers-interval", 5),
+            refresh_aliasmap_interval: (
+                PLUGIN_NAME.to_string() + "-refresh-aliasmap-interval",
+                3600,
+            ),
         }
     }
 }

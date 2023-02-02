@@ -20,6 +20,14 @@ use tokio::time::{self, Instant};
 
 pub async fn refresh_aliasmap(plugin: Plugin<PluginState>) -> Result<(), Error> {
     let rpc_path = make_rpc_path(&plugin);
+    let interval = plugin
+        .state()
+        .config
+        .lock()
+        .clone()
+        .refresh_aliasmap_interval
+        .1;
+
     loop {
         let now = Instant::now();
         {
@@ -33,7 +41,7 @@ pub async fn refresh_aliasmap(plugin: Plugin<PluginState>) -> Result<(), Error> 
             "Refreshing alias map done in {}ms!",
             now.elapsed().as_millis().to_string()
         );
-        time::sleep(Duration::from_secs(3600)).await;
+        time::sleep(Duration::from_secs(interval)).await;
     }
 }
 
