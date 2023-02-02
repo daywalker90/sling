@@ -153,7 +153,7 @@ pub async fn refresh_liquidity(plugin: Plugin<PluginState>) -> Result<(), Error>
                 now.elapsed().as_millis().to_string()
             );
         }
-        time::sleep(Duration::from_secs(interval)).await;
+        time::sleep(Duration::from_secs(900)).await;
     }
 }
 
