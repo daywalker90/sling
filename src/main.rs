@@ -34,7 +34,14 @@ async fn main() -> Result<(), anyhow::Error> {
                 defaultconfig.utf8.1
             ),
         ))
-        // .rpcmethod(PLUGIN_NAME, "Todo", sling)
+        .option(options::ConfigOption::new(
+            &defaultconfig.refresh_peers_interval.0,
+            options::Value::OptInteger,
+            &format!(
+                "Refresh interval for listpeers task. Default is {}",
+                defaultconfig.refresh_peers_interval.1
+            ),
+        ))
         .rpcmethod(
             &(PLUGIN_NAME.to_string() + "-job"),
             "add sling job",
@@ -83,8 +90,6 @@ async fn main() -> Result<(), anyhow::Error> {
             };
 
             confplugin = plugin;
-            // info!("plugin join");
-            // plugin.join().await
         }
         None => return Err(anyhow!("Error configuring the plugin!")),
     };

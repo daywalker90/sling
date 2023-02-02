@@ -66,6 +66,26 @@ pub async fn read_config(
                             ))
                         }
                     },
+                    opt if opt.eq(&config.refresh_peers_interval.0) => match value.parse::<u64>() {
+                        Ok(n) => {
+                            if n > 0 {
+                                config.refresh_peers_interval.1 = n
+                            } else {
+                                return Err(anyhow!(
+                                    "Error: Number needs to be greater than 0 for {}.",
+                                    config.refresh_peers_interval.0
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            return Err(anyhow!(
+                                "Error: Could not parse a positive number from `{}` for {}: {}",
+                                value,
+                                config.refresh_peers_interval.0,
+                                e
+                            ))
+                        }
+                    },
                     _ => (),
                 }
             }
@@ -84,6 +104,21 @@ pub fn get_startup_options(
         Some(options::Value::Boolean(b)) => b,
         Some(_) => config.utf8.1,
         None => config.utf8.1,
+    };
+    config.refresh_peers_interval.1 = match plugin.option(&config.refresh_peers_interval.0) {
+        Some(options::Value::Integer(i)) => {
+            if i > 0 {
+                i as u64
+            } else {
+                return Err(anyhow!(
+                    "Error: {} needs to be greater than 0 and not `{}`.",
+                    config.refresh_peers_interval.0,
+                    i
+                ));
+            }
+        }
+        Some(_) => config.refresh_peers_interval.1,
+        None => config.refresh_peers_interval.1,
     };
 
     Ok(())

@@ -39,6 +39,13 @@ pub async fn refresh_aliasmap(plugin: Plugin<PluginState>) -> Result<(), Error> 
 
 pub async fn refresh_listpeers(plugin: Plugin<PluginState>) -> Result<(), Error> {
     let rpc_path = make_rpc_path(&plugin);
+    let interval = plugin
+        .state()
+        .config
+        .lock()
+        .clone()
+        .refresh_peers_interval
+        .1;
 
     loop {
         {
@@ -49,7 +56,7 @@ pub async fn refresh_listpeers(plugin: Plugin<PluginState>) -> Result<(), Error>
                 now.elapsed().as_millis().to_string()
             );
         }
-        time::sleep(Duration::from_secs(5)).await;
+        time::sleep(Duration::from_secs(interval)).await;
     }
 }
 
