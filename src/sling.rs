@@ -21,8 +21,8 @@ use tokio::time::{self, Instant};
 
 use crate::dijkstra::dijkstra;
 use crate::model::{
-    DijkstraNode, FailureReb, Job, JobMessage, JobState, LnGraph, PluginState, SatDirection,
-    SuccessReb,
+    Config, DijkstraNode, FailureReb, Job, JobMessage, JobState, LnGraph, PluginState,
+    SatDirection, SuccessReb,
 };
 use crate::util::{
     channel_jobstate_update, feeppm_effective, feeppm_effective_from_amts, get_in_htlc_count,
@@ -76,6 +76,7 @@ pub async fn sling(
             &peers,
             other_peer,
             plugin.state().job_state.clone(),
+            &config,
         )
         .await
         {
@@ -119,26 +120,10 @@ pub async fn sling(
                 if c.len() > 0 {
                     candidatelist = c.clone()
                 } else {
-                    candidatelist = build_candidatelist(
-                        &peers,
-                        &job,
-                        &graph,
-                        tempbans,
-                        config.depleteuptopercent.1,
-                        config.depleteuptoamount.1,
-                    )
+                    candidatelist = build_candidatelist(&peers, &job, &graph, tempbans, &config)
                 }
             }
-            None => {
-                candidatelist = build_candidatelist(
-                    &peers,
-                    &job,
-                    &graph,
-                    tempbans,
-                    config.depleteuptopercent.1,
-                    config.depleteuptoamount.1,
-                )
-            }
+            None => candidatelist = build_candidatelist(&peers, &job, &graph, tempbans, &config),
         }
         debug!(
             "{}: Candidates: {}",
@@ -277,7 +262,7 @@ pub async fn sling(
                 None,
             );
             success_route = None;
-            time::sleep(Duration::from_secs(10)).await;
+            time::sleep(Duration::from_secs(20)).await;
             continue 'outer;
         }
 
@@ -297,7 +282,7 @@ pub async fn sling(
                 None,
                 None,
             );
-            time::sleep(Duration::from_secs(120)).await;
+            time::sleep(Duration::from_secs(20)).await;
             success_route = None;
             continue 'outer;
         }
@@ -625,6 +610,7 @@ async fn health_check(
     peers: &Vec<ListpeersPeers>,
     other_peer: PublicKey,
     job_states: Arc<Mutex<HashMap<String, JobState>>>,
+    config: &Config,
 ) -> Option<bool> {
     let our_listpeers_channel = get_normal_channel_from_listpeers(peers, chan_id);
     if let Some(channel) = our_listpeers_channel {
@@ -645,15 +631,16 @@ async fn health_check(
                 None,
                 None,
             );
-            time::sleep(Duration::from_secs(120)).await;
+            time::sleep(Duration::from_secs(20)).await;
             Some(true)
         } else if match job.sat_direction {
-            SatDirection::Pull => false,
-            SatDirection::Push => get_out_htlc_count(&channel) > 5,
+            SatDirection::Pull => get_in_htlc_count(&channel) > config.max_htlc_count.1,
+            SatDirection::Push => get_out_htlc_count(&channel) > config.max_htlc_count.1,
         } {
             info!(
-                "{}: already more than 5 pending htlcs. Taking a break...",
-                chan_id.to_string()
+                "{}: already more than {} pending htlcs. Taking a break...",
+                chan_id.to_string(),
+                config.max_htlc_count.1
             );
             channel_jobstate_update(
                 job_states.clone(),
@@ -662,7 +649,7 @@ async fn health_check(
                 None,
                 None,
             );
-            time::sleep(Duration::from_secs(120)).await;
+            time::sleep(Duration::from_secs(20)).await;
             Some(true)
         } else {
             match peers.iter().find(|x| x.id == other_peer) {
@@ -676,7 +663,7 @@ async fn health_check(
                             None,
                             None,
                         );
-                        time::sleep(Duration::from_secs(120)).await;
+                        time::sleep(Duration::from_secs(20)).await;
                         Some(true)
                     } else {
                         None
@@ -716,8 +703,7 @@ fn build_candidatelist(
     job: &Job,
     graph: &LnGraph,
     tempbans: HashMap<String, u64>,
-    depleteuptopercent: f64,
-    depleteuptoamount: u64,
+    config: &Config,
 ) -> Vec<ShortChannelId> {
     let mut candidatelist = Vec::<ShortChannelId>::new();
     for peer in peers {
@@ -745,10 +731,10 @@ fn build_candidatelist(
                             ) <= job.outppm as u64
                                 && to_us_msat
                                     > std::cmp::min(
-                                        (depleteuptopercent * total_msat as f64) as u64,
-                                        depleteuptoamount,
+                                        (config.depleteuptopercent.1 * total_msat as f64) as u64,
+                                        config.depleteuptoamount.1,
                                     )
-                                && get_out_htlc_count(channel) < 5
+                                && get_out_htlc_count(channel) <= config.max_htlc_count.1
                         }
                         SatDirection::Push => {
                             feeppm_effective(
@@ -758,10 +744,10 @@ fn build_candidatelist(
                             ) >= job.outppm as u64
                                 && total_msat - to_us_msat
                                     > std::cmp::min(
-                                        (depleteuptopercent * total_msat as f64) as u64,
-                                        depleteuptoamount,
+                                        (config.depleteuptopercent.1 * total_msat as f64) as u64,
+                                        config.depleteuptoamount.1,
                                     )
-                                && get_in_htlc_count(channel) < 5
+                                && get_in_htlc_count(channel) <= config.max_htlc_count.1
                         }
                     } && !tempbans.contains_key(&scid.to_string())
                     {

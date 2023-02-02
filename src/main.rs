@@ -54,7 +54,7 @@ async fn main() -> Result<(), anyhow::Error> {
             &defaultconfig.refresh_graph_interval.0,
             options::Value::OptInteger,
             &format!(
-                "Refresh interval for aliasmap task. Default is {}",
+                "Refresh interval for graph task. Default is {}",
                 defaultconfig.refresh_graph_interval.1
             ),
         ))
@@ -62,7 +62,7 @@ async fn main() -> Result<(), anyhow::Error> {
             &defaultconfig.refresh_liquidity_interval.0,
             options::Value::OptInteger,
             &format!(
-                "Refresh interval for aliasmap task. Default is {}",
+                "Refresh interval for liquidity refresh task. Default is {}",
                 defaultconfig.refresh_liquidity_interval.1
             ),
         ))
@@ -70,7 +70,7 @@ async fn main() -> Result<(), anyhow::Error> {
             &defaultconfig.depleteuptopercent.0,
             options::Value::OptString,
             &format!(
-                "Refresh interval for aliasmap task. Default is {}",
+                "Deplete up to percent for candidate search. Default is {}",
                 defaultconfig.depleteuptopercent.1
             ),
         ))
@@ -78,8 +78,16 @@ async fn main() -> Result<(), anyhow::Error> {
             &defaultconfig.depleteuptoamount.0,
             options::Value::OptInteger,
             &format!(
-                "Refresh interval for aliasmap task. Default is {}",
+                "Deplete up to amount for candidate search. Default is {}",
                 defaultconfig.depleteuptoamount.1
+            ),
+        ))
+        .option(options::ConfigOption::new(
+            &defaultconfig.max_htlc_count.0,
+            options::Value::OptInteger,
+            &format!(
+                "Max number of htlc allowed pending in job and candidate. Default is {}",
+                defaultconfig.max_htlc_count.1
             ),
         ))
         .rpcmethod(

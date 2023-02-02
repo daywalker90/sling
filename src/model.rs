@@ -62,6 +62,7 @@ pub struct Config {
     pub refresh_liquidity_interval: (String, u64),
     pub depleteuptopercent: (String, f64),
     pub depleteuptoamount: (String, u64),
+    pub max_htlc_count: (String, u64),
 }
 impl Config {
     pub fn new() -> Config {
@@ -80,6 +81,7 @@ impl Config {
             ),
             depleteuptopercent: (PLUGIN_NAME.to_string() + "-depleteuptopercent", 0.2),
             depleteuptoamount: (PLUGIN_NAME.to_string() + "-depleteuptoamount", 2_000_000),
+            max_htlc_count: (PLUGIN_NAME.to_string() + "-max-htlc-count", 4),
         }
     }
 }

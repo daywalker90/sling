@@ -181,7 +181,26 @@ pub async fn read_config(
                             ))
                         }
                     },
-
+                    opt if opt.eq(&config.max_htlc_count.0) => match value.parse::<u64>() {
+                        Ok(n) => {
+                            if n > 0 {
+                                config.max_htlc_count.1 = n
+                            } else {
+                                return Err(anyhow!(
+                                    "Error: Number needs to be greater than 0 for {}.",
+                                    config.max_htlc_count.0
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            return Err(anyhow!(
+                                "Error: Could not parse a positive number from `{}` for {}: {}",
+                                value,
+                                config.max_htlc_count.0,
+                                e
+                            ))
+                        }
+                    },
                     _ => (),
                 }
             }
@@ -290,6 +309,21 @@ pub fn get_startup_options(
         Some(options::Value::Integer(i)) => i as u64,
         Some(_) => config.depleteuptoamount.1,
         None => config.depleteuptoamount.1,
+    };
+    config.max_htlc_count.1 = match plugin.option(&config.max_htlc_count.0) {
+        Some(options::Value::Integer(i)) => {
+            if i > 0 {
+                i as u64
+            } else {
+                return Err(anyhow!(
+                    "Error: {} needs to be greater than 0 and not `{}`.",
+                    config.max_htlc_count.0,
+                    i
+                ));
+            }
+        }
+        Some(_) => config.max_htlc_count.1,
+        None => config.max_htlc_count.1,
     };
 
     Ok(())
