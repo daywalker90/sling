@@ -72,6 +72,13 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
     let rpc_path = make_rpc_path(&plugin);
     let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
     *plugin.state().graph.lock() = read_graph(&sling_dir).await?;
+    let interval = plugin
+        .state()
+        .config
+        .lock()
+        .clone()
+        .refresh_graph_interval
+        .1;
 
     loop {
         {
@@ -125,7 +132,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                 now.elapsed().as_millis().to_string()
             );
         }
-        time::sleep(Duration::from_secs(600)).await;
+        time::sleep(Duration::from_secs(interval)).await;
     }
 }
 
