@@ -7,7 +7,7 @@ use cln_rpc::{model::*, primitives::*};
 use log::{debug, info, warn};
 
 use parking_lot::Mutex;
-
+use std::cmp::{max, min};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -762,9 +762,12 @@ fn build_candidatelist(
                     if match job.sat_direction {
                         SatDirection::Pull => {
                             to_us_msat
-                                > std::cmp::min(
-                                    (config.depleteuptopercent.1 * total_msat as f64) as u64,
-                                    config.depleteuptoamount.1,
+                                > max(
+                                    job.amount + 10_000_000,
+                                    min(
+                                        (config.depleteuptopercent.1 * total_msat as f64) as u64,
+                                        config.depleteuptoamount.1,
+                                    ),
                                 )
                                 && match job.outppm {
                                     Some(out) => {
@@ -780,9 +783,12 @@ fn build_candidatelist(
                         }
                         SatDirection::Push => {
                             total_msat - to_us_msat
-                                > std::cmp::min(
-                                    (config.depleteuptopercent.1 * total_msat as f64) as u64,
-                                    config.depleteuptoamount.1,
+                                > max(
+                                    job.amount + 10_000_000,
+                                    min(
+                                        (config.depleteuptopercent.1 * total_msat as f64) as u64,
+                                        config.depleteuptoamount.1,
+                                    ),
                                 )
                                 && match job.outppm {
                                     Some(out) => {
