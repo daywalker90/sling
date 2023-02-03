@@ -13,7 +13,7 @@ use serde_json::json;
 use tabled::TableIteratorExt;
 
 use crate::model::{JobState, PluginState, StatSummary};
-use crate::util::get_all_normal_channels_from_listpeers;
+use crate::util::{get_all_normal_channels_from_listpeers, refresh_joblists};
 use crate::NO_ALIAS_SET;
 use crate::{
     model::{FailureReb, SuccessReb},
@@ -35,6 +35,7 @@ pub async fn slingstats(
             } else if a.len() == 0 {
                 let mut successes = HashMap::new();
                 let mut failures = HashMap::new();
+                refresh_joblists(plugin.clone()).await?;
                 let pull_jobs = plugin.state().pull_jobs.lock().clone();
                 let push_jobs = plugin.state().push_jobs.lock().clone();
                 let mut all_jobs: Vec<String> =
