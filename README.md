@@ -3,14 +3,17 @@ A core lightning plugin to automatically rebalance multiple channels.
 
 * [Installation](#installation)
 * [Building](#building)
-* [Example Usage](#example-usage)
+* [Command overview](#command-overview)
+* [Pull sats into a channel](#pull-sats-into-a-channel)
+* [Push sats into a channel](#push-sats-into-a-channel)
 * [How to set options](#how-to-set-options)
 * [Options](#options)
-* [Availability Database](#availability-database)
 * [Thanks](#thanks)
 
 ## Installation
 For general plugin installation instructions see the plugins repo [README.md](https://github.com/lightningd/plugins/blob/master/README.md#Installation)
+
+:warning:Make sure to change the option ``sling-lightning-cli`` if it is different from the default, see [Options](#options) for more info
 
 ## Building
 You can build the plugin yourself instead of using the release binaries.
@@ -97,12 +100,13 @@ Examples:
 2. just like other cln options in the config file: ``sling-refresh-peers-interval=6``
 
 ## Options
+* :warning:``sling-lightning-cli`` location of your lightning-cli, since some rpc methods are not implemented by cln-rpc yet we have to call these via cli. Default is ``/usr/local/bin/lightning-cli``
 * ``sling-refresh-peers-interval``: ``sling`` periodically calls listpeers every ``refresh-peers-interval`` seconds
 and jobs use the data of the last call to check for balances etc. So this option could severely impact rebalancing target precision
 if it's value is too high. Default is ``5``s
 * ``sling-refresh-aliasmap-interval`` How often to refresh node aliases in seconds. Default is ``3600``s
 * ``sling-refresh-graph-interval`` How often to refresh the graph in seconds. Default is ``600``s
-* ``sling-refresh-liquidity-interval`` After how many minutes to reset liquidity knowledge. Default is ``360``m
+* ``sling-reset-liquidity-interval`` After how many minutes to reset liquidity knowledge. Default is ``360``m
 * ``sling-depleteuptopercent`` Up to what percent to pull or push sats from/to candidate channels as floating point between 0 and 1. Formula is min(``depleteuptopercent``*channel_capacity, ``depleteuptoamount``). Default is ``0.2``
 * ``sling-depleteuptoamount`` Up to what amount to pull or push sats from/to candidate channels. Formula is min(``depleteuptopercent``*channel_capacity, ``depleteuptoamount``). Default is ``2000000``sats
 * ``sling-max-htlc-count`` Max number of pending directional htlcs allowed in participating channels. Default is ``4``
