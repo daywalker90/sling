@@ -78,7 +78,10 @@ impl Config {
             refresh_graph_interval: (PLUGIN_NAME.to_string() + "-refresh-graph-interval", 600),
             reset_liquidity_interval: (PLUGIN_NAME.to_string() + "-reset-liquidity-interval", 360),
             depleteuptopercent: (PLUGIN_NAME.to_string() + "-depleteuptopercent", 0.2),
-            depleteuptoamount: (PLUGIN_NAME.to_string() + "-depleteuptoamount", 2_000_000),
+            depleteuptoamount: (
+                PLUGIN_NAME.to_string() + "-depleteuptoamount",
+                2_000_000_000,
+            ),
             max_htlc_count: (PLUGIN_NAME.to_string() + "-max-htlc-count", 4),
             lightning_cli: (
                 PLUGIN_NAME.to_string() + "-lightning-cli",

@@ -171,7 +171,7 @@ pub async fn read_config(
                         }
                     },
                     opt if opt.eq(&config.depleteuptoamount.0) => match value.parse::<u64>() {
-                        Ok(n) => config.depleteuptoamount.1 = n,
+                        Ok(n) => config.depleteuptoamount.1 = n * 1_000,
                         Err(e) => {
                             return Err(anyhow!(
                                 "Error: Could not parse a positive number from `{}` for {}: {}",
@@ -305,7 +305,7 @@ pub fn get_startup_options(
         None => config.depleteuptopercent.1,
     };
     config.depleteuptoamount.1 = match plugin.option(&config.depleteuptoamount.0) {
-        Some(options::Value::Integer(i)) => i as u64,
+        Some(options::Value::Integer(i)) => (i * 1_000) as u64,
         Some(_) => config.depleteuptoamount.1,
         None => config.depleteuptoamount.1,
     };
