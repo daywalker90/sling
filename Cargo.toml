@@ -15,9 +15,9 @@ serde_json = "1.0"
 tokio = { version = "1", features = ["fs","sync","rt-multi-thread","process"] }
 # tokio-stream = "0.1"
 # futures = "0.3"
-cln-rpc = { path = "../lightning/cln-rpc/" }
+cln-rpc = "0.1"
 # env_logger = "0.10"
-cln-plugin = { path = "../lightning/plugins/" }
+cln-plugin = "0.1"
 tabled = "0.10"
 num-format = "0.4"
 struct-field-names-as-array = "0.1"

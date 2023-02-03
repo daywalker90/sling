@@ -199,7 +199,8 @@ impl PartialEq for DijkstraNode {
             && self.hops == other.hops
             && self.channel.source == other.channel.source
             && self.channel.destination == other.channel.destination
-            && self.channel.short_channel_id == other.channel.short_channel_id
+            && self.channel.short_channel_id.to_string()
+                == other.channel.short_channel_id.to_string()
             && self.destination == other.destination
     }
 }
@@ -293,9 +294,9 @@ impl LnGraph {
             let old_channels = self.graph.entry(new_node.clone()).or_default();
             for new_channel in new_channels {
                 let new_short_channel_id = &new_channel.channel.short_channel_id;
-                let old_channel = old_channels
-                    .iter_mut()
-                    .find(|e| e.channel.short_channel_id == *new_short_channel_id);
+                let old_channel = old_channels.iter_mut().find(|e| {
+                    e.channel.short_channel_id.to_string() == new_short_channel_id.to_string()
+                });
                 match old_channel {
                     Some(old_channel) => {
                         old_channel.channel = new_channel.channel.clone();
@@ -342,7 +343,7 @@ impl LnGraph {
             Some(e) => {
                 let result = e
                     .into_iter()
-                    .filter(|&i| i.channel.short_channel_id == channel)
+                    .filter(|&i| i.channel.short_channel_id.to_string() == channel.to_string())
                     .collect::<Vec<&DirectedChannel>>();
                 if result.len() != 1 {
                     Err(anyhow!(
@@ -388,7 +389,9 @@ impl LnGraph {
                             && if i.channel.source == *mypubkey
                                 || i.channel.destination == *mypubkey
                             {
-                                candidatelist.contains(&i.channel.short_channel_id)
+                                candidatelist.iter().any(|c| {
+                                    c.to_string() == i.channel.short_channel_id.to_string()
+                                })
                             } else {
                                 true
                             }

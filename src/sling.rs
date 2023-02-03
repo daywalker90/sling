@@ -172,12 +172,12 @@ pub async fn sling(
         match success_route {
             Some(prev_route) => {
                 if match job.sat_direction {
-                    SatDirection::Pull => {
-                        candidatelist.contains(&prev_route.first().unwrap().channel)
-                    }
-                    SatDirection::Push => {
-                        candidatelist.contains(&prev_route.last().unwrap().channel)
-                    }
+                    SatDirection::Pull => candidatelist
+                        .iter()
+                        .any(|c| c.to_string() == prev_route.first().unwrap().channel.to_string()),
+                    SatDirection::Push => candidatelist
+                        .iter()
+                        .any(|c| c.to_string() == prev_route.last().unwrap().channel.to_string()),
                 } {
                     route = prev_route
                 } else {
@@ -443,7 +443,9 @@ pub async fn sling(
                             let temp_ban_route = &route[..route.len() - 1];
                             let mut source = temp_ban_route.first().unwrap().id;
                             for hop in temp_ban_route {
-                                if hop.channel == temp_ban_route.first().unwrap().channel {
+                                if hop.channel.to_string()
+                                    == temp_ban_route.first().unwrap().channel.to_string()
+                                {
                                     source = hop.id;
                                 } else {
                                     plugin
@@ -455,7 +457,8 @@ pub async fn sling(
                                         .unwrap()
                                         .iter_mut()
                                         .find_map(|x| {
-                                            if x.channel.short_channel_id == hop.channel
+                                            if x.channel.short_channel_id.to_string()
+                                                == hop.channel.to_string()
                                                 && x.channel.destination != mypubkey
                                                 && x.channel.source != mypubkey
                                             {
@@ -544,7 +547,9 @@ pub async fn sling(
                                         break 'outer;
                                     }
 
-                                    if data.erring_channel == route.last().unwrap().channel {
+                                    if data.erring_channel.to_string()
+                                        == route.last().unwrap().channel.to_string()
+                                    {
                                         warn!(
                                             "{}: Peer has a problem or just updated their fees? {}",
                                             chan_id.to_string(),
@@ -566,7 +571,8 @@ pub async fn sling(
                                             .unwrap()
                                             .iter_mut()
                                             .find_map(|x| {
-                                                if x.channel.short_channel_id == data.erring_channel
+                                                if x.channel.short_channel_id.to_string()
+                                                    == data.erring_channel.to_string()
                                                     && x.channel.destination != mypubkey
                                                     && x.channel.source != mypubkey
                                                 {
@@ -741,7 +747,7 @@ fn build_candidatelist(
                     _ => false,
                 } && peer.connected
                     && match custom_candidates {
-                        Some(c) => c.contains(&scid),
+                        Some(c) => c.iter().any(|c| c.to_string() == scid.to_string()),
                         None => true,
                     }
                 {
