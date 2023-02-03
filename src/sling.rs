@@ -382,7 +382,15 @@ pub async fn sling(
             now.elapsed().as_millis().to_string()
         );
 
-        match waitsendpay(&networkdir, send_response.payment_hash, None, None).await {
+        match waitsendpay(
+            &networkdir,
+            &config.lightning_cli.1,
+            send_response.payment_hash,
+            None,
+            None,
+        )
+        .await
+        {
             Ok(o) => {
                 info!(
                     "{}: Rebalance SUCCESSFULL after {}s. Sent {}sats plus {}msats fee",
@@ -391,7 +399,13 @@ pub async fn sling(
                     Amount::msat(&o.amount_msat.unwrap()) / 1_000,
                     Amount::msat(&o.amount_sent_msat) - Amount::msat(&o.amount_msat.unwrap()),
                 );
-                delpay(&networkdir, send_response.payment_hash, "complete").await?;
+                delpay(
+                    &networkdir,
+                    &config.lightning_cli.1,
+                    send_response.payment_hash,
+                    "complete",
+                )
+                .await?;
                 SuccessReb {
                     amount_msat: Amount::msat(&o.amount_msat.unwrap()),
                     fee_ppm: feeppm_effective_from_amts(
@@ -590,7 +604,14 @@ pub async fn sling(
                         }
                         let delpay_timer = Instant::now();
                         while delpay_timer.elapsed() < Duration::from_secs(120) {
-                            match delpay(&networkdir, send_response.payment_hash, "failed").await {
+                            match delpay(
+                                &networkdir,
+                                &config.lightning_cli.1,
+                                send_response.payment_hash,
+                                "failed",
+                            )
+                            .await
+                            {
                                 Ok(_) => break,
                                 Err(_) => {
                                     time::sleep(Duration::from_secs(1)).await;

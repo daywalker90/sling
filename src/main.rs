@@ -4,6 +4,7 @@ use anyhow::anyhow;
 use cln_plugin::{options, Builder};
 use log::{debug, info, warn};
 use sling::{
+    check_lightning_dir,
     config::*,
     get_info,
     htlc::htlc_handler,
@@ -90,6 +91,14 @@ async fn main() -> Result<(), anyhow::Error> {
                 defaultconfig.max_htlc_count.1
             ),
         ))
+        .option(options::ConfigOption::new(
+            &defaultconfig.lightning_cli.0,
+            options::Value::OptString,
+            &format!(
+                "Path to lightning-cli for unsupported rpc methods. Default is {}",
+                defaultconfig.lightning_cli.1
+            ),
+        ))
         .rpcmethod(
             &(PLUGIN_NAME.to_string() + "-job"),
             "add sling job",
@@ -136,7 +145,10 @@ async fn main() -> Result<(), anyhow::Error> {
                 Ok(()) => &(),
                 Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
             };
-
+            match check_lightning_dir(&plugin, state.clone()).await {
+                Ok(()) => &(),
+                Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
+            };
             confplugin = plugin;
         }
         None => return Err(anyhow!("Error configuring the plugin!")),

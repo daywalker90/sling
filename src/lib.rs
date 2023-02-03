@@ -1,12 +1,14 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, str::FromStr};
 
 use anyhow::{anyhow, Error};
+use cln_plugin::ConfiguredPlugin;
 use cln_rpc::{
     model::*,
     primitives::{PublicKey, Secret, ShortChannelId},
     ClnRpc,
 };
 use log::debug;
+use model::PluginState;
 use tokio::{process::Command, time::Instant};
 
 use crate::errors::*;
@@ -163,10 +165,11 @@ pub async fn slingsend(
 
 pub async fn delpay(
     lightning_dir: &PathBuf,
+    lightning_cli: &String,
     payment_hash: Sha256,
     status: &str,
 ) -> Result<DelpayResponse, Error> {
-    let delpay_request = Command::new("/usr/local/bin/lightning-cli")
+    let delpay_request = Command::new(lightning_cli)
         .arg("--lightning-dir=".to_string() + lightning_dir.to_str().unwrap())
         .arg("delpay")
         .arg((payment_hash).to_string())
@@ -188,12 +191,13 @@ pub async fn delpay(
 
 pub async fn waitsendpay(
     lightning_dir: &PathBuf,
+    lightning_cli: &String,
     payment_hash: Sha256,
     _timeout: Option<u32>,
     _partid: Option<u64>,
 ) -> Result<WaitsendpayResponse, WaitsendpayError> {
     // debug!("{}", lightning_dir.to_str().unwrap());
-    let waitsendpay_request = Command::new("/usr/local/bin/lightning-cli")
+    let waitsendpay_request = Command::new(lightning_cli)
         .arg("--lightning-dir=".to_string() + lightning_dir.to_str().unwrap())
         .arg("waitsendpay")
         .arg((payment_hash).to_string())
@@ -219,5 +223,44 @@ pub async fn waitsendpay(
             message: e.to_string(),
             data: None,
         }),
+    }
+}
+
+pub async fn check_lightning_dir(
+    plugin: &ConfiguredPlugin<PluginState, tokio::io::Stdin, tokio::io::Stdout>,
+    state: PluginState,
+) -> Result<(), Error> {
+    let network_dir = PathBuf::from_str(&plugin.configuration().lightning_dir.clone()).unwrap();
+    let mut lightning_dir = network_dir.clone();
+    lightning_dir.pop();
+    let config = state.config.lock();
+    let getinfo_request = Command::new(config.lightning_cli.1.clone())
+        .arg("--lightning-dir=".to_string() + lightning_dir.to_str().unwrap())
+        .arg("getinfo")
+        .output()
+        .await;
+    let response = match getinfo_request {
+        Ok(output) => {
+            match serde_json::from_str::<GetinfoResponse>(&String::from_utf8_lossy(&output.stdout))
+            {
+                Ok(o) => o,
+                Err(e) => {
+                    return Err(anyhow!(
+                        "Unexpected error in parsing delpay response: {} {:?}",
+                        e,
+                        output
+                    ))
+                }
+            }
+        }
+        Err(e) => return Err(anyhow!("Unexpected error in delpay: {}", e)),
+    };
+    if response.lightning_dir == plugin.configuration().lightning_dir.clone() {
+        debug!("got working lightning-cli");
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "lightning-dir from lightning-cli not matching plugin state"
+        ))
     }
 }
