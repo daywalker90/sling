@@ -5,7 +5,7 @@ A core lightning plugin to automatically rebalance multiple channels.
 * [Building](#building)
 * [Command overview](#command-overview)
 * [Pull sats into a channel](#pull-sats-into-a-channel)
-* [Push sats into a channel](#push-sats-into-a-channel)
+* [Push sats out of a channel](#push-sats-out-of-a-channel)
 * [How to set options](#how-to-set-options)
 * [Options](#options)
 * [Thanks](#thanks)
@@ -61,7 +61,7 @@ Advanced example:
 
 ``sling-job 704776x2087x3 pull 100000 300 None 0.8 6 '["704776x2087x5","702776x1087x2"]'``
 
-## Push sats into a channel
+## Push sats out of a channel
 To push sats out of a channel you can add a job like this:
 
 ``sling-job scid push amount maxppm (outppm) (target) (maxhops) (candidatelist)``
