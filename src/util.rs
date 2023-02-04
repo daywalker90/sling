@@ -158,6 +158,8 @@ pub async fn refresh_joblists(p: Plugin<PluginState>) -> Result<(), Error> {
     .await?;
     let mut pull_jobs = p.state().pull_jobs.lock();
     let mut push_jobs = p.state().push_jobs.lock();
+    pull_jobs.clear();
+    push_jobs.clear();
 
     for (chan_id, job) in jobs {
         match job.sat_direction {
