@@ -36,7 +36,8 @@ There are currently six commands:
 * ``sling-stats`` with no arguments this shows a status overview for all jobs. Provide a short channel id to get more detailed stats
 * ``sling-job`` adds a rebalancing job for a channel, you can only have one job per channel and if you add one for the same channel it gets stopped and updated inplace
 * ``sling-deletejob`` stops and removes one or all jobs. E.g.: ``sling-deletejob 704776x2087x3`` or for all ``sling-deletejob all``
-* ``sling-except`` add or remove short channel ids to completely avoid. E.g. ``sling-except add 704776x2087x3`` or ``sling-except remove 704776x2087x3``
+* ``sling-except-chan`` add or remove short channel ids to completely avoid. E.g. ``sling-except-chan add 704776x2087x3`` or ``sling-except-chan remove 704776x2087x3`` or list all current exceptions: ``sling-except-chan list``.
+* ``sling-except-peer`` same as ``sling-except-chan`` but with node public keys
 
 ## Pull sats into a channel
 To pull sats into a channel you can add a job like this:
