@@ -121,14 +121,14 @@ pub async fn sling(
             Some(ref c) => {
                 if c.len() > 0 {
                     candidatelist =
-                        build_candidatelist(&peers, &job, &graph, tempbans, &config, Some(c))
+                        build_candidatelist(&peers, &job, &graph, &tempbans, &config, Some(c))
                 } else {
                     candidatelist =
-                        build_candidatelist(&peers, &job, &graph, tempbans, &config, None)
+                        build_candidatelist(&peers, &job, &graph, &tempbans, &config, None)
                 }
             }
             None => {
-                candidatelist = build_candidatelist(&peers, &job, &graph, tempbans, &config, None)
+                candidatelist = build_candidatelist(&peers, &job, &graph, &tempbans, &config, None)
             }
         }
         debug!(
@@ -140,20 +140,21 @@ pub async fn sling(
                 .collect::<Vec<String>>()
                 .join(", ")
         );
-        debug!(
-            "{}: Tempbans: {}",
-            chan_id.to_string(),
-            plugin
-                .state()
-                .tempbans
-                .lock()
-                .clone()
-                .keys()
-                .map(|y| y.to_owned())
-                .collect::<Vec<String>>()
-                .join(", ")
-        );
-
+        if tempbans.len() > 0 {
+            debug!(
+                "{}: Tempbans: {}",
+                chan_id.to_string(),
+                plugin
+                    .state()
+                    .tempbans
+                    .lock()
+                    .clone()
+                    .keys()
+                    .map(|y| y.to_owned())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            );
+        }
         if candidatelist.len() == 0 {
             info!(
                 "{}: No candidates found. Adjust out_ppm or wait for liquidity. Sleeping...",
@@ -757,7 +758,7 @@ fn build_candidatelist(
     peers: &Vec<ListpeersPeers>,
     job: &Job,
     graph: &LnGraph,
-    tempbans: HashMap<String, u64>,
+    tempbans: &HashMap<String, u64>,
     config: &Config,
     custom_candidates: Option<&Vec<ShortChannelId>>,
 ) -> Vec<ShortChannelId> {
