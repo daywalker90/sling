@@ -18,6 +18,7 @@ pub fn dijkstra(
     job: &Job,
     candidatelist: &Vec<ShortChannelId>,
     exclude: &HashSet<String>,
+    exclude_peers: &Vec<PublicKey>,
     hops: u64,
 ) -> Result<Vec<SendpayRoute>, Error> {
     let mut visited = HashSet::with_capacity(lngraph.graph.len());
@@ -49,7 +50,14 @@ pub fn dijkstra(
         if current_hops + 2 > hops {
             continue;
         }
-        for edge in lngraph.edges(mypubkey, &node, exclude, &job.amount, &candidatelist) {
+        for edge in lngraph.edges(
+            mypubkey,
+            &node,
+            exclude,
+            exclude_peers,
+            &job.amount,
+            &candidatelist,
+        ) {
             let next = edge.channel.destination;
             if visited.contains(&next) {
                 // debug!(

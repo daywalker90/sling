@@ -15,8 +15,9 @@ use std::{collections::HashMap, path::Path};
 use crate::jobs::slingstop;
 use crate::model::PluginState;
 use crate::model::{Job, JobMessage, JobState, LnGraph, SatDirection};
+use crate::EXCEPTS_PEERS_FILE_NAME;
 
-use crate::{list_peers, EXCEPTS_FILE_NAME, GRAPH_FILE_NAME, JOB_FILE_NAME, PLUGIN_NAME};
+use crate::{list_peers, EXCEPTS_CHANS_FILE_NAME, GRAPH_FILE_NAME, JOB_FILE_NAME, PLUGIN_NAME};
 use anyhow::{anyhow, Error};
 use bitcoin::consensus::encode::serialize_hex;
 use cln_plugin::Plugin;
@@ -276,13 +277,14 @@ async fn write_job(
     } else {
         my_job = job.unwrap();
         info!(
-            "{} job for {} with amount {}msat, maxppm {}, outppm {:?}, target: {:?} and candidatelist {:?}",
+            "{} job for {} with amount {}msat, maxppm {}, outppm {:?}, target: {:?}, maxhops: {:?} and candidatelist {:?}",
             job_change,
             &chan_id,
             &my_job.amount,
             &my_job.maxppm,
             &my_job.outppm,
             &my_job.target,
+            &my_job.maxhops,
             &my_job.candidatelist,
         );
         jobs.insert(chan_id, my_job);
@@ -298,16 +300,16 @@ async fn write_job(
         }
     }
     jobs.retain(|i, _j| !jobs_to_remove.contains(i));
-    refresh_joblists(p.clone()).await?;
     fs::write(
         sling_dir.join(JOB_FILE_NAME),
         serde_json::to_string_pretty(&jobs)?,
     )
     .await?;
+    refresh_joblists(p.clone()).await?;
     Ok(jobs)
 }
 
-pub async fn slingexcept(
+pub async fn slingexceptchan(
     plugin: Plugin<PluginState>,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, Error> {
@@ -328,7 +330,7 @@ pub async fn slingexcept(
                             }
                             o => return Err(anyhow!("not a vaild short_channel_id: {}", o)),
                         }
-                        let mut excepts = plugin.state().excepts.lock();
+                        let mut excepts = plugin.state().excepts_chans.lock();
                         let mut contains = false;
                         for chan_id in excepts.clone() {
                             if chan_id.to_string() == scid.to_string() {
@@ -383,12 +385,12 @@ pub async fn slingexcept(
                     }
                     _ => return Err(anyhow!("Invalid command. Please either provide `add`/`remove` and a short_channel_id or just `list`")),
                 }
-                write_excepts(plugin.clone()).await?;
+                write_excepts_chans(plugin.clone()).await?;
                 Ok(json!({ "result": "success" }))
             } else {
                 match a.get(0).unwrap() {
                     serde_json::Value::String(i) => {
-                        let excepts = plugin.state().excepts.lock();
+                        let excepts = plugin.state().excepts_chans.lock();
                         match i {
                             opt if opt.eq("list") => Ok(json!(excepts.clone())),
                             _ => Err(anyhow!("unknown commmand, did you misspell `list` or forgot the scid?")),
@@ -402,8 +404,94 @@ pub async fn slingexcept(
     }
 }
 
-async fn write_excepts(plugin: Plugin<PluginState>) -> Result<(), Error> {
-    let excepts = plugin.state().excepts.lock().clone();
+pub async fn slingexceptpeer(
+    plugin: Plugin<PluginState>,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, Error> {
+    let peers = plugin.state().peers.lock().clone();
+    match args {
+        serde_json::Value::Array(a) => {
+            if a.len() > 2 || a.len() == 0 {
+                return Err(anyhow!(
+                    "Please either provide `add`/`remove` and a node_id or just `list`"
+                ));
+            } else if a.len() == 2 {
+                match a.get(0).unwrap() {
+                    serde_json::Value::String(i) => {
+                        let pubkey;
+                        match a.get(1).unwrap() {
+                            serde_json::Value::String(s) => {
+                                pubkey = PublicKey::from_str(&s)?;
+                            }
+                            o => return Err(anyhow!("not a vaild node_id: {}", o)),
+                        }
+                        let mut excepts_peers = plugin.state().excepts_peers.lock();
+                        let contains = excepts_peers.contains(&pubkey);
+                        match i {
+                            opt if opt.eq("add") => {
+                                if contains {
+                                    return Err(anyhow!(
+                                        "{} is already in excepts",
+                                        pubkey.to_string()
+                                    ));
+                                } else {
+                                    let pull_jobs = plugin.state().pull_jobs.lock().clone();
+                                    let push_jobs = plugin.state().push_jobs.lock().clone();
+                                    let all_jobs: Vec<String> =
+                                        pull_jobs.into_iter().chain(push_jobs.into_iter()).collect();
+                                    let mut all_job_peers: Vec<PublicKey> = vec![];
+                                    debug!("{:?}",all_jobs);
+                                    for job in &all_jobs{
+                                        match get_peer_id_from_chan_id(&peers, ShortChannelId::from_str(job).unwrap()){
+                                            Ok(p)=>all_job_peers.push(p),
+                                            Err(_)=> (),
+                                        };
+                                    }
+                                    if all_job_peers.contains(&pubkey) {
+                                        return Err(anyhow!(
+                                            "this peer has a job already and can't be an except too"
+                                        ));
+                                    } else {
+                                        excepts_peers.push(pubkey);
+                                    }
+                                }
+                            }
+                            opt if opt.eq("remove") => {
+                                if contains {
+                                    excepts_peers.retain(|&x| x != pubkey);
+                                } else {
+                                    return Err(anyhow!(
+                                        "node_id {} not in excepts, nothing to remove",
+                                        pubkey.to_string()
+                                    ));
+                                }
+                            }
+                            _ => return Err(anyhow!("Unknown commmand. Please either provide `add`/`remove` and a node_id or just `list`")),
+                        }
+                    }
+                    _ => return Err(anyhow!("Invalid command. Please either provide `add`/`remove` and a node_id or just `list`")),
+                }
+                write_excepts_peers(plugin.clone()).await?;
+                Ok(json!({ "result": "success" }))
+            } else {
+                match a.get(0).unwrap() {
+                    serde_json::Value::String(i) => {
+                        let excepts = plugin.state().excepts_peers.lock();
+                        match i {
+                            opt if opt.eq("list") => Ok(json!(excepts.clone())),
+                            _ => Err(anyhow!("unknown commmand, did you misspell `list` or forgot the node_id?")),
+                        }
+                    }
+                    _ => Err(anyhow!("Invalid command. Please either provide `add`/`remove` and a node_id or just `list`")),
+                }
+            }
+        }
+        _ => Err(anyhow!("invalid arguments")),
+    }
+}
+
+async fn write_excepts_chans(plugin: Plugin<PluginState>) -> Result<(), Error> {
+    let excepts = plugin.state().excepts_chans.lock().clone();
     let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
     let excepts_tostring = excepts
         .into_iter()
@@ -411,16 +499,34 @@ async fn write_excepts(plugin: Plugin<PluginState>) -> Result<(), Error> {
         .collect::<Vec<_>>();
 
     fs::write(
-        sling_dir.join(EXCEPTS_FILE_NAME),
+        sling_dir.join(EXCEPTS_CHANS_FILE_NAME),
         serde_json::to_string(&excepts_tostring)?,
     )
     .await?;
 
     Ok(())
 }
-pub async fn read_excepts(plugin: Plugin<PluginState>) -> Result<(), Error> {
+
+async fn write_excepts_peers(plugin: Plugin<PluginState>) -> Result<(), Error> {
+    let excepts = plugin.state().excepts_peers.lock().clone();
     let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
-    let exceptsfile = sling_dir.join(EXCEPTS_FILE_NAME);
+    let excepts_tostring = excepts
+        .into_iter()
+        .map(|x| x.to_string())
+        .collect::<Vec<_>>();
+
+    fs::write(
+        sling_dir.join(EXCEPTS_CHANS_FILE_NAME),
+        serde_json::to_string(&excepts_tostring)?,
+    )
+    .await?;
+
+    Ok(())
+}
+
+pub async fn read_excepts_chans(plugin: Plugin<PluginState>) -> Result<(), Error> {
+    let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
+    let exceptsfile = sling_dir.join(EXCEPTS_CHANS_FILE_NAME);
     let exceptsfilecontent = fs::read_to_string(exceptsfile.clone()).await;
     let excepts_tostring: Vec<String>;
     let mut excepts: Vec<ShortChannelId> = Vec::new();
@@ -444,7 +550,37 @@ pub async fn read_excepts(plugin: Plugin<PluginState>) -> Result<(), Error> {
             Err(_e) => warn!("excepts file contains invalid short_channel_id: {}", except),
         }
     }
-    *plugin.state().excepts.lock() = excepts;
+    *plugin.state().excepts_chans.lock() = excepts;
+    Ok(())
+}
+
+pub async fn read_excepts_peers(plugin: Plugin<PluginState>) -> Result<(), Error> {
+    let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
+    let exceptsfile = sling_dir.join(EXCEPTS_PEERS_FILE_NAME);
+    let exceptsfilecontent = fs::read_to_string(exceptsfile.clone()).await;
+    let excepts_tostring: Vec<String>;
+    let mut excepts: Vec<PublicKey> = Vec::new();
+
+    create_sling_dir(&sling_dir).await?;
+    match exceptsfilecontent {
+        Ok(file) => excepts_tostring = serde_json::from_str(&file).unwrap_or(Vec::new()),
+        Err(e) => {
+            warn!(
+                "Could not open {}: {}. Maybe this is the first time using sling? Creating new file.",
+                exceptsfile.to_str().unwrap(), e.to_string()
+            );
+            File::create(exceptsfile.clone()).await?;
+            excepts_tostring = Vec::new();
+        }
+    };
+
+    for except in excepts_tostring {
+        match PublicKey::from_str(&except) {
+            Ok(id) => excepts.push(id),
+            Err(_e) => warn!("excepts_peers file contains invalid publickey: {}", except),
+        }
+    }
+    *plugin.state().excepts_peers.lock() = excepts;
     Ok(())
 }
 

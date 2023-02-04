@@ -30,7 +30,8 @@ pub const NODE_GOSSIP_MISS: &str = "NODE_GOSSIP_MISS";
 pub const PLUGIN_NAME: &str = "sling";
 pub const GRAPH_FILE_NAME: &str = "graph.json";
 pub const JOB_FILE_NAME: &str = "jobs.json";
-pub const EXCEPTS_FILE_NAME: &str = "excepts.json";
+pub const EXCEPTS_CHANS_FILE_NAME: &str = "excepts.json";
+pub const EXCEPTS_PEERS_FILE_NAME: &str = "excepts_peers.json";
 
 #[cfg(test)]
 mod tests;

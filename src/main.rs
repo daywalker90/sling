@@ -12,7 +12,10 @@ use sling::{
     model::{Config, PluginState},
     stats::slingstats,
     tasks,
-    util::{make_rpc_path, read_excepts, refresh_joblists, slingdeletejob, slingexcept, slingjob},
+    util::{
+        make_rpc_path, read_excepts_chans, read_excepts_peers, refresh_joblists, slingdeletejob,
+        slingexceptchan, slingexceptpeer, slingjob,
+    },
     PLUGIN_NAME,
 };
 use tokio::{self};
@@ -125,9 +128,14 @@ async fn main() -> Result<(), anyhow::Error> {
             slingstats,
         )
         .rpcmethod(
-            &(PLUGIN_NAME.to_string() + "-except"),
+            &(PLUGIN_NAME.to_string() + "-except-chan"),
             "channels to avoid for all jobs",
-            slingexcept,
+            slingexceptchan,
+        )
+        .rpcmethod(
+            &(PLUGIN_NAME.to_string() + "-except-peer"),
+            "peers to avoid for all jobs",
+            slingexceptpeer,
         )
         .hook("htlc_accepted", htlc_handler)
         .dynamic()
@@ -167,7 +175,9 @@ async fn main() -> Result<(), anyhow::Error> {
             };
         });
         let except_clone = plugin.clone();
-        read_excepts(except_clone).await?;
+        read_excepts_chans(except_clone).await?;
+        let except_peers_clone = plugin.clone();
+        read_excepts_peers(except_peers_clone).await?;
         let joblists_clone = plugin.clone();
         refresh_joblists(joblists_clone).await?;
         let channelsclone = plugin.clone();

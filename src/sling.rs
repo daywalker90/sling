@@ -70,6 +70,8 @@ pub async fn sling(
 
         let other_peer = get_peer_id_from_chan_id(&peers, chan_id)?;
 
+        let tempbans = plugin.state().tempbans.lock().clone();
+
         match health_check(
             chan_id,
             &job,
@@ -77,6 +79,7 @@ pub async fn sling(
             other_peer,
             plugin.state().job_state.clone(),
             &config,
+            &tempbans,
         )
         .await
         {
@@ -113,7 +116,6 @@ pub async fn sling(
             None,
         );
 
-        let tempbans = plugin.state().tempbans.lock().clone();
         let candidatelist;
         match job.candidatelist {
             Some(ref c) => {
@@ -197,7 +199,8 @@ pub async fn sling(
 
                 let mut pull_jobs = plugin.state().pull_jobs.lock().clone();
                 let mut push_jobs = plugin.state().push_jobs.lock().clone();
-                let excepts = plugin.state().excepts.lock().clone();
+                let excepts = plugin.state().excepts_chans.lock().clone();
+                let excepts_peers = plugin.state().excepts_peers.lock().clone();
                 for except in &excepts {
                     pull_jobs.insert(except.to_string());
                     push_jobs.insert(except.to_string());
@@ -226,6 +229,7 @@ pub async fn sling(
                                 &job,
                                 &candidatelist,
                                 &pull_jobs,
+                                &excepts_peers,
                                 hops,
                             )?;
                         }
@@ -244,6 +248,7 @@ pub async fn sling(
                                 &job,
                                 &candidatelist,
                                 &push_jobs,
+                                &excepts_peers,
                                 hops,
                             )?;
                         }
@@ -642,6 +647,7 @@ async fn health_check(
     other_peer: PublicKey,
     job_states: Arc<Mutex<HashMap<String, JobState>>>,
     config: &Config,
+    tempbans: &HashMap<String, u64>,
 ) -> Option<bool> {
     let our_listpeers_channel = get_normal_channel_from_listpeers(peers, chan_id);
     if let Some(channel) = our_listpeers_channel {
@@ -691,6 +697,24 @@ async fn health_check(
                             job_states.clone(),
                             chan_id,
                             JobMessage::Disconnected,
+                            None,
+                            None,
+                        );
+                        time::sleep(Duration::from_secs(20)).await;
+                        Some(true)
+                    } else if match job.sat_direction {
+                        SatDirection::Pull => false,
+                        SatDirection::Push => true,
+                    } && tempbans.contains_key(&chan_id.to_string())
+                    {
+                        info!(
+                            "{}: First peer not ready. Taking a break...",
+                            chan_id.to_string()
+                        );
+                        channel_jobstate_update(
+                            job_states.clone(),
+                            chan_id,
+                            JobMessage::PeerNotReady,
                             None,
                             None,
                         );

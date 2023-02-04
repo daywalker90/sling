@@ -31,7 +31,8 @@ pub struct PluginState {
     pub alias_peer_map: Arc<Mutex<HashMap<PublicKey, String>>>,
     pub pull_jobs: Arc<Mutex<HashSet<String>>>,
     pub push_jobs: Arc<Mutex<HashSet<String>>>,
-    pub excepts: Arc<Mutex<Vec<ShortChannelId>>>,
+    pub excepts_chans: Arc<Mutex<Vec<ShortChannelId>>>,
+    pub excepts_peers: Arc<Mutex<Vec<PublicKey>>>,
     pub tempbans: Arc<Mutex<HashMap<String, u64>>>,
     pub job_state: Arc<Mutex<HashMap<String, JobState>>>,
 }
@@ -45,7 +46,8 @@ impl PluginState {
             alias_peer_map: Arc::new(Mutex::new(HashMap::new())),
             pull_jobs: Arc::new(Mutex::new(HashSet::new())),
             push_jobs: Arc::new(Mutex::new(HashSet::new())),
-            excepts: Arc::new(Mutex::new(Vec::new())),
+            excepts_chans: Arc::new(Mutex::new(Vec::new())),
+            excepts_peers: Arc::new(Mutex::new(Vec::new())),
             tempbans: Arc::new(Mutex::new(HashMap::new())),
             job_state: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -141,6 +143,7 @@ pub enum JobMessage {
     HTLCcapped,
     Disconnected,
     PeerNotFound,
+    PeerNotReady,
     ChanNotNormal,
     GraphEmpty,
     NoRoute,
@@ -160,6 +163,7 @@ impl Display for JobMessage {
             JobMessage::HTLCcapped => write!(f, "HTLCcapped"),
             JobMessage::Disconnected => write!(f, "Disconnected"),
             JobMessage::PeerNotFound => write!(f, "PeerNotFound"),
+            JobMessage::PeerNotReady => write!(f, "PeerNotReady"),
             JobMessage::ChanNotNormal => write!(f, "ChanNotNormal"),
             JobMessage::GraphEmpty => write!(f, "GraphEmpty"),
             JobMessage::NoRoute => write!(f, "NoRoutes"),
@@ -369,6 +373,7 @@ impl LnGraph {
         mypubkey: &PublicKey,
         node: &PublicKey,
         exclude: &HashSet<String>,
+        exclude_peers: &Vec<PublicKey>,
         amount: &u64,
         candidatelist: &Vec<ShortChannelId>,
     ) -> Vec<&DirectedChannel> {
@@ -389,6 +394,8 @@ impl LnGraph {
                             && Amount::msat(
                                 &i.channel.htlc_maximum_msat.unwrap_or(i.channel.amount_msat),
                             ) >= *amount
+                            && !exclude_peers.contains(&i.channel.source)
+                            && !exclude_peers.contains(&i.channel.destination)
                             && if i.channel.source == *mypubkey
                                 || i.channel.destination == *mypubkey
                             {
