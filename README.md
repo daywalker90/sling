@@ -8,6 +8,7 @@ A core lightning plugin to automatically rebalance multiple channels.
 * [Push sats out of a channel](#push-sats-out-of-a-channel)
 * [How to set options](#how-to-set-options)
 * [Options](#options)
+* [Feedback](#feedback)
 * [Thanks](#thanks)
 
 ## Installation
@@ -33,7 +34,7 @@ There are currently six commands:
 * ``sling-go`` start all jobs that are not already running
 * ``sling-stop`` gracefully stop one or all running jobs, returns immediately but jobs take up to 2mins to actually stop
 * ``sling-stats`` with no arguments this shows a status overview for all jobs. Provide a short channel id to get more detailed stats
-* ``sling-job`` adds a rebalancing job for a channel
+* ``sling-job`` adds a rebalancing job for a channel, you can only have one job per channel and if you add one for the same channel it gets stopped and updated inplace
 * ``sling-deletejob`` stops and removes one or all jobs. E.g.: ``sling-deletejob 704776x2087x3`` or for all ``sling-deletejob all``
 * ``sling-except`` add or remove short channel ids to completely avoid. E.g. ``sling-except add 704776x2087x3`` or ``sling-except remove 704776x2087x3``
 
@@ -42,7 +43,7 @@ To pull sats into a channel you can add a job like this:
 
 ``sling-job scid pull amount maxppm (outppm) (target) (maxhops) (candidatelist)``
 
-You can completely leave out optional arguments but you must not skip them, instead use ``None`` to not set them.
+:warning:You can completely leave out optional ``()`` arguments but you must not skip them, instead use ``None`` to not set them.
 
 * ``scid``: the channel to which the sats should be pulled e.g. ``704776x2087x3``
 * ``pull``: this is to make it clear to pull the sats into the channel instead of push
@@ -66,7 +67,7 @@ To push sats out of a channel you can add a job like this:
 
 ``sling-job scid push amount maxppm (outppm) (target) (maxhops) (candidatelist)``
 
-You can completely leave out optional arguments but you must not skip them, instead use ``None`` to not set them.
+:warning:You can completely leave out optional ``()`` arguments but you must not skip them, instead use ``None`` to not set them.
 
 * ``scid``: the channel to push sats out of e.g. ``704776x2087x3``
 * ``push``: this is to make it clear to push the sats into the channel instead of push
@@ -110,6 +111,9 @@ if it's value is too high. Default is ``5``s
 * ``sling-depleteuptopercent`` Up to what percent to pull or push sats from/to candidate channels as floating point between 0 and 1. Formula is min(``depleteuptopercent``*channel_capacity, ``depleteuptoamount``). Default is ``0.2``
 * ``sling-depleteuptoamount`` Up to what amount to pull or push sats from/to candidate channels. Formula is min(``depleteuptopercent``*channel_capacity, ``depleteuptoamount``). Default is ``2000000``sats
 * ``sling-max-htlc-count`` Max number of pending directional htlcs allowed in participating channels. Default is ``4``
+
+## Feedback
+You can report issues, feedback etc. here on github or join this telegram channel: [Telegram](https://t.me/+9UKAom1Jam9hYTY6)
 
 ## Thanks
 Thank you to [cdecker](https://github.com/cdecker) for helping me get into writing a plugin with cln-plugin, the people in https://t.me/lightningd and [giovannizotta](https://github.com/giovannizotta) of the original [circular](https://github.com/giovannizotta/circular) plugin.
