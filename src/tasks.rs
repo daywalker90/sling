@@ -14,7 +14,7 @@ use anyhow::Error;
 use cln_plugin::Plugin;
 use cln_rpc::primitives::Amount;
 
-use log::info;
+use log::{debug, info};
 
 use tokio::time::{self, Instant};
 
@@ -59,7 +59,7 @@ pub async fn refresh_listpeers(plugin: Plugin<PluginState>) -> Result<(), Error>
         {
             let now = Instant::now();
             *plugin.state().peers.lock() = list_peers(&rpc_path).await?.peers;
-            info!(
+            debug!(
                 "Peers refreshed in {}ms",
                 now.elapsed().as_millis().to_string()
             );
