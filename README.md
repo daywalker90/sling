@@ -43,7 +43,7 @@ To pull sats into a channel you can add a job like this:
 
 ``sling-job scid pull amount maxppm (outppm) (target) (maxhops) (candidatelist)``
 
-:warning:You can completely leave out optional ``()`` arguments but you must not skip them, instead use ``None`` to not set them.
+:warning:You can completely leave out optional (those in ``()``) arguments but you must not skip them, instead use ``None`` to not set them.
 
 * ``scid``: the channel to which the sats should be pulled e.g. ``704776x2087x3``
 * ``pull``: this is to make it clear to pull the sats into the channel instead of push
@@ -67,7 +67,7 @@ To push sats out of a channel you can add a job like this:
 
 ``sling-job scid push amount maxppm (outppm) (target) (maxhops) (candidatelist)``
 
-:warning:You can completely leave out optional ``()`` arguments but you must not skip them, instead use ``None`` to not set them.
+:warning:You can completely leave out optional (those in ``()``) arguments but you must not skip them, instead use ``None`` to not set them.
 
 * ``scid``: the channel to push sats out of e.g. ``704776x2087x3``
 * ``push``: this is to make it clear to push the sats into the channel instead of push
