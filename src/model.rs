@@ -323,13 +323,10 @@ impl LnGraph {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
+        let mut count = 0;
         for (_node, channels) in self.graph.iter_mut() {
             for channel in channels {
                 if channel.timestamp <= now - interval * 60 {
-                    debug!(
-                        "{}: resetting liquidity",
-                        channel.channel.short_channel_id.to_string()
-                    );
                     channel.liquidity = Amount::msat(
                         &channel
                             .channel
@@ -337,9 +334,11 @@ impl LnGraph {
                             .unwrap_or(channel.channel.amount_msat),
                     ) / 2;
                     channel.timestamp = now;
+                    count += 1;
                 }
             }
         }
+        debug!("Reset liquidity belief on {} channels!", count);
     }
     pub fn get_channel(
         &self,
