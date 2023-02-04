@@ -314,11 +314,11 @@ pub async fn slingexcept(
     let peers = plugin.state().peers.lock().clone();
     match args {
         serde_json::Value::Array(a) => {
-            if a.len() != 2 {
+            if a.len() > 2 || a.len() == 0 {
                 return Err(anyhow!(
-                    "Please provide exactly two arguments: add/remove and a short_channel_id"
+                    "Please either provide `add`/`remove` and a short_channel_id or just `list`"
                 ));
-            } else {
+            } else if a.len() == 2 {
                 match a.get(0).unwrap() {
                     serde_json::Value::String(i) => {
                         let scid;
@@ -338,7 +338,6 @@ pub async fn slingexcept(
                         match i {
                             opt if opt.eq("add") => {
                                 if contains {
-                                    // excepts.retain(|&x| x.to_string() != scid.to_string());
                                     return Err(anyhow!(
                                         "{} is already in excepts",
                                         scid.to_string()
@@ -379,13 +378,24 @@ pub async fn slingexcept(
                                     ));
                                 }
                             }
-                            _ => return Err(anyhow!("unknown commmand, add or remove only")),
+                            _ => return Err(anyhow!("Unknown commmand. Please either provide `add`/`remove` and a short_channel_id or just `list`")),
                         }
                     }
-                    _ => return Err(anyhow!("invalid command, add or remove only")),
+                    _ => return Err(anyhow!("Invalid command. Please either provide `add`/`remove` and a short_channel_id or just `list`")),
                 }
                 write_excepts(plugin.clone()).await?;
                 Ok(json!({ "result": "success" }))
+            } else {
+                match a.get(0).unwrap() {
+                    serde_json::Value::String(i) => {
+                        let excepts = plugin.state().excepts.lock();
+                        match i {
+                            opt if opt.eq("list") => Ok(json!(excepts.clone())),
+                            _ => Err(anyhow!("unknown commmand, did you misspell `list` or forgot the scid?")),
+                        }
+                    }
+                    _ => Err(anyhow!("Invalid command. Please either provide `add`/`remove` and a short_channel_id or just `list`")),
+                }
             }
         }
         _ => Err(anyhow!("invalid arguments")),
