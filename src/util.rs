@@ -385,7 +385,9 @@ pub async fn slingexceptchan(
                     }
                     _ => return Err(anyhow!("Invalid command. Please either provide `add`/`remove` and a short_channel_id or just `list`")),
                 }
-                write_excepts_chans(plugin.clone()).await?;
+                let excepts = plugin.state().excepts_chans.lock().clone();
+                let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
+                write_excepts(excepts, EXCEPTS_CHANS_FILE_NAME, &sling_dir).await?;
                 Ok(json!({ "result": "success" }))
             } else {
                 match a.get(0).unwrap() {
@@ -471,7 +473,9 @@ pub async fn slingexceptpeer(
                     }
                     _ => return Err(anyhow!("Invalid command. Please either provide `add`/`remove` and a node_id or just `list`")),
                 }
-                write_excepts_peers(plugin.clone()).await?;
+                let excepts = plugin.state().excepts_peers.lock().clone();
+                let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
+                write_excepts::<PublicKey>(excepts, EXCEPTS_PEERS_FILE_NAME, &sling_dir).await?;
                 Ok(json!({ "result": "success" }))
             } else {
                 match a.get(0).unwrap() {
@@ -490,16 +494,18 @@ pub async fn slingexceptpeer(
     }
 }
 
-async fn write_excepts_chans(plugin: Plugin<PluginState>) -> Result<(), Error> {
-    let excepts = plugin.state().excepts_chans.lock().clone();
-    let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
+async fn write_excepts<T: ToString>(
+    excepts: Vec<T>,
+    file: &str,
+    sling_dir: &PathBuf,
+) -> Result<(), Error> {
     let excepts_tostring = excepts
         .into_iter()
         .map(|x| x.to_string())
         .collect::<Vec<_>>();
 
     fs::write(
-        sling_dir.join(EXCEPTS_CHANS_FILE_NAME),
+        sling_dir.join(file),
         serde_json::to_string(&excepts_tostring)?,
     )
     .await?;
@@ -507,29 +513,15 @@ async fn write_excepts_chans(plugin: Plugin<PluginState>) -> Result<(), Error> {
     Ok(())
 }
 
-async fn write_excepts_peers(plugin: Plugin<PluginState>) -> Result<(), Error> {
-    let excepts = plugin.state().excepts_peers.lock().clone();
-    let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
-    let excepts_tostring = excepts
-        .into_iter()
-        .map(|x| x.to_string())
-        .collect::<Vec<_>>();
-
-    fs::write(
-        sling_dir.join(EXCEPTS_CHANS_FILE_NAME),
-        serde_json::to_string(&excepts_tostring)?,
-    )
-    .await?;
-
-    Ok(())
-}
-
-pub async fn read_excepts_chans(plugin: Plugin<PluginState>) -> Result<(), Error> {
-    let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
-    let exceptsfile = sling_dir.join(EXCEPTS_CHANS_FILE_NAME);
+pub async fn read_excepts<T: FromStr>(
+    excepts_arc: Arc<Mutex<Vec<T>>>,
+    file: &str,
+    sling_dir: &PathBuf,
+) -> Result<(), Error> {
+    let exceptsfile = sling_dir.join(file);
     let exceptsfilecontent = fs::read_to_string(exceptsfile.clone()).await;
     let excepts_tostring: Vec<String>;
-    let mut excepts: Vec<ShortChannelId> = Vec::new();
+    let mut excepts: Vec<T> = Vec::new();
 
     create_sling_dir(&sling_dir).await?;
     match exceptsfilecontent {
@@ -545,42 +537,15 @@ pub async fn read_excepts_chans(plugin: Plugin<PluginState>) -> Result<(), Error
     };
 
     for except in excepts_tostring {
-        match ShortChannelId::from_str(&except) {
+        match T::from_str(&except) {
             Ok(id) => excepts.push(id),
-            Err(_e) => warn!("excepts file contains invalid short_channel_id: {}", except),
+            Err(_e) => warn!(
+                "excepts file contains invalid short_channel_id/node_id: {}",
+                except
+            ),
         }
     }
-    *plugin.state().excepts_chans.lock() = excepts;
-    Ok(())
-}
-
-pub async fn read_excepts_peers(plugin: Plugin<PluginState>) -> Result<(), Error> {
-    let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
-    let exceptsfile = sling_dir.join(EXCEPTS_PEERS_FILE_NAME);
-    let exceptsfilecontent = fs::read_to_string(exceptsfile.clone()).await;
-    let excepts_tostring: Vec<String>;
-    let mut excepts: Vec<PublicKey> = Vec::new();
-
-    create_sling_dir(&sling_dir).await?;
-    match exceptsfilecontent {
-        Ok(file) => excepts_tostring = serde_json::from_str(&file).unwrap_or(Vec::new()),
-        Err(e) => {
-            warn!(
-                "Could not open {}: {}. Maybe this is the first time using sling? Creating new file.",
-                exceptsfile.to_str().unwrap(), e.to_string()
-            );
-            File::create(exceptsfile.clone()).await?;
-            excepts_tostring = Vec::new();
-        }
-    };
-
-    for except in excepts_tostring {
-        match PublicKey::from_str(&except) {
-            Ok(id) => excepts.push(id),
-            Err(_e) => warn!("excepts_peers file contains invalid publickey: {}", except),
-        }
-    }
-    *plugin.state().excepts_peers.lock() = excepts;
+    *excepts_arc.lock() = excepts;
     Ok(())
 }
 

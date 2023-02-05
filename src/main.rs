@@ -1,7 +1,11 @@
 extern crate serde_json;
 
+use std::path::Path;
+
 use anyhow::anyhow;
 use cln_plugin::{options, Builder};
+use cln_rpc::primitives::PublicKey;
+use cln_rpc::primitives::ShortChannelId;
 use log::{debug, info, warn};
 use sling::{
     check_lightning_dir,
@@ -13,10 +17,10 @@ use sling::{
     stats::slingstats,
     tasks,
     util::{
-        make_rpc_path, read_excepts_chans, read_excepts_peers, refresh_joblists, slingdeletejob,
-        slingexceptchan, slingexceptpeer, slingjob,
+        make_rpc_path, read_excepts, refresh_joblists, slingdeletejob, slingexceptchan,
+        slingexceptpeer, slingjob,
     },
-    PLUGIN_NAME,
+    EXCEPTS_CHANS_FILE_NAME, EXCEPTS_PEERS_FILE_NAME, PLUGIN_NAME,
 };
 use tokio::{self};
 #[cfg(all(not(windows), not(target_env = "musl")))]
@@ -174,10 +178,19 @@ async fn main() -> Result<(), anyhow::Error> {
                 Err(e) => warn!("Error in refresh_listpeers thread: {:?}", e),
             };
         });
-        let except_clone = plugin.clone();
-        read_excepts_chans(except_clone).await?;
-        let except_peers_clone = plugin.clone();
-        read_excepts_peers(except_peers_clone).await?;
+        let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
+        read_excepts::<ShortChannelId>(
+            plugin.state().excepts_chans.clone(),
+            EXCEPTS_CHANS_FILE_NAME,
+            &sling_dir,
+        )
+        .await?;
+        read_excepts::<PublicKey>(
+            plugin.state().excepts_peers.clone(),
+            EXCEPTS_PEERS_FILE_NAME,
+            &sling_dir,
+        )
+        .await?;
         let joblists_clone = plugin.clone();
         refresh_joblists(joblists_clone).await?;
         let channelsclone = plugin.clone();
