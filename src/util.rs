@@ -46,7 +46,7 @@ pub async fn slingjob(
         "maxppm",
         "outppm",
         "target",
-        "naxhops",
+        "maxhops",
         "candidates",
         "depleteuptopercent",
         "depleteuptoamount",
