@@ -14,6 +14,7 @@ use cln_rpc::{
 use log::debug;
 use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use tabled::Tabled;
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 
@@ -191,6 +192,12 @@ impl SatDirection {
             _ => Err(anyhow!("could not parse flow direction from `{}`", s)),
         }
     }
+    pub fn to_str(&self) -> &str {
+        match self {
+            SatDirection::Pull => "pull",
+            SatDirection::Push => "push",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -216,12 +223,18 @@ impl PartialEq for DijkstraNode {
 pub struct Job {
     pub sat_direction: SatDirection,
     pub amount: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub outppm: Option<u64>,
     pub maxppm: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub candidatelist: Option<Vec<ShortChannelId>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub maxhops: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub depleteuptopercent: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub depleteuptoamount: Option<u64>,
 }
 
@@ -266,6 +279,43 @@ impl Job {
             }
         }
         target_cap
+    }
+    pub fn to_json(&self) -> serde_json::Value {
+        let mut result = HashMap::new();
+        result.insert("direction", String::from(self.sat_direction.to_str()));
+        result.insert("amount", (self.amount / 1_000).to_string());
+        result.insert("maxppm", self.maxppm.to_string());
+        match self.outppm {
+            Some(o) => result.insert("outppm", o.to_string()),
+            None => None,
+        };
+        match self.target {
+            Some(t) => result.insert("target", t.to_string()),
+            None => None,
+        };
+        match self.maxhops {
+            Some(m) => result.insert("maxhops", m.to_string()),
+            None => None,
+        };
+        match &self.candidatelist {
+            Some(c) => result.insert(
+                "candidates",
+                c.iter()
+                    .map(|y| y.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", "),
+            ),
+            None => None,
+        };
+        match self.depleteuptopercent {
+            Some(dp) => result.insert("depleteuptopercent", dp.to_string()),
+            None => None,
+        };
+        match self.depleteuptoamount {
+            Some(da) => result.insert("depleteuptoamount", (da / 1_000).to_string()),
+            None => None,
+        };
+        json!(result)
     }
 }
 

@@ -207,6 +207,44 @@ pub async fn slingjob(
     }
 }
 
+pub async fn slingjobsettings(
+    p: Plugin<PluginState>,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, Error> {
+    let sling_dir = Path::new(&p.configuration().lightning_dir).join(PLUGIN_NAME);
+    let peers = p.state().peers.lock().clone();
+    let jobs = read_jobs(&sling_dir, &peers).await?;
+    let mut json_jobs: Vec<serde_json::Value> = vec![];
+    match args {
+        serde_json::Value::Array(a) => {
+            if a.len() > 1 {
+                return Err(anyhow!(
+                    "Please provide exactly one short_channel_id or nothing for all"
+                ));
+            } else if a.len() == 0 {
+                for (id, job) in jobs {
+                    json_jobs.push(json!({id:job.to_json()}));
+                }
+            } else {
+                let scid = a
+                    .first()
+                    .unwrap()
+                    .as_str()
+                    .ok_or(anyhow!("invalid input, not a string"))?;
+                let job = jobs.get(scid).ok_or(anyhow!("channel not found"))?;
+                json_jobs.push(json!({scid:job.to_json()}));
+            }
+        }
+        _ => {
+            return Err(anyhow!(
+                "Invalid: Please provide exactly one short_channel_id or nothing for all"
+            ))
+        }
+    }
+
+    Ok(json!(json_jobs))
+}
+
 pub async fn refresh_joblists(p: Plugin<PluginState>) -> Result<(), Error> {
     let now = Instant::now();
     let peers = list_peers(&make_rpc_path(&p.clone())).await?.peers;

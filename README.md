@@ -36,6 +36,7 @@ There are currently six commands:
 * ``sling-stop`` gracefully stop one or all running jobs, returns immediately but jobs take up to 2mins to actually stop
 * ``sling-stats`` with no arguments this shows a status overview for all jobs. Provide a short channel id to get more detailed stats
 * ``sling-job`` adds a rebalancing job for a channel, you can only have one job per channel and if you add one for the same channel it gets stopped and updated inplace
+* ``sling-jobsettings`` provide a channel id (or nothing for all channels) to list the currently saved settings for the job(s)
 * ``sling-deletejob`` stops and removes one or all jobs. E.g.: ``sling-deletejob 704776x2087x3`` or for all ``sling-deletejob all``. Does *not* remove raw stats from disk.
 * ``sling-except-chan`` add or remove short channel ids to completely avoid. E.g. ``sling-except-chan add 704776x2087x3`` or ``sling-except-chan remove 704776x2087x3`` or list all current exceptions: ``sling-except-chan list``.
 * ``sling-except-peer`` same as ``sling-except-chan`` but with node public keys

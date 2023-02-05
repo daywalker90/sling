@@ -7,6 +7,7 @@ use cln_plugin::{options, Builder};
 use cln_rpc::primitives::PublicKey;
 use cln_rpc::primitives::ShortChannelId;
 use log::{debug, info, warn};
+use sling::util::slingjobsettings;
 use sling::{
     check_lightning_dir,
     config::*,
@@ -112,8 +113,13 @@ async fn main() -> Result<(), anyhow::Error> {
             slingjob,
         )
         .rpcmethod(
+            &(PLUGIN_NAME.to_string() + "-jobsettings"),
+            "show job settings",
+            slingjobsettings,
+        )
+        .rpcmethod(
             &(PLUGIN_NAME.to_string() + "-deletejob"),
-            "add sling job",
+            "delete sling job",
             slingdeletejob,
         )
         .rpcmethod(
