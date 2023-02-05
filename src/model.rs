@@ -221,6 +221,8 @@ pub struct Job {
     pub candidatelist: Option<Vec<ShortChannelId>>,
     pub target: Option<f64>,
     pub maxhops: Option<u64>,
+    pub depleteuptopercent: Option<f64>,
+    pub depleteuptoamount: Option<u64>,
 }
 
 impl Job {

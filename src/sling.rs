@@ -764,6 +764,15 @@ fn build_candidatelist(
 ) -> Vec<ShortChannelId> {
     let mut candidatelist = Vec::<ShortChannelId>::new();
 
+    let depleteuptopercent = match job.depleteuptopercent {
+        Some(dp) => dp,
+        None => config.depleteuptopercent.1,
+    };
+    let depleteuptoamount = match job.depleteuptoamount {
+        Some(dp) => dp,
+        None => config.depleteuptoamount.1,
+    };
+
     for peer in peers {
         for channel in &peer.channels {
             if let Some(scid) = channel.short_channel_id {
@@ -790,8 +799,8 @@ fn build_candidatelist(
                                 > max(
                                     job.amount + 10_000_000,
                                     min(
-                                        (config.depleteuptopercent.1 * total_msat as f64) as u64,
-                                        config.depleteuptoamount.1,
+                                        (depleteuptopercent * total_msat as f64) as u64,
+                                        depleteuptoamount,
                                     ),
                                 )
                                 && match job.outppm {
@@ -811,8 +820,8 @@ fn build_candidatelist(
                                 > max(
                                     job.amount + 10_000_000,
                                     min(
-                                        (config.depleteuptopercent.1 * total_msat as f64) as u64,
-                                        config.depleteuptoamount.1,
+                                        (depleteuptopercent * total_msat as f64) as u64,
+                                        depleteuptoamount,
                                     ),
                                 )
                                 && match job.outppm {
