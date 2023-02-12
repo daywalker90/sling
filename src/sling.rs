@@ -58,6 +58,9 @@ pub async fn sling(
             .unwrap()
             .should_stop();
         if should_stop {
+            if !my_invoice.is_none() {
+                delinvoice(&rpc_path, label.unwrap(), DelinvoiceStatus::UNPAID).await?;
+            }
             info!("{}: Stopped job!", chan_id.to_string());
             channel_jobstate_update(
                 plugin.state().job_state.clone(),
@@ -90,6 +93,9 @@ pub async fn sling(
                 if r {
                     continue 'outer;
                 } else {
+                    if !my_invoice.is_none() {
+                        delinvoice(&rpc_path, label.unwrap(), DelinvoiceStatus::UNPAID).await?;
+                    }
                     break 'outer;
                 }
             }
@@ -457,6 +463,9 @@ pub async fn sling(
                         chan_id.to_string(),
                         e.to_string()
                     );
+                    if !my_invoice.is_none() {
+                        delinvoice(&rpc_path, label.unwrap(), DelinvoiceStatus::UNPAID).await?;
+                    }
                     break 'outer;
                 }
             }
@@ -564,6 +573,9 @@ pub async fn sling(
                                         });
                                 }
                             }
+                            delinvoice(&rpc_path, label.unwrap(), DelinvoiceStatus::UNPAID).await?;
+                            my_invoice = None;
+                            label = None;
                             FailureReb {
                                 amount_msat: job.amount,
                                 failure_reason: "WAITSENDPAY_TIMEOUT".to_string(),
@@ -671,6 +683,14 @@ pub async fn sling(
                                             now.elapsed().as_secs().to_string(),
                                             e
                                         );
+                                        if !my_invoice.is_none() {
+                                            delinvoice(
+                                                &rpc_path,
+                                                label.unwrap(),
+                                                DelinvoiceStatus::UNPAID,
+                                            )
+                                            .await?;
+                                        }
                                         break 'outer;
                                     }
 
@@ -740,6 +760,14 @@ pub async fn sling(
                                         now.elapsed().as_secs().to_string(),
                                         e
                                     );
+                                    if !my_invoice.is_none() {
+                                        delinvoice(
+                                            &rpc_path,
+                                            label.unwrap(),
+                                            DelinvoiceStatus::UNPAID,
+                                        )
+                                        .await?;
+                                    }
                                     break 'outer;
                                 }
                             };
@@ -754,7 +782,10 @@ pub async fn sling(
                             )
                             .await
                             {
-                                Ok(_) => break,
+                                Ok(_) => {
+                                    debug!("{}: failed payment deleted.", chan_id.to_string());
+                                    break;
+                                }
                                 Err(_) => {
                                     time::sleep(Duration::from_secs(1)).await;
                                     continue;
