@@ -312,6 +312,13 @@ pub async fn slingdeletejob(
     Ok(json!({ "result": "success" }))
 }
 
+pub async fn slingversion(
+    _p: Plugin<PluginState>,
+    _args: serde_json::Value,
+) -> Result<serde_json::Value, Error> {
+    Ok(json!({ "version": env!("CARGO_PKG_VERSION") }))
+}
+
 pub async fn read_jobs(
     sling_dir: &PathBuf,
     peers: &Vec<ListpeersPeers>,

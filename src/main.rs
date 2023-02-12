@@ -8,6 +8,7 @@ use cln_rpc::primitives::PublicKey;
 use cln_rpc::primitives::ShortChannelId;
 use log::{debug, info, warn};
 use sling::util::slingjobsettings;
+use sling::util::slingversion;
 use sling::{
     check_lightning_dir,
     config::*,
@@ -145,6 +146,11 @@ async fn main() -> Result<(), anyhow::Error> {
             &(PLUGIN_NAME.to_string() + "-except-peer"),
             "peers to avoid for all jobs",
             slingexceptpeer,
+        )
+        .rpcmethod(
+            &(PLUGIN_NAME.to_string() + "-version"),
+            "print version",
+            slingversion,
         )
         .dynamic()
         .configure()
