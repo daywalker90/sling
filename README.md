@@ -120,7 +120,7 @@ if it's value is too high. Default is ``1``s
 * ``sling-reset-liquidity-interval`` After how many minutes to reset liquidity knowledge. Default is ``360``m
 * ``sling-depleteuptopercent`` Up to what percent to pull or push sats from/to candidate channels as floating point between 0 and 1. Also see [Depleteformula](#depleteformula). Default is ``0.2``
 * ``sling-depleteuptoamount`` Up to what amount to pull or push sats from/to candidate channels. Also see [Depleteformula](#depleteformula). Default is ``2000000``sats
-* ``sling-max-htlc-count`` Max number of pending directional htlcs allowed in participating channels. Default is ``4``
+* ``sling-max-htlc-count`` Max number of pending directional htlcs allowed in participating channels. Default is ``3``
 
 ## Feedback
 You can report issues, feedback etc. here on github or join this telegram channel: [Telegram](https://t.me/+9UKAom1Jam9hYTY6)

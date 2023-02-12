@@ -85,7 +85,7 @@ impl Config {
                 PLUGIN_NAME.to_string() + "-depleteuptoamount",
                 2_000_000_000,
             ),
-            max_htlc_count: (PLUGIN_NAME.to_string() + "-max-htlc-count", 4),
+            max_htlc_count: (PLUGIN_NAME.to_string() + "-max-htlc-count", 3),
             lightning_cli: (
                 PLUGIN_NAME.to_string() + "-lightning-cli",
                 "/usr/local/bin/lightning-cli".to_string(),
