@@ -192,8 +192,38 @@ pub async fn sling(
                 }
             }
             None => {
-                let slingchan_inc = graph.get_channel(other_peer, chan_id)?;
-                let slingchan_out = graph.get_channel(mypubkey, chan_id)?;
+                let slingchan_inc;
+                match graph.get_channel(other_peer, chan_id) {
+                    Ok(in_chan) => slingchan_inc = in_chan,
+                    Err(_) => {
+                        warn!("{}: channel not found in graph!", chan_id.to_string());
+                        channel_jobstate_update(
+                            plugin.state().job_state.clone(),
+                            chan_id,
+                            JobMessage::ChanNotInGraph,
+                            None,
+                            None,
+                        );
+                        time::sleep(Duration::from_secs(20)).await;
+                        continue 'outer;
+                    }
+                };
+                let slingchan_out;
+                match graph.get_channel(mypubkey, chan_id) {
+                    Ok(out_chan) => slingchan_out = out_chan,
+                    Err(_) => {
+                        warn!("{}: channel not found in graph!", chan_id.to_string());
+                        channel_jobstate_update(
+                            plugin.state().job_state.clone(),
+                            chan_id,
+                            JobMessage::ChanNotInGraph,
+                            None,
+                            None,
+                        );
+                        time::sleep(Duration::from_secs(20)).await;
+                        continue 'outer;
+                    }
+                };
 
                 let maxhops = match job.maxhops {
                     Some(h) => h + 1,
