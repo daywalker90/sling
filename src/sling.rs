@@ -28,7 +28,7 @@ use crate::model::{
 };
 use crate::util::{
     channel_jobstate_update, feeppm_effective, feeppm_effective_from_amts, get_in_htlc_count,
-    get_normal_channel_from_listpeers, get_out_htlc_count, get_peer_id_from_chan_id,
+    get_normal_channel_from_listpeers, get_out_htlc_count, get_peer_id_from_chan_id, my_sleep,
 };
 use crate::{delinvoice, delpay, invoice, listinvoices, slingsend, waitsendpay, PLUGIN_NAME};
 
@@ -113,7 +113,7 @@ pub async fn sling(
                 None,
                 None,
             );
-            time::sleep(Duration::from_secs(10)).await;
+            my_sleep(600, plugin.state().job_state.clone(), &chan_id).await;
             continue 'outer;
         }
 
@@ -176,7 +176,7 @@ pub async fn sling(
                 None,
                 None,
             );
-            time::sleep(Duration::from_secs(20)).await;
+            my_sleep(600, plugin.state().job_state.clone(), &chan_id).await;
             continue 'outer;
         }
 
@@ -210,7 +210,7 @@ pub async fn sling(
                             None,
                             None,
                         );
-                        time::sleep(Duration::from_secs(20)).await;
+                        my_sleep(600, plugin.state().job_state.clone(), &chan_id).await;
                         continue 'outer;
                     }
                 };
@@ -226,7 +226,7 @@ pub async fn sling(
                             None,
                             None,
                         );
-                        time::sleep(Duration::from_secs(20)).await;
+                        my_sleep(600, plugin.state().job_state.clone(), &chan_id).await;
                         continue 'outer;
                     }
                 };
@@ -311,7 +311,7 @@ pub async fn sling(
                 None,
             );
             success_route = None;
-            time::sleep(Duration::from_secs(20)).await;
+            my_sleep(600, plugin.state().job_state.clone(), &chan_id).await;
             continue 'outer;
         }
 
@@ -331,7 +331,7 @@ pub async fn sling(
                 None,
                 None,
             );
-            time::sleep(Duration::from_secs(20)).await;
+            my_sleep(600, plugin.state().job_state.clone(), &chan_id).await;
             success_route = None;
             continue 'outer;
         }
@@ -702,7 +702,8 @@ pub async fn sling(
                                             chan_id.to_string(),
                                             data.failcodename
                                         );
-                                        time::sleep(Duration::from_secs(20)).await;
+                                        my_sleep(60, plugin.state().job_state.clone(), &chan_id)
+                                            .await;
                                     } else if data.erring_channel.to_string()
                                         == route.first().unwrap().channel.to_string()
                                     {
@@ -711,7 +712,8 @@ pub async fn sling(
                                             chan_id.to_string(),
                                             e.message.clone()
                                         );
-                                        time::sleep(Duration::from_secs(5)).await;
+                                        my_sleep(5, plugin.state().job_state.clone(), &chan_id)
+                                            .await;
                                     } else {
                                         debug!(
                                             "{}: Adjusting liquidity for {}.",
@@ -830,7 +832,7 @@ async fn health_check(
                 None,
                 None,
             );
-            time::sleep(Duration::from_secs(20)).await;
+            my_sleep(600, job_states.clone(), &chan_id).await;
             Some(true)
         } else if match job.sat_direction {
             SatDirection::Pull => get_in_htlc_count(&channel) > config.max_htlc_count.1,
@@ -848,7 +850,7 @@ async fn health_check(
                 None,
                 None,
             );
-            time::sleep(Duration::from_secs(20)).await;
+            my_sleep(10, job_states.clone(), &chan_id).await;
             Some(true)
         } else {
             match peers.iter().find(|x| x.id == other_peer) {
@@ -862,7 +864,7 @@ async fn health_check(
                             None,
                             None,
                         );
-                        time::sleep(Duration::from_secs(20)).await;
+                        my_sleep(60, job_states.clone(), &chan_id).await;
                         Some(true)
                     } else if match job.sat_direction {
                         SatDirection::Pull => false,
@@ -880,7 +882,7 @@ async fn health_check(
                             None,
                             None,
                         );
-                        time::sleep(Duration::from_secs(20)).await;
+                        my_sleep(20, job_states.clone(), &chan_id).await;
                         Some(true)
                     } else {
                         None

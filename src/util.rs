@@ -10,6 +10,7 @@ use std::io;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 use std::{collections::HashMap, path::Path};
 
 use crate::jobs::slingstop;
@@ -32,7 +33,7 @@ use rand::thread_rng;
 use serde_json::json;
 use tokio::fs::{self, File};
 
-use tokio::time::Instant;
+use tokio::time::{self, Instant};
 
 pub async fn slingjob(
     p: Plugin<PluginState>,
@@ -867,4 +868,19 @@ pub fn get_all_normal_channels_from_listpeers(
         }
     }
     scid_peer_map
+}
+
+pub async fn my_sleep(
+    seconds: u64,
+    job_state: Arc<Mutex<HashMap<String, JobState>>>,
+    chan_id: &ShortChannelId,
+) {
+    let timer = Instant::now();
+    let chan_id = chan_id.to_string();
+    while timer.elapsed() < Duration::from_secs(seconds) {
+        if job_state.lock().get(&chan_id).unwrap().should_stop() {
+            break;
+        }
+        time::sleep(Duration::from_secs(2)).await;
+    }
 }
