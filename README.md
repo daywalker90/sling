@@ -31,7 +31,7 @@ After that the binary will be here: ``target/release/sling``
 
 ## Command overview
 
-There are currently six commands:
+* ``sling-version`` print the version of the plugin
 * ``sling-go`` start all jobs that are not already running
 * ``sling-stop`` gracefully stop one or all running jobs, returns immediately but jobs take up to 2mins to actually stop
 * ``sling-stats`` with no arguments this shows a status overview for all jobs. Provide a short channel id to get more detailed stats
