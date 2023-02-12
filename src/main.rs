@@ -12,7 +12,6 @@ use sling::{
     check_lightning_dir,
     config::*,
     get_info,
-    htlc::htlc_handler,
     jobs::{slinggo, slingstop},
     model::{Config, PluginState},
     stats::slingstats,
@@ -147,7 +146,6 @@ async fn main() -> Result<(), anyhow::Error> {
             "peers to avoid for all jobs",
             slingexceptpeer,
         )
-        .hook("htlc_accepted", htlc_handler)
         .dynamic()
         .configure()
         .await?

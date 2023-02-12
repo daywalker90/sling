@@ -10,6 +10,8 @@ use parking_lot::Mutex;
 use std::cmp::{max, min};
 use std::path::Path;
 use std::sync::Arc;
+
+use cln_rpc::model::requests::DelinvoiceStatus;
 use std::time::SystemTime;
 use std::{
     collections::HashMap,
@@ -27,9 +29,8 @@ use crate::model::{
 use crate::util::{
     channel_jobstate_update, feeppm_effective, feeppm_effective_from_amts, get_in_htlc_count,
     get_normal_channel_from_listpeers, get_out_htlc_count, get_peer_id_from_chan_id,
-    get_preimage_paymend_hash_pair,
 };
-use crate::{delpay, slingsend, waitsendpay, PLUGIN_NAME};
+use crate::{delinvoice, delpay, invoice, listinvoices, slingsend, waitsendpay, PLUGIN_NAME};
 
 pub async fn sling(
     rpc_path: &PathBuf,
@@ -45,6 +46,8 @@ pub async fn sling(
     networkdir.pop();
 
     let mut success_route: Option<Vec<SendpayRoute>> = None;
+    let mut label = None;
+    let mut my_invoice: Option<InvoiceResponse> = None;
     'outer: loop {
         let now = Instant::now();
         let should_stop = plugin
@@ -316,22 +319,68 @@ pub async fn sling(
             );
         }
 
-        let (preimage, payment_hash) = get_preimage_paymend_hash_pair();
-        debug!(
-            "{}: Made preimage and payment_hash: {} Total: {}ms",
-            chan_id.to_string(),
-            payment_hash.to_string(),
-            now.elapsed().as_millis().to_string()
-        );
+        // let (preimage, payment_hash) = get_preimage_paymend_hash_pair();
+        // debug!(
+        //     "{}: Made preimage and payment_hash: {} Total: {}ms",
+        //     chan_id.to_string(),
+        //     payment_hash.to_string(),
+        //     now.elapsed().as_millis().to_string()
+        // );
+        if let Some(ref x) = my_invoice {
+            if x.expires_at
+                <= SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs()
+                    + 3_600
+            {
+                delinvoice(&rpc_path, label.unwrap(), DelinvoiceStatus::UNPAID).await?;
+                label = None;
+                my_invoice = None;
+            }
+        };
+
+        if label.is_none() {
+            label = Some(
+                "sling_".to_string()
+                    + &chan_id.to_string()
+                    + "_"
+                    + &SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis()
+                        .to_string(),
+            )
+        };
+
+        if my_invoice.is_none() {
+            my_invoice = Some(
+                invoice(
+                    &rpc_path,
+                    Amount::from_msat(job.amount),
+                    "".to_string(),
+                    label.as_ref().unwrap().clone(),
+                )
+                .await?,
+            )
+        }
 
         let send_response;
-        match slingsend(&rpc_path, route.clone(), payment_hash, None, None).await {
+        match slingsend(
+            &rpc_path,
+            route.clone(),
+            my_invoice.as_ref().unwrap().payment_hash,
+            Some(my_invoice.as_ref().unwrap().payment_secret),
+            None,
+        )
+        .await
+        {
             Ok(resp) => {
-                plugin
-                    .state()
-                    .pays
-                    .write()
-                    .insert(payment_hash.to_string(), preimage);
+                // plugin
+                //     .state()
+                //     .pays
+                //     .write()
+                //     .insert(payment_hash.to_string(), preimage);
                 send_response = resp;
             }
             Err(e) => {
@@ -405,6 +454,7 @@ pub async fn sling(
                     Amount::msat(&o.amount_msat.unwrap()) / 1_000,
                     Amount::msat(&o.amount_sent_msat) - Amount::msat(&o.amount_msat.unwrap()),
                 );
+
                 delpay(
                     &networkdir,
                     &config.lightning_cli.1,
@@ -412,6 +462,8 @@ pub async fn sling(
                     "complete",
                 )
                 .await?;
+                delinvoice(&rpc_path, label.unwrap(), DelinvoiceStatus::PAID).await?;
+
                 SuccessReb {
                     amount_msat: Amount::msat(&o.amount_msat.unwrap()),
                     fee_ppm: feeppm_effective_from_amts(
@@ -427,15 +479,17 @@ pub async fn sling(
                 }
                 .write_to_file(chan_id, &sling_dir)
                 .await?;
+                label = None;
+                my_invoice = None;
                 success_route = Some(route);
             }
             Err(e) => {
                 success_route = None;
-                plugin
-                    .state()
-                    .pays
-                    .write()
-                    .remove(&send_response.payment_hash.to_string());
+                // plugin
+                //     .state()
+                //     .pays
+                //     .write()
+                //     .remove(&send_response.payment_hash.to_string());
                 let mut special_stop = false;
                 match e.code {
                     Some(c) => {
@@ -512,13 +566,50 @@ pub async fn sling(
                                             .eq("WIRE_INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS")
                                             && data.erring_node == mypubkey =>
                                         {
-                                            warn!(
-                                                "{}: PAYMENT DETAILS ERROR:{:?} {:?}",
-                                                chan_id.to_string(),
-                                                e,
-                                                route
-                                            );
-                                            special_stop = true;
+                                            match listinvoices(
+                                                &rpc_path,
+                                                None,
+                                                Some(data.payment_hash.to_string()),
+                                            )
+                                            .await?
+                                            .invoices
+                                            .first()
+                                            .unwrap()
+                                            .status
+                                            {
+                                                ListinvoicesInvoicesStatus::PAID => {
+                                                    info!("{}: Invoice got paid by previously timed out payment!", chan_id.to_string());
+                                                    match delpay(
+                                                        &networkdir,
+                                                        &config.lightning_cli.1,
+                                                        send_response.payment_hash,
+                                                        "complete",
+                                                    )
+                                                    .await{
+                                                        Ok(_) => debug!("{}: deleted previously timed out payment", chan_id.to_string()),
+                                                        Err(e) => debug!("{}: failed to delete previously timed out payment: {}", chan_id.to_string(), e.to_string()),
+                                                    };
+
+                                                    delinvoice(
+                                                        &rpc_path,
+                                                        label.unwrap(),
+                                                        DelinvoiceStatus::PAID,
+                                                    )
+                                                    .await?;
+                                                    label = None;
+                                                    my_invoice = None;
+                                                    continue 'outer;
+                                                }
+                                                _ => {
+                                                    warn!(
+                                                        "{}: PAYMENT DETAILS ERROR:{:?} {:?}",
+                                                        chan_id.to_string(),
+                                                        e,
+                                                        route
+                                                    );
+                                                    special_stop = true;
+                                                }
+                                            }
                                         }
                                         _ => (),
                                     }

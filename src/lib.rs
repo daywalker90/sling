@@ -12,6 +12,7 @@ use model::PluginState;
 use tokio::{process::Command, time::Instant};
 
 use crate::errors::*;
+use cln_rpc::model::requests::DelinvoiceStatus;
 use cln_rpc::primitives::*;
 pub mod config;
 pub mod dijkstra;
@@ -159,6 +160,74 @@ pub async fn slingsend(
     match sendpay_request {
         Response::SendPay(info) => Ok(info),
         e => Err(anyhow!("Unexpected result in sendpay: {:?}", e)),
+    }
+}
+
+pub async fn invoice(
+    rpc_path: &PathBuf,
+    amount_msat: Amount,
+    description: String,
+    label: String,
+) -> Result<InvoiceResponse, Error> {
+    let mut rpc = ClnRpc::new(&rpc_path).await?;
+    let invoice_request = rpc
+        .call(Request::Invoice(InvoiceRequest {
+            amount_msat: AmountOrAny::Amount(amount_msat),
+            description,
+            label,
+            expiry: None,
+            fallbacks: None,
+            preimage: None,
+            exposeprivatechannels: None,
+            cltv: Some(50),
+            deschashonly: None,
+        }))
+        .await
+        .map_err(|e| anyhow!("Error calling invoice: {:?}", e))?;
+    match invoice_request {
+        Response::Invoice(info) => Ok(info),
+        e => Err(anyhow!("Unexpected result in invoice: {:?}", e)),
+    }
+}
+
+pub async fn listinvoices(
+    rpc_path: &PathBuf,
+    label: Option<String>,
+    payment_hash: Option<String>,
+) -> Result<ListinvoicesResponse, Error> {
+    let mut rpc = ClnRpc::new(&rpc_path).await?;
+    let invoice_request = rpc
+        .call(Request::ListInvoices(ListinvoicesRequest {
+            label,
+            invstring: None,
+            payment_hash,
+            offer_id: None,
+        }))
+        .await
+        .map_err(|e| anyhow!("Error calling listinvoices: {:?}", e))?;
+    match invoice_request {
+        Response::ListInvoices(info) => Ok(info),
+        e => Err(anyhow!("Unexpected result in listinvoices: {:?}", e)),
+    }
+}
+
+pub async fn delinvoice(
+    rpc_path: &PathBuf,
+    label: String,
+    status: DelinvoiceStatus,
+) -> Result<DelinvoiceResponse, Error> {
+    let mut rpc = ClnRpc::new(&rpc_path).await?;
+    let invoice_request = rpc
+        .call(Request::DelInvoice(DelinvoiceRequest {
+            label,
+            status,
+            desconly: None,
+        }))
+        .await
+        .map_err(|e| anyhow!("Error calling delinvoice: {:?}", e))?;
+    match invoice_request {
+        Response::DelInvoice(info) => Ok(info),
+        e => Err(anyhow!("Unexpected result in delinvoice: {:?}", e)),
     }
 }
 

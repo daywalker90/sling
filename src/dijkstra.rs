@@ -159,7 +159,7 @@ fn build_route(
     let mut sendpay_route = Vec::new();
     let mut prev_amount_msat;
     let mut amount_msat = Amount::from_msat(0);
-    let mut delay = 20;
+    let mut delay = 55;
     for hop in &dijkstra_path {
         if hop == dijkstra_path.first().unwrap() {
             sendpay_route.insert(

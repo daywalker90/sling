@@ -12,7 +12,7 @@ use cln_rpc::{
     primitives::{Amount, PublicKey, ShortChannelId},
 };
 use log::debug;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tabled::Tabled;
@@ -28,7 +28,7 @@ pub struct PluginState {
     pub config: Arc<Mutex<Config>>,
     pub peers: Arc<Mutex<Vec<ListpeersPeers>>>,
     pub graph: Arc<Mutex<LnGraph>>,
-    pub pays: Arc<RwLock<HashMap<String, String>>>,
+    // pub pays: Arc<RwLock<HashMap<String, String>>>,
     pub alias_peer_map: Arc<Mutex<HashMap<PublicKey, String>>>,
     pub pull_jobs: Arc<Mutex<HashSet<String>>>,
     pub push_jobs: Arc<Mutex<HashSet<String>>>,
@@ -43,7 +43,7 @@ impl PluginState {
             config: Arc::new(Mutex::new(Config::new())),
             peers: Arc::new(Mutex::new(Vec::new())),
             graph: Arc::new(Mutex::new(LnGraph::new())),
-            pays: Arc::new(RwLock::new(HashMap::new())),
+            // pays: Arc::new(RwLock::new(HashMap::new())),
             alias_peer_map: Arc::new(Mutex::new(HashMap::new())),
             pull_jobs: Arc::new(Mutex::new(HashSet::new())),
             push_jobs: Arc::new(Mutex::new(HashSet::new())),
