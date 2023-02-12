@@ -557,11 +557,20 @@ pub async fn sling(
                                         == route.last().unwrap().channel.to_string()
                                     {
                                         warn!(
-                                            "{}: Peer has a problem or just updated their fees? {}",
+                                            "{}: Last peer has a problem or just updated their fees? {}",
                                             chan_id.to_string(),
                                             data.failcodename
                                         );
                                         time::sleep(Duration::from_secs(20)).await;
+                                    } else if data.erring_channel.to_string()
+                                        == route.first().unwrap().channel.to_string()
+                                    {
+                                        warn!(
+                                            "{}: First peer has a problem {}",
+                                            chan_id.to_string(),
+                                            e.message.clone()
+                                        );
+                                        time::sleep(Duration::from_secs(5)).await;
                                     } else {
                                         debug!(
                                             "{}: Adjusting liquidity for {}.",

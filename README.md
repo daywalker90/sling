@@ -114,7 +114,7 @@ Examples:
 * :warning:``sling-lightning-cli`` location of your lightning-cli, since some rpc methods are not implemented by cln-rpc yet we have to call these via cli. Default is ``/usr/local/bin/lightning-cli``
 * ``sling-refresh-peers-interval``: ``sling`` periodically calls listpeers every ``refresh-peers-interval`` seconds
 and jobs use the data of the last call to check for balances etc. So this option could severely impact rebalancing target precision
-if it's value is too high. Default is ``5``s
+if it's value is too high. Default is ``1``s
 * ``sling-refresh-aliasmap-interval`` How often to refresh node aliases in seconds. Default is ``3600``s
 * ``sling-refresh-graph-interval`` How often to refresh the graph in seconds. Default is ``600``s
 * ``sling-reset-liquidity-interval`` After how many minutes to reset liquidity knowledge. Default is ``360``m

@@ -73,7 +73,7 @@ impl Config {
         Config {
             pubkey: None,
             utf8: (PLUGIN_NAME.to_string() + "-utf8", true),
-            refresh_peers_interval: (PLUGIN_NAME.to_string() + "-refresh-peers-interval", 5),
+            refresh_peers_interval: (PLUGIN_NAME.to_string() + "-refresh-peers-interval", 1),
             refresh_aliasmap_interval: (
                 PLUGIN_NAME.to_string() + "-refresh-aliasmap-interval",
                 3600,

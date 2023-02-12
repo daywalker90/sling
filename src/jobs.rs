@@ -1,5 +1,7 @@
 use std::path::Path;
 use std::str::FromStr;
+use std::thread::sleep;
+use std::time::Duration;
 
 use crate::model::{JobMessage, JobState, PluginState};
 use crate::sling::sling;
@@ -59,6 +61,7 @@ pub async fn slinggo(
                     }
                 };
             });
+            sleep(Duration::from_millis(100));
         }
     }
 

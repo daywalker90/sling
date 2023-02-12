@@ -51,7 +51,6 @@ pub async fn slingjob(
         "depleteuptopercent",
         "depleteuptoamount",
     ];
-    debug!("{:?}", v);
 
     match v {
         serde_json::Value::Object(ar) => {
@@ -257,6 +256,11 @@ pub async fn refresh_joblists(p: Plugin<PluginState>) -> Result<(), Error> {
     let mut push_jobs = p.state().push_jobs.lock();
     pull_jobs.clear();
     push_jobs.clear();
+
+    p.state()
+        .job_state
+        .lock()
+        .retain(|k, _v| jobs.contains_key(k));
 
     for (chan_id, job) in jobs {
         match job.sat_direction {

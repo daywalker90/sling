@@ -49,7 +49,6 @@ pub async fn list_funds(rpc_path: &PathBuf) -> Result<ListfundsResponse, Error> 
 }
 
 pub async fn list_peers(rpc_path: &PathBuf) -> Result<ListpeersResponse, Error> {
-    let now = Instant::now();
     let mut rpc = ClnRpc::new(&rpc_path).await?;
     let listpeers_request = rpc
         .call(Request::ListPeers(ListpeersRequest {
@@ -58,7 +57,6 @@ pub async fn list_peers(rpc_path: &PathBuf) -> Result<ListpeersResponse, Error> 
         }))
         .await
         .map_err(|e| anyhow!("Error calling list_peers: {:?}", e))?;
-    debug!("Listpeers:{:.3?}", now.elapsed());
     match listpeers_request {
         Response::ListPeers(info) => Ok(info),
         e => Err(anyhow!("Unexpected result in list_peers: {:?}", e)),
@@ -258,6 +256,11 @@ pub async fn check_lightning_dir(
     };
     if response.lightning_dir == plugin.configuration().lightning_dir.clone() {
         debug!("got working lightning-cli");
+        debug!(
+            "{} {}",
+            response.lightning_dir,
+            plugin.configuration().lightning_dir.clone()
+        );
         Ok(())
     } else {
         Err(anyhow!(
