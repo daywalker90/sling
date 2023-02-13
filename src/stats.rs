@@ -28,6 +28,10 @@ pub async fn slingstats(
 
     match args {
         serde_json::Value::Array(a) => {
+            let stats_delete_successes_age =
+                plugin.state().config.lock().stats_delete_successes_age.1;
+            let stats_delete_failures_age =
+                plugin.state().config.lock().stats_delete_failures_age.1;
             if a.len() > 1 {
                 Err(anyhow!(
                     "Please provide exactly one short_channel_id or nothing for a summary"
@@ -86,13 +90,16 @@ pub async fn slingstats(
                     .as_secs();
                 let mut tabled = Vec::new();
                 let jobstates = plugin.state().job_state.lock().clone();
+
                 for job in &all_jobs {
                     let mut total_amount_msat = 0;
                     let mut most_recent_completed_at = 0;
                     let mut weighted_fee_ppm = 0;
                     let jobstate = jobstates.get(job).unwrap_or(JobState::missing());
                     for success_reb in successes.get(&job).unwrap_or(&Vec::new()) {
-                        if success_reb.completed_at >= now - 2592000 {
+                        if success_reb.completed_at
+                            >= now - stats_delete_successes_age * 24 * 60 * 60
+                        {
                             total_amount_msat += success_reb.amount_msat;
                             weighted_fee_ppm +=
                                 success_reb.fee_ppm as u64 * success_reb.amount_msat;
@@ -173,12 +180,12 @@ pub async fn slingstats(
                             }
                         };
                         let success_json = if successes.len() > 0 {
-                            success_stats(successes)
+                            success_stats(successes, stats_delete_successes_age)
                         } else {
                             json!({"successes_in_time_window":""})
                         };
                         let failures_json = if failures.len() > 0 {
-                            failure_stats(failures)
+                            failure_stats(failures, stats_delete_failures_age)
                         } else {
                             json!({"failures_in_time_window":""})
                         };
@@ -196,7 +203,7 @@ pub async fn slingstats(
     }
 }
 
-fn success_stats(successes: Vec<SuccessReb>) -> serde_json::Value {
+fn success_stats(successes: Vec<SuccessReb>, time_window: u64) -> serde_json::Value {
     let mut total_amount_msat = 0;
     let mut channel_partner_counts = HashMap::new();
     let mut hop_counts = HashMap::new();
@@ -209,7 +216,7 @@ fn success_stats(successes: Vec<SuccessReb>) -> serde_json::Value {
         .as_secs();
 
     for success_reb in successes {
-        if success_reb.completed_at >= now - 2592000 {
+        if success_reb.completed_at >= now - time_window * 24 * 60 * 60 {
             total_amount_msat += success_reb.amount_msat;
             weighted_fee_ppm += success_reb.fee_ppm as u64 * success_reb.amount_msat;
             *channel_partner_counts
@@ -254,7 +261,7 @@ fn success_stats(successes: Vec<SuccessReb>) -> serde_json::Value {
     }})
 }
 
-fn failure_stats(failures: Vec<FailureReb>) -> serde_json::Value {
+fn failure_stats(failures: Vec<FailureReb>, time_window: u64) -> serde_json::Value {
     let mut total_amount_msat = 0;
     let mut channel_partner_counts = HashMap::new();
     let mut hop_counts = HashMap::new();
@@ -268,7 +275,7 @@ fn failure_stats(failures: Vec<FailureReb>) -> serde_json::Value {
         .as_secs();
 
     for fail_reb in failures {
-        if fail_reb.created_at >= now - 2592000 {
+        if fail_reb.created_at >= now - time_window * 24 * 60 * 60 {
             total_amount_msat += fail_reb.amount_msat;
             *channel_partner_counts
                 .entry(fail_reb.channel_partner.to_string())
