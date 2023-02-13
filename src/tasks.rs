@@ -105,11 +105,18 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
 
             let mypubkey = plugin.state().config.lock().pubkey.unwrap().clone();
 
+            let two_w_ago = (SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                - 1_209_600) as u32;
+
             plugin.state().graph.lock().update(LnGraph {
                 graph: channels
                     .into_iter()
                     .filter(|chan| {
                         (chan.active
+                            && chan.last_update >= two_w_ago
                             && chan.delay <= 288
                             && Amount::msat(&chan.htlc_maximum_msat.unwrap_or(chan.amount_msat))
                                 >= min_amount

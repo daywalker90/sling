@@ -353,6 +353,13 @@ impl LnGraph {
     pub fn update(&mut self, new_graph: LnGraph) {
         for (new_node, new_channels) in new_graph.graph.iter() {
             let old_channels = self.graph.entry(new_node.clone()).or_default();
+            let new_short_channel_ids: HashSet<String> = new_channels
+                .iter()
+                .map(|c| c.channel.short_channel_id.to_string())
+                .collect();
+            old_channels.retain(|e| {
+                new_short_channel_ids.contains(&e.channel.short_channel_id.to_string())
+            });
             for new_channel in new_channels {
                 let new_short_channel_id = &new_channel.channel.short_channel_id;
                 let old_channel = old_channels.iter_mut().find(|e| {
