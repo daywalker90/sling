@@ -201,6 +201,58 @@ pub async fn read_config(
                             ))
                         }
                     },
+                    opt if opt.eq(&config.stats_delete_failures_age.0) => {
+                        match value.parse::<u64>() {
+                            Ok(n) => config.stats_delete_failures_age.1 = n,
+                            Err(e) => {
+                                return Err(anyhow!(
+                                    "Error: Could not parse a number from `{}` for {}: {}",
+                                    value,
+                                    config.stats_delete_failures_age.0,
+                                    e
+                                ))
+                            }
+                        }
+                    }
+                    opt if opt.eq(&config.stats_delete_failures_size.0) => {
+                        match value.parse::<u64>() {
+                            Ok(n) => config.stats_delete_failures_size.1 = n,
+                            Err(e) => {
+                                return Err(anyhow!(
+                                    "Error: Could not parse a number from `{}` for {}: {}",
+                                    value,
+                                    config.stats_delete_failures_size.0,
+                                    e
+                                ))
+                            }
+                        }
+                    }
+                    opt if opt.eq(&config.stats_delete_successes_age.0) => {
+                        match value.parse::<u64>() {
+                            Ok(n) => config.stats_delete_successes_age.1 = n,
+                            Err(e) => {
+                                return Err(anyhow!(
+                                    "Error: Could not parse a number from `{}` for {}: {}",
+                                    value,
+                                    config.stats_delete_successes_age.0,
+                                    e
+                                ))
+                            }
+                        }
+                    }
+                    opt if opt.eq(&config.stats_delete_successes_size.0) => {
+                        match value.parse::<u64>() {
+                            Ok(n) => config.stats_delete_successes_size.1 = n,
+                            Err(e) => {
+                                return Err(anyhow!(
+                                    "Error: Could not parse a number from `{}` for {}: {}",
+                                    value,
+                                    config.stats_delete_successes_size.0,
+                                    e
+                                ))
+                            }
+                        }
+                    }
                     _ => (),
                 }
             }
@@ -324,6 +376,29 @@ pub fn get_startup_options(
         Some(_) => config.max_htlc_count.1,
         None => config.max_htlc_count.1,
     };
+    config.stats_delete_failures_age.1 = match plugin.option(&config.stats_delete_failures_age.0) {
+        Some(options::Value::Integer(i)) => i as u64,
+        Some(_) => config.stats_delete_failures_age.1,
+        None => config.stats_delete_failures_age.1,
+    };
+    config.stats_delete_failures_size.1 = match plugin.option(&config.stats_delete_failures_size.0)
+    {
+        Some(options::Value::Integer(i)) => i as u64,
+        Some(_) => config.stats_delete_failures_size.1,
+        None => config.stats_delete_failures_size.1,
+    };
+    config.stats_delete_successes_age.1 = match plugin.option(&config.stats_delete_successes_age.0)
+    {
+        Some(options::Value::Integer(i)) => i as u64,
+        Some(_) => config.stats_delete_successes_age.1,
+        None => config.stats_delete_successes_age.1,
+    };
+    config.stats_delete_successes_size.1 =
+        match plugin.option(&config.stats_delete_successes_size.0) {
+            Some(options::Value::Integer(i)) => i as u64,
+            Some(_) => config.stats_delete_successes_size.1,
+            None => config.stats_delete_successes_size.1,
+        };
 
     Ok(())
 }

@@ -20,8 +20,8 @@ use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 
 use crate::PLUGIN_NAME;
 
-const SUCCESSES_SUFFIX: &str = "_successes.json";
-const FAILURES_SUFFIX: &str = "_failures.json";
+pub const SUCCESSES_SUFFIX: &str = "_successes.json";
+pub const FAILURES_SUFFIX: &str = "_failures.json";
 
 #[derive(Clone)]
 pub struct PluginState {
@@ -67,6 +67,10 @@ pub struct Config {
     pub depleteuptoamount: (String, u64),
     pub max_htlc_count: (String, u64),
     pub lightning_cli: (String, String),
+    pub stats_delete_failures_age: (String, u64),
+    pub stats_delete_failures_size: (String, u64),
+    pub stats_delete_successes_age: (String, u64),
+    pub stats_delete_successes_size: (String, u64),
 }
 impl Config {
     pub fn new() -> Config {
@@ -89,6 +93,19 @@ impl Config {
             lightning_cli: (
                 PLUGIN_NAME.to_string() + "-lightning-cli",
                 "/usr/local/bin/lightning-cli".to_string(),
+            ),
+            stats_delete_failures_age: (PLUGIN_NAME.to_string() + "-stats-delete-failures-age", 30),
+            stats_delete_failures_size: (
+                PLUGIN_NAME.to_string() + "-stats-delete-failures-size",
+                10_000,
+            ),
+            stats_delete_successes_age: (
+                PLUGIN_NAME.to_string() + "-stats-delete-successes-age",
+                30,
+            ),
+            stats_delete_successes_size: (
+                PLUGIN_NAME.to_string() + "-stats-delete-successes-size",
+                10_000,
             ),
         }
     }

@@ -107,6 +107,38 @@ async fn main() -> Result<(), anyhow::Error> {
                 defaultconfig.lightning_cli.1
             ),
         ))
+        .option(options::ConfigOption::new(
+            &defaultconfig.stats_delete_failures_age.0,
+            options::Value::OptInteger,
+            &format!(
+                "Max age of failure stats in days. Default is {}",
+                defaultconfig.stats_delete_failures_age.1
+            ),
+        ))
+        .option(options::ConfigOption::new(
+            &defaultconfig.stats_delete_failures_size.0,
+            options::Value::OptInteger,
+            &format!(
+                "Max number of failure stats per channel. Default is {}",
+                defaultconfig.stats_delete_failures_size.1
+            ),
+        ))
+        .option(options::ConfigOption::new(
+            &defaultconfig.stats_delete_successes_age.0,
+            options::Value::OptInteger,
+            &format!(
+                "Max age of success stats in days. Default is {}",
+                defaultconfig.stats_delete_successes_age.1
+            ),
+        ))
+        .option(options::ConfigOption::new(
+            &defaultconfig.stats_delete_successes_size.0,
+            options::Value::OptInteger,
+            &format!(
+                "Max number of success stats per channel. Default is {}",
+                defaultconfig.stats_delete_successes_size.1
+            ),
+        ))
         .rpcmethod(
             &(PLUGIN_NAME.to_string() + "-job"),
             "add sling job",
@@ -229,6 +261,13 @@ async fn main() -> Result<(), anyhow::Error> {
             match tasks::clear_tempbans(tempbanclone).await {
                 Ok(()) => (),
                 Err(e) => warn!("Error in clear_tempbans thread: {:?}", e),
+            };
+        });
+        let clearstatsclone = plugin.clone();
+        tokio::spawn(async move {
+            match tasks::clear_stats(clearstatsclone).await {
+                Ok(()) => (),
+                Err(e) => warn!("Error in clear_stats thread: {:?}", e),
             };
         });
         plugin.join().await
