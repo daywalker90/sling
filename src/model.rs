@@ -384,6 +384,16 @@ impl LnGraph {
                 });
                 match old_channel {
                     Some(old_channel) => {
+                        if (old_channel.channel.htlc_maximum_msat.is_some()
+                            && new_channel.channel.htlc_maximum_msat.is_some()
+                            && old_channel.channel.htlc_maximum_msat.unwrap()
+                                != new_channel.channel.htlc_maximum_msat.unwrap())
+                            || old_channel.channel.fee_per_millionth
+                                != new_channel.channel.fee_per_millionth
+                        {
+                            old_channel.liquidity = new_channel.liquidity;
+                            old_channel.timestamp = new_channel.timestamp;
+                        }
                         old_channel.channel = new_channel.channel.clone();
                     }
                     None => {
