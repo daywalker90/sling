@@ -123,17 +123,20 @@ pub async fn slingstop(
                         }
                     }
                     loop {
-                        let mut job_states = p.state().job_state.lock().clone();
-                        job_states.retain(|chan, _state| stopped_ids.contains(&chan));
-                        let mut all_stopped = true;
-                        for (_chan_id, jobstate) in job_states.iter_mut() {
-                            if jobstate.is_active() {
-                                all_stopped = false;
+                        {
+                            let mut job_states = p.state().job_state.lock().clone();
+                            job_states.retain(|chan, _state| stopped_ids.contains(&chan));
+                            let mut all_stopped = true;
+                            for (_chan_id, jobstate) in job_states.iter_mut() {
+                                if jobstate.is_active() {
+                                    all_stopped = false;
+                                }
+                            }
+                            if all_stopped {
+                                break;
                             }
                         }
-                        if all_stopped {
-                            break;
-                        }
+                        time::sleep(Duration::from_millis(200)).await;
                     }
                 }
             }
