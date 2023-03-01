@@ -14,6 +14,7 @@ use cln_rpc::primitives::ShortChannelId;
 use log::{debug, info, warn};
 
 use serde_json::json;
+use tokio::time;
 
 pub async fn slinggo(
     p: Plugin<PluginState>,
@@ -74,7 +75,6 @@ pub async fn slingstop(
 ) -> Result<serde_json::Value, Error> {
     let stopped_count;
     {
-        let mut job_states = p.state().job_state.lock();
         match args {
             serde_json::Value::Array(a) => {
                 if a.len() > 1 {
@@ -84,26 +84,56 @@ pub async fn slingstop(
                 } else if a.len() == 1 {
                     match a.first().unwrap() {
                         serde_json::Value::String(i) => {
-                            if job_states.contains_key(i) {
-                                stopped_count = 1;
-                                let jobstate = job_states.get_mut(i).unwrap();
-                                jobstate.stop();
-                                jobstate.statechange(JobMessage::Stopping);
-                                jobstate.set_active(false);
-                                debug!("{}: Stopping job...", i.to_string());
-                            } else {
-                                return Err(anyhow!("no job running for {}", i));
+                            {
+                                let mut job_states = p.state().job_state.lock();
+                                if job_states.contains_key(i) {
+                                    stopped_count = 1;
+                                    let jobstate = job_states.get_mut(i).unwrap();
+                                    jobstate.stop();
+                                    jobstate.statechange(JobMessage::Stopping);
+                                    debug!("{}: Stopping job...", i.to_string());
+                                } else {
+                                    return Err(anyhow!("no job running for {}", i));
+                                }
+                            }
+                            loop {
+                                {
+                                    let job_states = p.state().job_state.lock();
+                                    if job_states.get(i).is_none()
+                                        || !job_states.get(i).unwrap().is_active()
+                                    {
+                                        break;
+                                    }
+                                }
+                                time::sleep(Duration::from_millis(200)).await;
                             }
                         }
                         _ => return Err(anyhow!("invalid short_channel_id")),
                     };
                 } else {
-                    stopped_count = job_states.len();
-                    for (chan_id, jobstate) in job_states.iter_mut() {
-                        jobstate.stop();
-                        jobstate.statechange(JobMessage::Stopping);
-                        jobstate.set_active(false);
-                        debug!("{}: Stopping job...", chan_id.to_string());
+                    let mut stopped_ids = Vec::new();
+                    {
+                        let mut job_states = p.state().job_state.lock();
+                        stopped_count = job_states.len();
+                        for (chan_id, jobstate) in job_states.iter_mut() {
+                            jobstate.stop();
+                            jobstate.statechange(JobMessage::Stopping);
+                            stopped_ids.push(chan_id.clone());
+                            debug!("{}: Stopping job...", chan_id.to_string());
+                        }
+                    }
+                    loop {
+                        let mut job_states = p.state().job_state.lock().clone();
+                        job_states.retain(|chan, _state| stopped_ids.contains(&chan));
+                        let mut all_stopped = true;
+                        for (_chan_id, jobstate) in job_states.iter_mut() {
+                            if jobstate.is_active() {
+                                all_stopped = false;
+                            }
+                        }
+                        if all_stopped {
+                            break;
+                        }
                     }
                 }
             }
