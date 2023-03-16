@@ -20,6 +20,7 @@ pub fn dijkstra(
     exclude: &HashSet<String>,
     exclude_peers: &Vec<PublicKey>,
     hops: u64,
+    last_delay: u16,
 ) -> Result<Vec<SendpayRoute>, Error> {
     let mut visited = HashSet::with_capacity(lngraph.graph.len());
     let mut scores = HashMap::new();
@@ -121,6 +122,7 @@ pub fn dijkstra(
         job,
         &start,
         &slingchan,
+        last_delay,
     )?)
 }
 
@@ -131,6 +133,7 @@ fn build_route(
     job: &Job,
     start: &PublicKey,
     slingchan: &DijkstraNode,
+    last_delay: u16,
 ) -> Result<Vec<SendpayRoute>, Error> {
     let mut dijkstra_path = Vec::new();
     // debug!("predecssors: {:?}", predecessor);
@@ -159,7 +162,7 @@ fn build_route(
     let mut sendpay_route = Vec::new();
     let mut prev_amount_msat;
     let mut amount_msat = Amount::from_msat(0);
-    let mut delay = 55;
+    let mut delay = last_delay;
     for hop in &dijkstra_path {
         if hop == dijkstra_path.first().unwrap() {
             sendpay_route.insert(

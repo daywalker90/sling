@@ -7,6 +7,7 @@ use cln_plugin::{options, Builder};
 use cln_rpc::primitives::PublicKey;
 use cln_rpc::primitives::ShortChannelId;
 use log::{debug, info, warn};
+use sling::htlc::htlc_handler;
 use sling::util::slingjobsettings;
 use sling::util::slingversion;
 use sling::{
@@ -35,6 +36,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let defaultconfig = Config::new();
     let confplugin;
     match Builder::new(tokio::io::stdin(), tokio::io::stdout())
+        .hook("htlc_accepted", htlc_handler)
         .option(options::ConfigOption::new(
             &defaultconfig.utf8.0,
             options::Value::OptBoolean,

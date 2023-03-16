@@ -1,6 +1,6 @@
 [package]
 name = "sling"
-version = "0.1.1"
+version = "1.0.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -17,7 +17,8 @@ tokio = { version = "1", features = ["fs","sync","rt-multi-thread","process"] }
 # futures = "0.3"
 cln-rpc = "0.1"
 # env_logger = "0.10"
-cln-plugin = "0.1"
+# cln-plugin = "0.1"
+cln-plugin = {path= "../lightning/plugins"}
 tabled = "0.10"
 num-format = "0.4"
 struct-field-names-as-array = "0.1"

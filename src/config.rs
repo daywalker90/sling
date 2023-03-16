@@ -55,6 +55,17 @@ pub async fn read_config(
                 let value = splitline.into_iter().nth(1).unwrap();
 
                 match name {
+                    opt if opt.eq(&config.cltv_delta.0) => match value.parse::<u16>() {
+                        Ok(n) => config.cltv_delta.1 = Some(n),
+                        Err(e) => {
+                            return Err(anyhow!(
+                                "Error: Could not parse a number from `{}` for {}: {}",
+                                value,
+                                config.cltv_delta.0,
+                                e
+                            ))
+                        }
+                    },
                     opt if opt.eq(&config.utf8.0) => match value.parse::<bool>() {
                         Ok(b) => config.utf8.1 = b,
                         Err(e) => {

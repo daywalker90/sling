@@ -12,7 +12,7 @@ use cln_rpc::{
     primitives::{Amount, PublicKey, ShortChannelId},
 };
 use log::debug;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tabled::Tabled;
@@ -28,7 +28,7 @@ pub struct PluginState {
     pub config: Arc<Mutex<Config>>,
     pub peers: Arc<Mutex<Vec<ListpeersPeers>>>,
     pub graph: Arc<Mutex<LnGraph>>,
-    // pub pays: Arc<RwLock<HashMap<String, String>>>,
+    pub pays: Arc<RwLock<HashMap<String, String>>>,
     pub alias_peer_map: Arc<Mutex<HashMap<PublicKey, String>>>,
     pub pull_jobs: Arc<Mutex<HashSet<String>>>,
     pub push_jobs: Arc<Mutex<HashSet<String>>>,
@@ -43,7 +43,7 @@ impl PluginState {
             config: Arc::new(Mutex::new(Config::new())),
             peers: Arc::new(Mutex::new(Vec::new())),
             graph: Arc::new(Mutex::new(LnGraph::new())),
-            // pays: Arc::new(RwLock::new(HashMap::new())),
+            pays: Arc::new(RwLock::new(HashMap::new())),
             alias_peer_map: Arc::new(Mutex::new(HashMap::new())),
             pull_jobs: Arc::new(Mutex::new(HashSet::new())),
             push_jobs: Arc::new(Mutex::new(HashSet::new())),
@@ -71,6 +71,7 @@ pub struct Config {
     pub stats_delete_failures_size: (String, u64),
     pub stats_delete_successes_age: (String, u64),
     pub stats_delete_successes_size: (String, u64),
+    pub cltv_delta: (String, Option<u16>),
 }
 impl Config {
     pub fn new() -> Config {
@@ -107,6 +108,7 @@ impl Config {
                 PLUGIN_NAME.to_string() + "-stats-delete-successes-size",
                 10_000,
             ),
+            cltv_delta: ("cltv-delta".to_string(), None),
         }
     }
 }
