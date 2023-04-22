@@ -10,7 +10,7 @@ use cln_rpc::primitives::ShortChannelId;
 use log::{debug, info};
 use num_format::{Locale, ToFormattedString};
 use serde_json::json;
-use tabled::TableIteratorExt;
+use tabled::Table;
 
 use crate::model::{JobState, PluginState, StatSummary};
 use crate::util::{get_all_normal_channels_from_listpeers, refresh_joblists};
@@ -88,7 +88,7 @@ pub async fn slingstats(
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
                     .as_secs();
-                let mut tabled = Vec::new();
+                let mut table = Vec::new();
                 let jobstates = plugin.state().job_state.lock().clone();
 
                 for job in &all_jobs {
@@ -143,7 +143,7 @@ pub async fn slingstats(
                             .format("%Y-%m-%d %H:%M:%S")
                             .to_string()
                     };
-                    tabled.push(StatSummary {
+                    table.push(StatSummary {
                         alias: normal_channels_alias
                             .get(&job.clone())
                             .unwrap_or(&NO_ALIAS_SET.to_string())
@@ -157,10 +157,15 @@ pub async fn slingstats(
                         last_success_reb,
                     })
                 }
-                tabled.sort_by_key(|k| k.alias.clone());
-                Ok(
-                    json!({"format-hint":"simple","result":format!("{}", tabled.table().to_string(),)}),
-                )
+                table.sort_by_key(|x| {
+                    x.alias
+                        .chars()
+                        .filter(|c| c.is_ascii() && !c.is_whitespace() && c != &'@')
+                        .collect::<String>()
+                        .to_ascii_lowercase()
+                });
+                let tabled = Table::new(table);
+                Ok(json!({"format-hint":"simple","result":format!("{}", tabled.to_string(),)}))
             } else {
                 match a.first().unwrap() {
                     serde_json::Value::String(i) => {

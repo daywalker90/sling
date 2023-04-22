@@ -457,11 +457,14 @@ pub async fn slingexceptchan(
                                     let push_jobs = plugin.state().push_jobs.lock().clone();
                                     let peer_channel = peers
                                         .iter()
-                                        .flat_map(|peer| &peer.channels)
-                                        .find(|channel| {
-                                            channel.short_channel_id.as_ref().map_or(false, |x| {
-                                                x.to_string() == scid.to_string()
-                                            })
+                                        .find_map(|peer| {
+                                            if let Some(channels) = &peer.channels {
+                                                channels.iter().find(|channel| {
+                                                    channel.short_channel_id.as_ref().map_or(false, |x| *x == scid)
+                                                })
+                                            } else {
+                                                None
+                                            }
                                         });
                                     if let Some(_) = peer_channel {
                                         if pull_jobs.contains(&scid.to_string())
@@ -778,12 +781,17 @@ pub fn get_peer_id_from_chan_id(
 ) -> Result<PublicKey, Error> {
     let now = Instant::now();
     let peer = peers.iter().find(|peer| {
-        peer.channels.iter().any(|chan| {
-            chan.short_channel_id
-                .as_ref()
-                .map_or(false, |x| x.to_string() == channel.to_string())
-        })
+        if let Some(channels) = &peer.channels {
+            channels.iter().any(|chan| {
+                chan.short_channel_id
+                    .as_ref()
+                    .map_or(false, |x| *x == channel)
+            })
+        } else {
+            false
+        }
     });
+
     match peer {
         Some(p) => Ok(p.id),
         None => {
@@ -843,27 +851,35 @@ pub fn get_normal_channel_from_listpeers(
 ) -> Option<ListpeersPeersChannels> {
     peers
         .iter()
-        .flat_map(|peer| &peer.channels)
-        .find(|channel| {
-            channel
-                .short_channel_id
-                .as_ref()
-                .map_or(false, |x| x.to_string() == chan_id.to_string())
-                && is_channel_normal(channel)
+        .find_map(|peer| {
+            if let Some(channels) = &peer.channels {
+                channels.iter().find(|channel| {
+                    channel
+                        .short_channel_id
+                        .as_ref()
+                        .map_or(false, |x| *x == chan_id)
+                        && is_channel_normal(channel)
+                })
+            } else {
+                None
+            }
         })
         .cloned()
 }
+
 pub fn get_all_normal_channels_from_listpeers(
     peers: &Vec<ListpeersPeers>,
 ) -> HashMap<String, PublicKey> {
     let mut scid_peer_map = HashMap::new();
     for peer in peers {
-        for channel in &peer.channels {
-            if is_channel_normal(channel) {
-                scid_peer_map.insert(
-                    channel.short_channel_id.unwrap().to_string(),
-                    peer.id.clone(),
-                );
+        if let Some(channels) = &peer.channels {
+            for channel in channels {
+                if is_channel_normal(channel) {
+                    scid_peer_map.insert(
+                        channel.short_channel_id.unwrap().to_string(),
+                        peer.id.clone(),
+                    );
+                }
             }
         }
     }

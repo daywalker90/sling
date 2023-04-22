@@ -1,6 +1,6 @@
 [package]
 name = "sling"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -15,11 +15,11 @@ serde_json = "1.0"
 tokio = { version = "1", features = ["fs","sync","rt-multi-thread","process"] }
 # tokio-stream = "0.1"
 # futures = "0.3"
-cln-rpc = "0.1"
+cln-rpc = {path= "../lightning/cln-rpc"}
 # env_logger = "0.10"
-cln-plugin = "0.1"
-#cln-plugin = {path= "../lightning/plugins"}
-tabled = "0.10"
+#cln-plugin = "0.1"
+cln-plugin = {path= "../lightning/plugins"}
+tabled = "0.11"
 num-format = "0.4"
 struct-field-names-as-array = "0.1"
 # pickledb = "0.5.1"

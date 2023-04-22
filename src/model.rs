@@ -465,6 +465,7 @@ impl LnGraph {
         exclude_peers: &Vec<PublicKey>,
         amount: &u64,
         candidatelist: &Vec<ShortChannelId>,
+        tempbans: &HashMap<String, u64>,
     ) -> Vec<&DirectedChannel> {
         match self.graph.get(&node) {
             Some(e) => {
@@ -477,7 +478,9 @@ impl LnGraph {
                         //     i.liquidity,
                         //     amount
                         // );
-                        !exclude.contains(&i.channel.short_channel_id.to_string())
+                        let chan_str = i.channel.short_channel_id.to_string();
+                        !exclude.contains(&chan_str)
+                            && !tempbans.contains_key(&chan_str)
                             && i.liquidity >= *amount
                             && Amount::msat(&i.channel.htlc_minimum_msat) <= *amount
                             && Amount::msat(
@@ -488,9 +491,7 @@ impl LnGraph {
                             && if i.channel.source == *mypubkey
                                 || i.channel.destination == *mypubkey
                             {
-                                candidatelist.iter().any(|c| {
-                                    c.to_string() == i.channel.short_channel_id.to_string()
-                                })
+                                candidatelist.iter().any(|c| c.to_string() == chan_str)
                             } else {
                                 true
                             }

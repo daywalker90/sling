@@ -21,6 +21,7 @@ pub fn dijkstra(
     exclude_peers: &Vec<PublicKey>,
     hops: u64,
     last_delay: u16,
+    tempbans: &HashMap<String, u64>,
 ) -> Result<Vec<SendpayRoute>, Error> {
     let mut visited = HashSet::with_capacity(lngraph.graph.len());
     let mut scores = HashMap::new();
@@ -58,6 +59,7 @@ pub fn dijkstra(
             exclude_peers,
             &job.amount,
             &candidatelist,
+            &tempbans,
         ) {
             let next = edge.channel.destination;
             if visited.contains(&next) {

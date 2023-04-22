@@ -267,6 +267,7 @@ pub async fn sling(
                                 &excepts_peers,
                                 hops,
                                 last_delay,
+                                &tempbans,
                             )?;
                         }
                         SatDirection::Push => {
@@ -287,6 +288,7 @@ pub async fn sling(
                                 &excepts_peers,
                                 hops,
                                 last_delay,
+                                &tempbans,
                             )?;
                         }
                     }
@@ -593,12 +595,17 @@ pub async fn sling(
                                         );
                                         match job.sat_direction {
                                             SatDirection::Pull => {
-                                                my_sleep(
-                                                    60,
-                                                    plugin.state().job_state.clone(),
-                                                    &chan_id,
-                                                )
-                                                .await;
+                                                plugin.state().tempbans.lock().insert(
+                                                    route
+                                                        .get(route.len() - 3)
+                                                        .unwrap()
+                                                        .channel
+                                                        .to_string(),
+                                                    SystemTime::now()
+                                                        .duration_since(UNIX_EPOCH)
+                                                        .unwrap()
+                                                        .as_secs(),
+                                                );
                                             }
                                             SatDirection::Push => {
                                                 plugin.state().tempbans.lock().insert(
@@ -832,69 +839,71 @@ fn build_candidatelist(
     };
 
     for peer in peers {
-        for channel in &peer.channels {
-            if let Some(scid) = channel.short_channel_id {
-                if match channel.state {
-                    ListpeersPeersChannelsState::CHANNELD_NORMAL => true,
-                    _ => false,
-                } && peer.connected
-                    && match custom_candidates {
-                        Some(c) => c.iter().any(|c| c.to_string() == scid.to_string()),
-                        None => true,
-                    }
-                {
-                    let chan_from_peer = match graph.get_channel(peer.id, scid) {
-                        Ok(chan) => chan.channel,
-                        Err(_) => continue,
-                    };
-
-                    let to_us_msat = Amount::msat(&channel.to_us_msat.unwrap());
-                    let total_msat = Amount::msat(&channel.total_msat.unwrap());
-                    let chan_out_ppm = feeppm_effective(
-                        channel.fee_proportional_millionths.unwrap(),
-                        Amount::msat(&channel.fee_base_msat.unwrap()) as u32,
-                        job.amount,
-                    );
-                    let chan_in_ppm = feeppm_effective(
-                        chan_from_peer.fee_per_millionth,
-                        chan_from_peer.base_fee_millisatoshi,
-                        job.amount,
-                    );
-                    if match job.sat_direction {
-                        SatDirection::Pull => {
-                            to_us_msat
-                                > max(
-                                    job.amount + 10_000_000,
-                                    min(
-                                        (depleteuptopercent * total_msat as f64) as u64,
-                                        depleteuptoamount,
-                                    ),
-                                )
-                                && match job.outppm {
-                                    Some(out) => chan_out_ppm <= out,
-                                    None => true,
-                                }
-                                && get_out_htlc_count(channel) <= config.max_htlc_count.1
+        if let Some(channels) = &peer.channels {
+            for channel in channels {
+                if let Some(scid) = channel.short_channel_id {
+                    if match channel.state {
+                        ListpeersPeersChannelsState::CHANNELD_NORMAL => true,
+                        _ => false,
+                    } && peer.connected
+                        && match custom_candidates {
+                            Some(c) => c.iter().any(|c| c.to_string() == scid.to_string()),
+                            None => true,
                         }
-                        SatDirection::Push => {
-                            total_msat - to_us_msat
-                                > max(
-                                    job.amount + 10_000_000,
-                                    min(
-                                        (depleteuptopercent * total_msat as f64) as u64,
-                                        depleteuptoamount,
-                                    ),
-                                )
-                                && match job.outppm {
-                                    Some(out) => chan_out_ppm >= out,
-                                    None => true,
-                                }
-                                && job.maxppm as u64 >= chan_in_ppm
-                                && get_in_htlc_count(channel) <= config.max_htlc_count.1
-                        }
-                    } && !tempbans.contains_key(&scid.to_string())
                     {
-                        candidatelist.push(scid.clone());
+                        let chan_from_peer = match graph.get_channel(peer.id, scid) {
+                            Ok(chan) => chan.channel,
+                            Err(_) => continue,
+                        };
+
+                        let to_us_msat = Amount::msat(&channel.to_us_msat.unwrap());
+                        let total_msat = Amount::msat(&channel.total_msat.unwrap());
+                        let chan_out_ppm = feeppm_effective(
+                            channel.fee_proportional_millionths.unwrap(),
+                            Amount::msat(&channel.fee_base_msat.unwrap()) as u32,
+                            job.amount,
+                        );
+                        let chan_in_ppm = feeppm_effective(
+                            chan_from_peer.fee_per_millionth,
+                            chan_from_peer.base_fee_millisatoshi,
+                            job.amount,
+                        );
+                        if match job.sat_direction {
+                            SatDirection::Pull => {
+                                to_us_msat
+                                    > max(
+                                        job.amount + 10_000_000,
+                                        min(
+                                            (depleteuptopercent * total_msat as f64) as u64,
+                                            depleteuptoamount,
+                                        ),
+                                    )
+                                    && match job.outppm {
+                                        Some(out) => chan_out_ppm <= out,
+                                        None => true,
+                                    }
+                                    && get_out_htlc_count(channel) <= config.max_htlc_count.1
+                            }
+                            SatDirection::Push => {
+                                total_msat - to_us_msat
+                                    > max(
+                                        job.amount + 10_000_000,
+                                        min(
+                                            (depleteuptopercent * total_msat as f64) as u64,
+                                            depleteuptoamount,
+                                        ),
+                                    )
+                                    && match job.outppm {
+                                        Some(out) => chan_out_ppm >= out,
+                                        None => true,
+                                    }
+                                    && job.maxppm as u64 >= chan_in_ppm
+                                    && get_in_htlc_count(channel) <= config.max_htlc_count.1
+                            }
+                        } && !tempbans.contains_key(&scid.to_string())
+                        {
+                            candidatelist.push(scid.clone());
+                        }
                     }
                 }
             }
