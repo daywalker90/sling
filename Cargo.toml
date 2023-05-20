@@ -19,9 +19,9 @@ cln-rpc = {path= "../lightning/cln-rpc"}
 # env_logger = "0.10"
 #cln-plugin = "0.1"
 cln-plugin = {path= "../lightning/plugins"}
-tabled = "0.11"
+tabled = "0.12"
 num-format = "0.4"
-struct-field-names-as-array = "0.1"
+struct-field-names-as-array = "0.2"
 # pickledb = "0.5.1"
 chrono = "0.4"
 rand = "0.8"
