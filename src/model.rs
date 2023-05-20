@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fmt::{self, Display, Formatter},
     path::PathBuf,
     sync::Arc,
@@ -8,7 +8,7 @@ use std::{
 
 use anyhow::{anyhow, Error};
 use cln_rpc::{
-    model::{ListchannelsChannels, ListpeersPeers, ListpeersPeersChannels},
+    model::{ListchannelsChannels, ListpeerchannelsChannels},
     primitives::{Amount, PublicKey, ShortChannelId},
 };
 use log::debug;
@@ -26,7 +26,7 @@ pub const FAILURES_SUFFIX: &str = "_failures.json";
 #[derive(Clone)]
 pub struct PluginState {
     pub config: Arc<Mutex<Config>>,
-    pub peers: Arc<Mutex<Vec<ListpeersPeers>>>,
+    pub peer_channels: Arc<Mutex<BTreeMap<String, ListpeerchannelsChannels>>>,
     pub graph: Arc<Mutex<LnGraph>>,
     pub pays: Arc<RwLock<HashMap<String, String>>>,
     pub alias_peer_map: Arc<Mutex<HashMap<PublicKey, String>>>,
@@ -41,7 +41,7 @@ impl PluginState {
     pub fn new() -> PluginState {
         PluginState {
             config: Arc::new(Mutex::new(Config::new())),
-            peers: Arc::new(Mutex::new(Vec::new())),
+            peer_channels: Arc::new(Mutex::new(BTreeMap::new())),
             graph: Arc::new(Mutex::new(LnGraph::new())),
             pays: Arc::new(RwLock::new(HashMap::new())),
             alias_peer_map: Arc::new(Mutex::new(HashMap::new())),
@@ -260,7 +260,11 @@ pub struct Job {
 }
 
 impl Job {
-    pub fn is_balanced(&self, channel: &ListpeersPeersChannels, chan_id: &ShortChannelId) -> bool {
+    pub fn is_balanced(
+        &self,
+        channel: &ListpeerchannelsChannels,
+        chan_id: &ShortChannelId,
+    ) -> bool {
         let target_cap = self.target_cap(channel);
         debug!(
             "{}: target: {}sats",
@@ -276,7 +280,7 @@ impl Job {
             SatDirection::Push => channel_msat - to_us_msat >= target_cap,
         }
     }
-    pub fn target_cap(&self, channel: &ListpeersPeersChannels) -> u64 {
+    pub fn target_cap(&self, channel: &ListpeerchannelsChannels) -> u64 {
         let target = match self.target {
             Some(t) => t,
             None => 0.5,

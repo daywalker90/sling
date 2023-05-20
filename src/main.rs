@@ -217,7 +217,7 @@ async fn main() -> Result<(), anyhow::Error> {
         }
         let peersclone = plugin.clone();
         tokio::spawn(async move {
-            match tasks::refresh_listpeers(peersclone).await {
+            match tasks::refresh_listpeerchannels(peersclone).await {
                 Ok(()) => (),
                 Err(e) => warn!("Error in refresh_listpeers thread: {:?}", e),
             };

@@ -1,11 +1,14 @@
 use bitcoin::hashes::Hash;
 use bitcoin::hashes::HashEngine;
 use cln_rpc::model::ListchannelsChannels;
-use cln_rpc::model::ListpeersPeersChannelsState;
+use cln_rpc::model::ListpeerchannelsChannels;
+use cln_rpc::model::ListpeerchannelsChannelsHtlcsDirection;
+use cln_rpc::model::ListpeerchannelsChannelsState;
 use cln_rpc::primitives::PublicKey;
 use cln_rpc::primitives::Sha256;
 use parking_lot::Mutex;
 use rand::Rng;
+use std::collections::BTreeMap;
 use std::io;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -14,18 +17,16 @@ use std::time::Duration;
 use std::{collections::HashMap, path::Path};
 
 use crate::jobs::slingstop;
+use crate::list_peer_channels;
 use crate::model::PluginState;
 use crate::model::{Job, JobMessage, JobState, LnGraph, SatDirection};
 use crate::EXCEPTS_PEERS_FILE_NAME;
 
-use crate::{list_peers, EXCEPTS_CHANS_FILE_NAME, GRAPH_FILE_NAME, JOB_FILE_NAME, PLUGIN_NAME};
+use crate::{EXCEPTS_CHANS_FILE_NAME, GRAPH_FILE_NAME, JOB_FILE_NAME, PLUGIN_NAME};
 use anyhow::{anyhow, Error};
 use bitcoin::consensus::encode::serialize_hex;
 use cln_plugin::Plugin;
 
-use cln_rpc::model::{
-    ListpeersPeers, ListpeersPeersChannels, ListpeersPeersChannelsHtlcsDirection,
-};
 use cln_rpc::primitives::ShortChannelId;
 use log::{debug, info, warn};
 
@@ -180,7 +181,7 @@ pub async fn slingjob(
                     "Atleast one of outppm and candidatelist need to be set"
                 ));
             }
-            let peers = p.state().peers.lock().clone();
+            let peer_channels = p.state().peer_channels.lock().clone();
             let job = Job {
                 sat_direction,
                 amount,
@@ -192,7 +193,7 @@ pub async fn slingjob(
                 depleteuptopercent,
                 depleteuptoamount,
             };
-            let our_listpeers_channel = get_normal_channel_from_listpeers(&peers, chan_id);
+            let our_listpeers_channel = get_normal_channel_from_listpeerchannels(&peer_channels, &chan_id.to_string());
             if let Some(_channel) = our_listpeers_channel {
                 write_job(p.clone(), sling_dir, chan_id.to_string(), Some(job), false).await?;
                 Ok(json!({"result":"success"}))
@@ -212,7 +213,7 @@ pub async fn slingjobsettings(
     args: serde_json::Value,
 ) -> Result<serde_json::Value, Error> {
     let sling_dir = Path::new(&p.configuration().lightning_dir).join(PLUGIN_NAME);
-    let peers = p.state().peers.lock().clone();
+    let peers = p.state().peer_channels.lock().clone();
     let jobs = read_jobs(&sling_dir, &peers).await?;
     let mut json_jobs: Vec<serde_json::Value> = vec![];
     match args {
@@ -247,10 +248,16 @@ pub async fn slingjobsettings(
 
 pub async fn refresh_joblists(p: Plugin<PluginState>) -> Result<(), Error> {
     let now = Instant::now();
-    let peers = list_peers(&make_rpc_path(&p.clone())).await?.peers;
+    let peer_channels = list_peer_channels(&make_rpc_path(&p.clone()))
+        .await?
+        .channels
+        .ok_or(anyhow!("refresh_joblists: no channels found!"))?
+        .into_iter()
+        .filter_map(|channel| channel.short_channel_id.map(|id| (id.to_string(), channel)))
+        .collect();
     let jobs = read_jobs(
         &Path::new(&p.configuration().lightning_dir).join(PLUGIN_NAME),
-        &peers,
+        &peer_channels,
     )
     .await?;
     let mut pull_jobs = p.state().pull_jobs.lock();
@@ -322,25 +329,25 @@ pub async fn slingversion(
 
 pub async fn read_jobs(
     sling_dir: &PathBuf,
-    peers: &Vec<ListpeersPeers>,
-) -> Result<HashMap<String, Job>, Error> {
+    peer_channels: &BTreeMap<String, ListpeerchannelsChannels>,
+) -> Result<BTreeMap<String, Job>, Error> {
     let jobfile = sling_dir.join(JOB_FILE_NAME);
     let jobfilecontent = fs::read_to_string(jobfile.clone()).await;
-    let mut jobs: HashMap<String, Job>;
+    let mut jobs: BTreeMap<String, Job>;
 
     create_sling_dir(sling_dir).await?;
     match jobfilecontent {
-        Ok(file) => jobs = serde_json::from_str(&file).unwrap_or(HashMap::new()),
+        Ok(file) => jobs = serde_json::from_str(&file).unwrap_or(BTreeMap::new()),
         Err(e) => {
             warn!(
                 "Could not open {}: {}. Maybe this is the first time using sling? Creating new file.",
                 jobfile.to_str().unwrap(), e.to_string()
             );
             File::create(jobfile.clone()).await?;
-            jobs = HashMap::new();
+            jobs = BTreeMap::new();
         }
     };
-    let channels = get_all_normal_channels_from_listpeers(peers);
+    let channels = get_all_normal_channels_from_listpeerchannels(peer_channels);
     let channels = channels.keys().collect::<Vec<&String>>();
 
     jobs.retain(|c, _j| channels.contains(&c));
@@ -353,9 +360,9 @@ async fn write_job(
     chan_id: String,
     job: Option<Job>,
     remove: bool,
-) -> Result<HashMap<String, Job>, Error> {
-    let peers = p.state().peers.lock().clone();
-    let mut jobs = read_jobs(&sling_dir, &peers).await?;
+) -> Result<BTreeMap<String, Job>, Error> {
+    let peer_channels = p.state().peer_channels.lock().clone();
+    let mut jobs = read_jobs(&sling_dir, &peer_channels).await?;
     let job_change;
     let my_job;
     let jobstates = p.state().job_state.lock().clone();
@@ -398,11 +405,9 @@ async fn write_job(
         jobs.insert(chan_id, my_job);
     }
     let mut jobs_to_remove = Vec::new();
-    if peers.len() > 0 {
+    if peer_channels.len() > 0 {
         for (chan_id, _job) in &jobs {
-            if let None =
-                get_normal_channel_from_listpeers(&peers, ShortChannelId::from_str(&chan_id)?)
-            {
+            if let None = get_normal_channel_from_listpeerchannels(&peer_channels, chan_id) {
                 jobs_to_remove.push(chan_id.clone());
             }
         }
@@ -421,7 +426,7 @@ pub async fn slingexceptchan(
     plugin: Plugin<PluginState>,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, Error> {
-    let peers = plugin.state().peers.lock().clone();
+    let peer_channels = plugin.state().peer_channels.lock().clone();
     match args {
         serde_json::Value::Array(a) => {
             if a.len() > 2 || a.len() == 0 {
@@ -455,18 +460,8 @@ pub async fn slingexceptchan(
                                 } else {
                                     let pull_jobs = plugin.state().pull_jobs.lock().clone();
                                     let push_jobs = plugin.state().push_jobs.lock().clone();
-                                    let peer_channel = peers
-                                        .iter()
-                                        .find_map(|peer| {
-                                            if let Some(channels) = &peer.channels {
-                                                channels.iter().find(|channel| {
-                                                    channel.short_channel_id.as_ref().map_or(false, |x| *x == scid)
-                                                })
-                                            } else {
-                                                None
-                                            }
-                                        });
-                                    if let Some(_) = peer_channel {
+                                    
+                                    if let Some(_) = peer_channels.get(&scid.to_string()) {
                                         if pull_jobs.contains(&scid.to_string())
                                             || push_jobs.contains(&scid.to_string())
                                         {
@@ -521,7 +516,7 @@ pub async fn slingexceptpeer(
     plugin: Plugin<PluginState>,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, Error> {
-    let peers = plugin.state().peers.lock().clone();
+    let peer_channels = plugin.state().peer_channels.lock().clone();
     match args {
         serde_json::Value::Array(a) => {
             if a.len() > 2 || a.len() == 0 {
@@ -555,9 +550,11 @@ pub async fn slingexceptpeer(
                                     let mut all_job_peers: Vec<PublicKey> = vec![];
                                     debug!("{:?}",all_jobs);
                                     for job in &all_jobs{
-                                        match get_peer_id_from_chan_id(&peers, ShortChannelId::from_str(job).unwrap()){
-                                            Ok(p)=>all_job_peers.push(p),
-                                            Err(_)=> (),
+                                        match peer_channels.get(job){
+                                            Some(peer)=> all_job_peers.push(peer.peer_id.unwrap()),
+                                            None=> return Err(anyhow!(
+                                                "peer not found"
+                                            )),
                                         };
                                     }
                                     if all_job_peers.contains(&pubkey) {
@@ -750,57 +747,28 @@ pub fn get_preimage_paymend_hash_pair() -> (String, Sha256) {
     (pi_str, payment_hash)
 }
 
-pub fn get_out_htlc_count(channel: &ListpeersPeersChannels) -> u64 {
+pub fn get_out_htlc_count(channel: &ListpeerchannelsChannels) -> u64 {
     match &channel.htlcs {
         Some(htlcs) => htlcs
             .into_iter()
-            .filter(|htlc| match htlc.direction {
-                ListpeersPeersChannelsHtlcsDirection::OUT => true,
-                ListpeersPeersChannelsHtlcsDirection::IN => false,
+            .filter(|htlc| match htlc.direction.unwrap() {
+                ListpeerchannelsChannelsHtlcsDirection::OUT => true,
+                ListpeerchannelsChannelsHtlcsDirection::IN => false,
             })
             .count() as u64,
         None => 0,
     }
 }
-pub fn get_in_htlc_count(channel: &ListpeersPeersChannels) -> u64 {
+pub fn get_in_htlc_count(channel: &ListpeerchannelsChannels) -> u64 {
     match &channel.htlcs {
         Some(htlcs) => htlcs
             .into_iter()
-            .filter(|htlc| match htlc.direction {
-                ListpeersPeersChannelsHtlcsDirection::OUT => false,
-                ListpeersPeersChannelsHtlcsDirection::IN => true,
+            .filter(|htlc| match htlc.direction.unwrap() {
+                ListpeerchannelsChannelsHtlcsDirection::OUT => false,
+                ListpeerchannelsChannelsHtlcsDirection::IN => true,
             })
             .count() as u64,
         None => 0,
-    }
-}
-
-pub fn get_peer_id_from_chan_id(
-    peers: &Vec<ListpeersPeers>,
-    channel: ShortChannelId,
-) -> Result<PublicKey, Error> {
-    let now = Instant::now();
-    let peer = peers.iter().find(|peer| {
-        if let Some(channels) = &peer.channels {
-            channels.iter().any(|chan| {
-                chan.short_channel_id
-                    .as_ref()
-                    .map_or(false, |x| *x == channel)
-            })
-        } else {
-            false
-        }
-    });
-
-    match peer {
-        Some(p) => Ok(p.id),
-        None => {
-            debug!(
-                "get_peer_id_from_chan_id in {}ms",
-                now.elapsed().as_millis().to_string()
-            );
-            Err(anyhow!("{} disappeard from peers", channel.to_string()))
-        }
     }
 }
 
@@ -838,49 +806,43 @@ pub fn make_rpc_path(plugin: &Plugin<PluginState>) -> PathBuf {
     Path::new(&plugin.configuration().lightning_dir).join(plugin.configuration().rpc_file)
 }
 
-pub fn is_channel_normal(channel: &ListpeersPeersChannels) -> bool {
+pub fn is_channel_normal(channel: &ListpeerchannelsChannels) -> bool {
     match channel.state {
-        ListpeersPeersChannelsState::CHANNELD_NORMAL => true,
-        _ => false,
+        Some(state) => match state{
+            ListpeerchannelsChannelsState::CHANNELD_NORMAL => true,
+            _ => false,
+        }
+        None => false,
     }
 }
 
-pub fn get_normal_channel_from_listpeers(
-    peers: &Vec<ListpeersPeers>,
-    chan_id: ShortChannelId,
-) -> Option<ListpeersPeersChannels> {
-    peers
-        .iter()
-        .find_map(|peer| {
-            if let Some(channels) = &peer.channels {
-                channels.iter().find(|channel| {
-                    channel
-                        .short_channel_id
-                        .as_ref()
-                        .map_or(false, |x| *x == chan_id)
-                        && is_channel_normal(channel)
-                })
-            } else {
-                None
+pub fn get_normal_channel_from_listpeerchannels(
+    peer_channels: &BTreeMap<String, ListpeerchannelsChannels>,
+    chan_id: &String,
+) -> Option<ListpeerchannelsChannels> {
+    match peer_channels.get(chan_id){
+        Some(chan) => if let Some(state) = chan.state {
+            match state{
+                ListpeerchannelsChannelsState::CHANNELD_NORMAL => Some(chan.clone()),
+                _ => None,
             }
-        })
-        .cloned()
+        } else {
+            None
+        }
+        None => None,
+    }
 }
 
-pub fn get_all_normal_channels_from_listpeers(
-    peers: &Vec<ListpeersPeers>,
-) -> HashMap<String, PublicKey> {
-    let mut scid_peer_map = HashMap::new();
-    for peer in peers {
-        if let Some(channels) = &peer.channels {
-            for channel in channels {
-                if is_channel_normal(channel) {
-                    scid_peer_map.insert(
-                        channel.short_channel_id.unwrap().to_string(),
-                        peer.id.clone(),
-                    );
-                }
-            }
+pub fn get_all_normal_channels_from_listpeerchannels(
+    peer_channels: &BTreeMap<String, ListpeerchannelsChannels>,
+) -> BTreeMap<String, PublicKey> {
+    let mut scid_peer_map = BTreeMap::new();
+    for channel in peer_channels.values() {
+        if is_channel_normal(channel) {
+            scid_peer_map.insert(
+                channel.short_channel_id.unwrap().to_string(),
+                channel.peer_id.unwrap().clone(),
+            );
         }
     }
     scid_peer_map

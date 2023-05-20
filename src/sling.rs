@@ -1,4 +1,4 @@
-use anyhow::Error;
+use anyhow::{anyhow, Error};
 
 use cln_plugin::Plugin;
 
@@ -8,6 +8,7 @@ use log::{debug, info, warn};
 
 use parking_lot::Mutex;
 use std::cmp::{max, min};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -24,8 +25,8 @@ use crate::model::{
 };
 use crate::util::{
     channel_jobstate_update, feeppm_effective, feeppm_effective_from_amts, get_in_htlc_count,
-    get_normal_channel_from_listpeers, get_out_htlc_count, get_peer_id_from_chan_id,
-    get_preimage_paymend_hash_pair, my_sleep,
+    get_normal_channel_from_listpeerchannels, get_out_htlc_count, get_preimage_paymend_hash_pair,
+    is_channel_normal, my_sleep,
 };
 use crate::{slingsend, waitsendpay, PLUGIN_NAME};
 
@@ -70,16 +71,20 @@ pub async fn sling(
             break;
         }
 
-        let peers = plugin.state().peers.lock().clone();
+        let peer_channels = plugin.state().peer_channels.lock().clone();
 
-        let other_peer = get_peer_id_from_chan_id(&peers, chan_id)?;
+        let other_peer = peer_channels
+            .get(&chan_id.to_string())
+            .ok_or(anyhow!("other_peer: channel not found"))?
+            .peer_id
+            .ok_or(anyhow!("other_peer: peer id gone"))?;
 
         let tempbans = plugin.state().tempbans.lock().clone();
 
         match health_check(
             chan_id,
             &job,
-            &peers,
+            &peer_channels,
             other_peer,
             plugin.state().job_state.clone(),
             &config,
@@ -124,15 +129,22 @@ pub async fn sling(
         match job.candidatelist {
             Some(ref c) => {
                 if c.len() > 0 {
-                    candidatelist =
-                        build_candidatelist(&peers, &job, &graph, &tempbans, &config, Some(c))
+                    candidatelist = build_candidatelist(
+                        &peer_channels,
+                        &job,
+                        &graph,
+                        &tempbans,
+                        &config,
+                        Some(c),
+                    )
                 } else {
                     candidatelist =
-                        build_candidatelist(&peers, &job, &graph, &tempbans, &config, None)
+                        build_candidatelist(&peer_channels, &job, &graph, &tempbans, &config, None)
                 }
             }
             None => {
-                candidatelist = build_candidatelist(&peers, &job, &graph, &tempbans, &config, None)
+                candidatelist =
+                    build_candidatelist(&peer_channels, &job, &graph, &tempbans, &config, None)
             }
         }
         debug!(
@@ -709,105 +721,125 @@ pub async fn sling(
 async fn health_check(
     chan_id: ShortChannelId,
     job: &Job,
-    peers: &Vec<ListpeersPeers>,
+    peer_channels: &BTreeMap<String, ListpeerchannelsChannels>,
     other_peer: PublicKey,
     job_states: Arc<Mutex<HashMap<String, JobState>>>,
     config: &Config,
     tempbans: &HashMap<String, u64>,
 ) -> Option<bool> {
-    let our_listpeers_channel = get_normal_channel_from_listpeers(peers, chan_id);
+    let our_listpeers_channel =
+        get_normal_channel_from_listpeerchannels(peer_channels, &chan_id.to_string());
     if let Some(channel) = our_listpeers_channel {
-        if job.is_balanced(&channel, &chan_id)
-            || match job.sat_direction {
-                SatDirection::Pull => Amount::msat(&channel.receivable_msat.unwrap()) < job.amount,
-                SatDirection::Push => Amount::msat(&channel.spendable_msat.unwrap()) < job.amount,
+        if is_channel_normal(&channel) {
+            if job.is_balanced(&channel, &chan_id)
+                || match job.sat_direction {
+                    SatDirection::Pull => {
+                        Amount::msat(&channel.receivable_msat.unwrap()) < job.amount
+                    }
+                    SatDirection::Push => {
+                        Amount::msat(&channel.spendable_msat.unwrap()) < job.amount
+                    }
+                }
+            {
+                info!(
+                    "{}: already balanced. Taking a break...",
+                    chan_id.to_string()
+                );
+                channel_jobstate_update(
+                    job_states.clone(),
+                    chan_id,
+                    JobMessage::Balanced,
+                    None,
+                    None,
+                );
+                my_sleep(600, job_states.clone(), &chan_id).await;
+                Some(true)
+            } else if match job.sat_direction {
+                SatDirection::Pull => get_in_htlc_count(&channel) > config.max_htlc_count.1,
+                SatDirection::Push => get_out_htlc_count(&channel) > config.max_htlc_count.1,
+            } {
+                info!(
+                    "{}: already more than {} pending htlcs. Taking a break...",
+                    chan_id.to_string(),
+                    config.max_htlc_count.1
+                );
+                channel_jobstate_update(
+                    job_states.clone(),
+                    chan_id,
+                    JobMessage::HTLCcapped,
+                    None,
+                    None,
+                );
+                my_sleep(10, job_states.clone(), &chan_id).await;
+                Some(true)
+            } else {
+                match peer_channels
+                    .values()
+                    .find(|x| x.peer_id.unwrap() == other_peer)
+                {
+                    Some(p) => {
+                        if !p.peer_connected.unwrap() {
+                            info!("{}: not connected. Taking a break...", chan_id.to_string());
+                            channel_jobstate_update(
+                                job_states.clone(),
+                                chan_id,
+                                JobMessage::Disconnected,
+                                None,
+                                None,
+                            );
+                            my_sleep(60, job_states.clone(), &chan_id).await;
+                            Some(true)
+                        } else if match job.sat_direction {
+                            SatDirection::Pull => false,
+                            SatDirection::Push => true,
+                        } && tempbans.contains_key(&chan_id.to_string())
+                        {
+                            info!(
+                                "{}: First peer not ready. Taking a break...",
+                                chan_id.to_string()
+                            );
+                            channel_jobstate_update(
+                                job_states.clone(),
+                                chan_id,
+                                JobMessage::PeerNotReady,
+                                None,
+                                None,
+                            );
+                            my_sleep(20, job_states.clone(), &chan_id).await;
+                            Some(true)
+                        } else {
+                            None
+                        }
+                    }
+                    None => {
+                        channel_jobstate_update(
+                            job_states.clone(),
+                            chan_id,
+                            JobMessage::PeerNotFound,
+                            Some(false),
+                            None,
+                        );
+                        warn!("{}: peer not found. Stopping job.", chan_id.to_string());
+                        Some(false)
+                    }
+                }
             }
-        {
-            info!(
-                "{}: already balanced. Taking a break...",
+        } else {
+            warn!(
+                "{}: not in CHANNELD_NORMAL state. Stopping Job.",
                 chan_id.to_string()
             );
             channel_jobstate_update(
                 job_states.clone(),
                 chan_id,
-                JobMessage::Balanced,
-                None,
-                None,
-            );
-            my_sleep(600, job_states.clone(), &chan_id).await;
-            Some(true)
-        } else if match job.sat_direction {
-            SatDirection::Pull => get_in_htlc_count(&channel) > config.max_htlc_count.1,
-            SatDirection::Push => get_out_htlc_count(&channel) > config.max_htlc_count.1,
-        } {
-            info!(
-                "{}: already more than {} pending htlcs. Taking a break...",
-                chan_id.to_string(),
-                config.max_htlc_count.1
-            );
-            channel_jobstate_update(
-                job_states.clone(),
-                chan_id,
-                JobMessage::HTLCcapped,
-                None,
+                JobMessage::ChanNotNormal,
+                Some(false),
                 None,
             );
-            my_sleep(10, job_states.clone(), &chan_id).await;
-            Some(true)
-        } else {
-            match peers.iter().find(|x| x.id == other_peer) {
-                Some(p) => {
-                    if !p.connected {
-                        info!("{}: not connected. Taking a break...", chan_id.to_string());
-                        channel_jobstate_update(
-                            job_states.clone(),
-                            chan_id,
-                            JobMessage::Disconnected,
-                            None,
-                            None,
-                        );
-                        my_sleep(60, job_states.clone(), &chan_id).await;
-                        Some(true)
-                    } else if match job.sat_direction {
-                        SatDirection::Pull => false,
-                        SatDirection::Push => true,
-                    } && tempbans.contains_key(&chan_id.to_string())
-                    {
-                        info!(
-                            "{}: First peer not ready. Taking a break...",
-                            chan_id.to_string()
-                        );
-                        channel_jobstate_update(
-                            job_states.clone(),
-                            chan_id,
-                            JobMessage::PeerNotReady,
-                            None,
-                            None,
-                        );
-                        my_sleep(20, job_states.clone(), &chan_id).await;
-                        Some(true)
-                    } else {
-                        None
-                    }
-                }
-                None => {
-                    channel_jobstate_update(
-                        job_states.clone(),
-                        chan_id,
-                        JobMessage::PeerNotFound,
-                        Some(false),
-                        None,
-                    );
-                    warn!("{}: peer not found. Stopping job.", chan_id.to_string());
-                    Some(false)
-                }
-            }
+            Some(false)
         }
     } else {
-        warn!(
-            "{}: not in CHANNELD_NORMAL state. Stopping Job.",
-            chan_id.to_string()
-        );
+        warn!("{}: not found. Stopping Job.", chan_id.to_string());
         channel_jobstate_update(
             job_states.clone(),
             chan_id,
@@ -820,7 +852,7 @@ async fn health_check(
 }
 
 fn build_candidatelist(
-    peers: &Vec<ListpeersPeers>,
+    peer_channels: &BTreeMap<String, ListpeerchannelsChannels>,
     job: &Job,
     graph: &LnGraph,
     tempbans: &HashMap<String, u64>,
@@ -838,73 +870,69 @@ fn build_candidatelist(
         None => config.depleteuptoamount.1,
     };
 
-    for peer in peers {
-        if let Some(channels) = &peer.channels {
-            for channel in channels {
-                if let Some(scid) = channel.short_channel_id {
-                    if match channel.state {
-                        ListpeersPeersChannelsState::CHANNELD_NORMAL => true,
-                        _ => false,
-                    } && peer.connected
-                        && match custom_candidates {
-                            Some(c) => c.iter().any(|c| c.to_string() == scid.to_string()),
-                            None => true,
-                        }
-                    {
-                        let chan_from_peer = match graph.get_channel(peer.id, scid) {
-                            Ok(chan) => chan.channel,
-                            Err(_) => continue,
-                        };
+    for channel in peer_channels.values() {
+        if let Some(scid) = channel.short_channel_id {
+            if match channel.state.unwrap() {
+                ListpeerchannelsChannelsState::CHANNELD_NORMAL => true,
+                _ => false,
+            } && channel.peer_connected.unwrap()
+                && match custom_candidates {
+                    Some(c) => c.iter().any(|c| c.to_string() == scid.to_string()),
+                    None => true,
+                }
+            {
+                let chan_from_peer = match graph.get_channel(channel.peer_id.unwrap(), scid) {
+                    Ok(chan) => chan.channel,
+                    Err(_) => continue,
+                };
 
-                        let to_us_msat = Amount::msat(&channel.to_us_msat.unwrap());
-                        let total_msat = Amount::msat(&channel.total_msat.unwrap());
-                        let chan_out_ppm = feeppm_effective(
-                            channel.fee_proportional_millionths.unwrap(),
-                            Amount::msat(&channel.fee_base_msat.unwrap()) as u32,
-                            job.amount,
-                        );
-                        let chan_in_ppm = feeppm_effective(
-                            chan_from_peer.fee_per_millionth,
-                            chan_from_peer.base_fee_millisatoshi,
-                            job.amount,
-                        );
-                        if match job.sat_direction {
-                            SatDirection::Pull => {
-                                to_us_msat
-                                    > max(
-                                        job.amount + 10_000_000,
-                                        min(
-                                            (depleteuptopercent * total_msat as f64) as u64,
-                                            depleteuptoamount,
-                                        ),
-                                    )
-                                    && match job.outppm {
-                                        Some(out) => chan_out_ppm <= out,
-                                        None => true,
-                                    }
-                                    && get_out_htlc_count(channel) <= config.max_htlc_count.1
+                let to_us_msat = Amount::msat(&channel.to_us_msat.unwrap());
+                let total_msat = Amount::msat(&channel.total_msat.unwrap());
+                let chan_out_ppm = feeppm_effective(
+                    channel.fee_proportional_millionths.unwrap(),
+                    Amount::msat(&channel.fee_base_msat.unwrap()) as u32,
+                    job.amount,
+                );
+                let chan_in_ppm = feeppm_effective(
+                    chan_from_peer.fee_per_millionth,
+                    chan_from_peer.base_fee_millisatoshi,
+                    job.amount,
+                );
+                if match job.sat_direction {
+                    SatDirection::Pull => {
+                        to_us_msat
+                            > max(
+                                job.amount + 10_000_000,
+                                min(
+                                    (depleteuptopercent * total_msat as f64) as u64,
+                                    depleteuptoamount,
+                                ),
+                            )
+                            && match job.outppm {
+                                Some(out) => chan_out_ppm <= out,
+                                None => true,
                             }
-                            SatDirection::Push => {
-                                total_msat - to_us_msat
-                                    > max(
-                                        job.amount + 10_000_000,
-                                        min(
-                                            (depleteuptopercent * total_msat as f64) as u64,
-                                            depleteuptoamount,
-                                        ),
-                                    )
-                                    && match job.outppm {
-                                        Some(out) => chan_out_ppm >= out,
-                                        None => true,
-                                    }
-                                    && job.maxppm as u64 >= chan_in_ppm
-                                    && get_in_htlc_count(channel) <= config.max_htlc_count.1
-                            }
-                        } && !tempbans.contains_key(&scid.to_string())
-                        {
-                            candidatelist.push(scid.clone());
-                        }
+                            && get_out_htlc_count(channel) <= config.max_htlc_count.1
                     }
+                    SatDirection::Push => {
+                        total_msat - to_us_msat
+                            > max(
+                                job.amount + 10_000_000,
+                                min(
+                                    (depleteuptopercent * total_msat as f64) as u64,
+                                    depleteuptoamount,
+                                ),
+                            )
+                            && match job.outppm {
+                                Some(out) => chan_out_ppm >= out,
+                                None => true,
+                            }
+                            && job.maxppm as u64 >= chan_in_ppm
+                            && get_in_htlc_count(channel) <= config.max_htlc_count.1
+                    }
+                } && !tempbans.contains_key(&scid.to_string())
+                {
+                    candidatelist.push(scid.clone());
                 }
             }
         }

@@ -63,6 +63,20 @@ pub async fn list_peers(rpc_path: &PathBuf) -> Result<ListpeersResponse, Error> 
     }
 }
 
+pub async fn list_peer_channels(rpc_path: &PathBuf) -> Result<ListpeerchannelsResponse, Error> {
+    let mut rpc = ClnRpc::new(&rpc_path).await?;
+    let list_peer_channels = rpc
+        .call(Request::ListPeerChannels(ListpeerchannelsRequest {
+            id: None,
+        }))
+        .await
+        .map_err(|e| anyhow!("Error calling list_peer_channels: {}", e.to_string()))?;
+    match list_peer_channels {
+        Response::ListPeerChannels(info) => Ok(info),
+        e => Err(anyhow!("Unexpected result in list_peer_channels: {:?}", e)),
+    }
+}
+
 pub async fn list_nodes(
     rpc_path: &PathBuf,
     peer: Option<PublicKey>,

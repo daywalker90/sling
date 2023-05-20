@@ -13,7 +13,7 @@ use serde_json::json;
 use tabled::Table;
 
 use crate::model::{JobState, PluginState, StatSummary};
-use crate::util::{get_all_normal_channels_from_listpeers, refresh_joblists};
+use crate::util::{get_all_normal_channels_from_listpeerchannels, refresh_joblists};
 use crate::NO_ALIAS_SET;
 use crate::{
     model::{FailureReb, SuccessReb},
@@ -45,9 +45,9 @@ pub async fn slingstats(
                 let mut all_jobs: Vec<String> =
                     pull_jobs.into_iter().chain(push_jobs.into_iter()).collect();
                 let alias_map = plugin.state().alias_peer_map.lock().clone();
-                let peers = plugin.state().peers.lock().clone();
+                let peers = plugin.state().peer_channels.lock().clone();
                 let mut normal_channels_alias: HashMap<String, String> = HashMap::new();
-                let scid_peer_map = get_all_normal_channels_from_listpeers(&peers);
+                let scid_peer_map = get_all_normal_channels_from_listpeerchannels(&peers);
                 for (scid, peer) in &scid_peer_map {
                     normal_channels_alias.insert(
                         scid.clone(),

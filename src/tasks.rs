@@ -6,18 +6,18 @@ use std::{
 };
 
 use crate::{
-    list_channels, list_nodes, list_peers,
+    list_channels, list_nodes, list_peer_channels,
     model::{
         DirectedChannel, FailureReb, LnGraph, PluginState, SuccessReb, FAILURES_SUFFIX,
         SUCCESSES_SUFFIX,
     },
     util::{
-        get_all_normal_channels_from_listpeers, make_rpc_path, read_graph, read_jobs,
+        get_all_normal_channels_from_listpeerchannels, make_rpc_path, read_graph, read_jobs,
         refresh_joblists, write_graph,
     },
     PLUGIN_NAME,
 };
-use anyhow::Error;
+use anyhow::{anyhow, Error};
 use cln_plugin::Plugin;
 use cln_rpc::primitives::{Amount, ShortChannelId};
 
@@ -56,7 +56,7 @@ pub async fn refresh_aliasmap(plugin: Plugin<PluginState>) -> Result<(), Error> 
     }
 }
 
-pub async fn refresh_listpeers(plugin: Plugin<PluginState>) -> Result<(), Error> {
+pub async fn refresh_listpeerchannels(plugin: Plugin<PluginState>) -> Result<(), Error> {
     let rpc_path = make_rpc_path(&plugin);
     let interval = plugin
         .state()
@@ -69,9 +69,15 @@ pub async fn refresh_listpeers(plugin: Plugin<PluginState>) -> Result<(), Error>
     loop {
         {
             let now = Instant::now();
-            *plugin.state().peers.lock() = list_peers(&rpc_path).await?.peers;
+            *plugin.state().peer_channels.lock() = list_peer_channels(&rpc_path)
+                .await?
+                .channels
+                .ok_or(anyhow!("refresh_listpeerchannels: no channels found!"))?
+                .into_iter()
+                .filter_map(|channel| channel.short_channel_id.map(|id| (id.to_string(), channel)))
+                .collect();
             debug!(
-                "Peers refreshed in {}ms",
+                "Peerchannels refreshed in {}ms",
                 now.elapsed().as_millis().to_string()
             );
         }
@@ -100,10 +106,10 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                 "Getting all channels done in {}s!",
                 now.elapsed().as_secs().to_string()
             );
-            let peers = plugin.state().peers.lock().clone();
+            let peer_channels = plugin.state().peer_channels.lock().clone();
             let jobs = read_jobs(
                 &Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME),
-                &peers,
+                &peer_channels,
             )
             .await?;
 
@@ -202,8 +208,8 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
             let push_jobs = plugin.state().push_jobs.lock().clone();
             let mut all_jobs: Vec<String> =
                 pull_jobs.into_iter().chain(push_jobs.into_iter()).collect();
-            let peers = plugin.state().peers.lock().clone();
-            let scid_peer_map = get_all_normal_channels_from_listpeers(&peers);
+            let peer_channels = plugin.state().peer_channels.lock().clone();
+            let scid_peer_map = get_all_normal_channels_from_listpeerchannels(&peer_channels);
             all_jobs.retain(|c| scid_peer_map.contains_key(c));
             for scid in &all_jobs {
                 match SuccessReb::read_from_file(

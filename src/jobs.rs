@@ -20,10 +20,10 @@ pub async fn slinggo(
     p: Plugin<PluginState>,
     _v: serde_json::Value,
 ) -> Result<serde_json::Value, Error> {
-    let peers = p.state().peers.lock().clone();
+    let peer_channels = p.state().peer_channels.lock().clone();
     let jobs = read_jobs(
         &Path::new(&p.configuration().lightning_dir).join(PLUGIN_NAME),
-        &peers,
+        &peer_channels,
     )
     .await?;
     if jobs.len() == 0 {
