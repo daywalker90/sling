@@ -178,7 +178,7 @@ pub async fn slingjob(
             };
             if outppm.is_none() && candidatelist.is_none() {
                 return Err(anyhow!(
-                    "Atleast one of outppm and candidatelist need to be set"
+                    "Atleast one of outppm and candidatelist need to be set."
                 ));
             }
             let peer_channels = p.state().peer_channels.lock().clone();
@@ -193,7 +193,8 @@ pub async fn slingjob(
                 depleteuptopercent,
                 depleteuptoamount,
             };
-            let our_listpeers_channel = get_normal_channel_from_listpeerchannels(&peer_channels, &chan_id.to_string());
+            let our_listpeers_channel =
+                get_normal_channel_from_listpeerchannels(&peer_channels, &chan_id.to_string());
             if let Some(_channel) = our_listpeers_channel {
                 write_job(p.clone(), sling_dir, chan_id.to_string(), Some(job), false).await?;
                 Ok(json!({"result":"success"}))
@@ -460,7 +461,6 @@ pub async fn slingexceptchan(
                                 } else {
                                     let pull_jobs = plugin.state().pull_jobs.lock().clone();
                                     let push_jobs = plugin.state().push_jobs.lock().clone();
-                                    
                                     if let Some(_) = peer_channels.get(&scid.to_string()) {
                                         if pull_jobs.contains(&scid.to_string())
                                             || push_jobs.contains(&scid.to_string())
@@ -486,10 +486,18 @@ pub async fn slingexceptchan(
                                     ));
                                 }
                             }
-                            _ => return Err(anyhow!("Unknown commmand. Please either provide `add`/`remove` and a short_channel_id or just `list`")),
+                            _ => {
+                                return Err(anyhow!(
+                                    "Use `add`/`remove` and a short_channel_id or just `list`"
+                                ))
+                            }
                         }
                     }
-                    _ => return Err(anyhow!("Invalid command. Please either provide `add`/`remove` and a short_channel_id or just `list`")),
+                    _ => {
+                        return Err(anyhow!(
+                            "Use `add`/`remove` and a short_channel_id or just `list`"
+                        ))
+                    }
                 }
                 let excepts = plugin.state().excepts_chans.lock().clone();
                 let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
@@ -501,10 +509,14 @@ pub async fn slingexceptchan(
                         let excepts = plugin.state().excepts_chans.lock();
                         match i {
                             opt if opt.eq("list") => Ok(json!(excepts.clone())),
-                            _ => Err(anyhow!("unknown commmand, did you misspell `list` or forgot the scid?")),
+                            _ => Err(anyhow!(
+                                "unknown commmand, did you misspell `list` or forgot the scid?"
+                            )),
                         }
                     }
-                    _ => Err(anyhow!("Invalid command. Please either provide `add`/`remove` and a short_channel_id or just `list`")),
+                    _ => Err(anyhow!(
+                        "Use `add`/`remove` and a short_channel_id or just `list`"
+                    )),
                 }
             }
         }
@@ -808,10 +820,10 @@ pub fn make_rpc_path(plugin: &Plugin<PluginState>) -> PathBuf {
 
 pub fn is_channel_normal(channel: &ListpeerchannelsChannels) -> bool {
     match channel.state {
-        Some(state) => match state{
+        Some(state) => match state {
             ListpeerchannelsChannelsState::CHANNELD_NORMAL => true,
             _ => false,
-        }
+        },
         None => false,
     }
 }
@@ -820,14 +832,16 @@ pub fn get_normal_channel_from_listpeerchannels(
     peer_channels: &BTreeMap<String, ListpeerchannelsChannels>,
     chan_id: &String,
 ) -> Option<ListpeerchannelsChannels> {
-    match peer_channels.get(chan_id){
-        Some(chan) => if let Some(state) = chan.state {
-            match state{
-                ListpeerchannelsChannelsState::CHANNELD_NORMAL => Some(chan.clone()),
-                _ => None,
+    match peer_channels.get(chan_id) {
+        Some(chan) => {
+            if let Some(state) = chan.state {
+                match state {
+                    ListpeerchannelsChannelsState::CHANNELD_NORMAL => Some(chan.clone()),
+                    _ => None,
+                }
+            } else {
+                None
             }
-        } else {
-            None
         }
         None => None,
     }
@@ -859,6 +873,6 @@ pub async fn my_sleep(
         if job_state.lock().get(&chan_id).unwrap().should_stop() {
             break;
         }
-        time::sleep(Duration::from_secs(2)).await;
+        time::sleep(Duration::from_secs(1)).await;
     }
 }

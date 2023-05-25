@@ -272,6 +272,13 @@ async fn main() -> Result<(), anyhow::Error> {
                 Err(e) => warn!("Error in clear_stats thread: {:?}", e),
             };
         });
+        let channelhealthclone = plugin.clone();
+        tokio::spawn(async move {
+            match tasks::channel_health(channelhealthclone).await {
+                Ok(()) => (),
+                Err(e) => warn!("Error in channel_health thread: {:?}", e),
+            };
+        });
         plugin.join().await
     } else {
         Err(anyhow!("Error starting the plugin!"))

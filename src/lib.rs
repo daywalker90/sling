@@ -36,6 +36,48 @@ pub const EXCEPTS_PEERS_FILE_NAME: &str = "excepts_peers.json";
 #[cfg(test)]
 mod tests;
 
+pub async fn set_channel(
+    rpc_path: &PathBuf,
+    id: String,
+    feebase: Option<Amount>,
+    feeppm: Option<u32>,
+    htlcmin: Option<Amount>,
+    htlcmax: Option<Amount>,
+    enforcedelay: Option<u32>,
+) -> Result<SetchannelResponse, Error> {
+    let mut rpc = ClnRpc::new(&rpc_path).await?;
+    let set_channel_request = rpc
+        .call(Request::SetChannel(SetchannelRequest {
+            id,
+            feebase,
+            feeppm,
+            htlcmin,
+            htlcmax,
+            enforcedelay,
+        }))
+        .await
+        .map_err(|e| anyhow!("Error calling set_channel: {:?}", e))?;
+    match set_channel_request {
+        Response::SetChannel(info) => Ok(info),
+        e => Err(anyhow!("Unexpected result in set_channel: {:?}", e)),
+    }
+}
+
+pub async fn disconnect(rpc_path: &PathBuf, id: PublicKey) -> Result<DisconnectResponse, Error> {
+    let mut rpc = ClnRpc::new(&rpc_path).await?;
+    let disconnect_request = rpc
+        .call(Request::Disconnect(DisconnectRequest {
+            id,
+            force: Some(true),
+        }))
+        .await
+        .map_err(|e| anyhow!("Error calling disconnect: {:?}", e))?;
+    match disconnect_request {
+        Response::Disconnect(info) => Ok(info),
+        e => Err(anyhow!("Unexpected result in disconnect: {:?}", e)),
+    }
+}
+
 pub async fn list_funds(rpc_path: &PathBuf) -> Result<ListfundsResponse, Error> {
     let mut rpc = ClnRpc::new(&rpc_path).await?;
     let listfunds_request = rpc
@@ -108,7 +150,9 @@ pub async fn list_channels(
         }))
         .await
         .map_err(|e| anyhow!("Error calling list_channels: {:?}", e))?;
-    debug!("Listchannels:{}ms", now.elapsed().as_millis().to_string());
+    if short_channel_id.is_none() && source.is_none() && destination.is_none() {
+        debug!("Listchannels:{}ms", now.elapsed().as_millis().to_string());
+    }
     match listchannels_request {
         Response::ListChannels(info) => Ok(info),
         e => Err(anyhow!("Unexpected result in list_channels: {:?}", e)),

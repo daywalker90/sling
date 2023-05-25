@@ -605,28 +605,33 @@ pub async fn sling(
                                             chan_id.to_string(),
                                             data.failcodename
                                         );
-                                        match job.sat_direction {
-                                            SatDirection::Pull => {
-                                                plugin.state().tempbans.lock().insert(
-                                                    route
-                                                        .get(route.len() - 3)
-                                                        .unwrap()
-                                                        .channel
-                                                        .to_string(),
-                                                    SystemTime::now()
-                                                        .duration_since(UNIX_EPOCH)
-                                                        .unwrap()
-                                                        .as_secs(),
-                                                );
-                                            }
-                                            SatDirection::Push => {
-                                                plugin.state().tempbans.lock().insert(
-                                                    route.last().unwrap().channel.to_string(),
-                                                    SystemTime::now()
-                                                        .duration_since(UNIX_EPOCH)
-                                                        .unwrap()
-                                                        .as_secs(),
-                                                );
+                                        if e.message.contains("Too many HTLCs") {
+                                            my_sleep(3, plugin.state().job_state.clone(), &chan_id)
+                                                .await;
+                                        } else {
+                                            match job.sat_direction {
+                                                SatDirection::Pull => {
+                                                    plugin.state().tempbans.lock().insert(
+                                                        route
+                                                            .get(route.len() - 3)
+                                                            .unwrap()
+                                                            .channel
+                                                            .to_string(),
+                                                        SystemTime::now()
+                                                            .duration_since(UNIX_EPOCH)
+                                                            .unwrap()
+                                                            .as_secs(),
+                                                    );
+                                                }
+                                                SatDirection::Push => {
+                                                    plugin.state().tempbans.lock().insert(
+                                                        route.last().unwrap().channel.to_string(),
+                                                        SystemTime::now()
+                                                            .duration_since(UNIX_EPOCH)
+                                                            .unwrap()
+                                                            .as_secs(),
+                                                    );
+                                                }
                                             }
                                         }
                                     } else if data.erring_channel.to_string()
@@ -637,23 +642,28 @@ pub async fn sling(
                                             chan_id.to_string(),
                                             e.message.clone()
                                         );
-                                        match job.sat_direction {
-                                            SatDirection::Pull => {
-                                                plugin.state().tempbans.lock().insert(
-                                                    route.first().unwrap().channel.to_string(),
-                                                    SystemTime::now()
-                                                        .duration_since(UNIX_EPOCH)
-                                                        .unwrap()
-                                                        .as_secs(),
-                                                );
-                                            }
-                                            SatDirection::Push => {
-                                                my_sleep(
-                                                    60,
-                                                    plugin.state().job_state.clone(),
-                                                    &chan_id,
-                                                )
+                                        if e.message.contains("Too many HTLCs") {
+                                            my_sleep(3, plugin.state().job_state.clone(), &chan_id)
                                                 .await;
+                                        } else {
+                                            match job.sat_direction {
+                                                SatDirection::Pull => {
+                                                    plugin.state().tempbans.lock().insert(
+                                                        route.first().unwrap().channel.to_string(),
+                                                        SystemTime::now()
+                                                            .duration_since(UNIX_EPOCH)
+                                                            .unwrap()
+                                                            .as_secs(),
+                                                    );
+                                                }
+                                                SatDirection::Push => {
+                                                    my_sleep(
+                                                        60,
+                                                        plugin.state().job_state.clone(),
+                                                        &chan_id,
+                                                    )
+                                                    .await;
+                                                }
                                             }
                                         }
                                     } else {

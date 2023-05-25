@@ -6,11 +6,12 @@ use std::{
 };
 
 use crate::{
-    list_channels, list_nodes, list_peer_channels,
+    disconnect, list_channels, list_nodes, list_peer_channels,
     model::{
         DirectedChannel, FailureReb, LnGraph, PluginState, SuccessReb, FAILURES_SUFFIX,
         SUCCESSES_SUFFIX,
     },
+    set_channel,
     util::{
         get_all_normal_channels_from_listpeerchannels, make_rpc_path, read_graph, read_jobs,
         refresh_joblists, write_graph,
@@ -19,10 +20,14 @@ use crate::{
 };
 use anyhow::{anyhow, Error};
 use cln_plugin::Plugin;
-use cln_rpc::primitives::{Amount, ShortChannelId};
+use cln_rpc::{
+    model::ListpeerchannelsChannelsState,
+    primitives::{Amount, ShortChannelId},
+};
 
-use log::{debug, info};
+use log::{debug, info, warn};
 
+use rand::Rng;
 use tokio::{
     fs::OpenOptions,
     io::AsyncWriteExt,
@@ -350,5 +355,181 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
             );
         }
         time::sleep(Duration::from_secs(21_600)).await;
+    }
+}
+
+pub async fn channel_health(plugin: Plugin<PluginState>) -> Result<(), Error> {
+    let rpc_path = &make_rpc_path(&plugin);
+    time::sleep(Duration::from_secs(60)).await;
+    loop {
+        {
+            let now = Instant::now();
+            let peer_channels = list_peer_channels(rpc_path).await?;
+            let alias_map = plugin.state().alias_peer_map.lock().clone();
+            let my_pubkey = plugin.state().config.lock().pubkey.unwrap();
+            let unix_now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            if let Some(channels) = peer_channels.channels {
+                for chan in &channels {
+                    let mut should_disconnect = false;
+                    if let Some(c) = chan.peer_connected {
+                        if c {
+                            ()
+                        } else {
+                            continue;
+                        }
+                    } else {
+                        continue;
+                    }
+
+                    if let Some(s) = chan.state {
+                        match s {
+                            ListpeerchannelsChannelsState::CHANNELD_NORMAL => (),
+                            _ => continue,
+                        }
+                    } else {
+                        continue;
+                    }
+
+                    let private;
+                    if let Some(p) = chan.private {
+                        private = p
+                    } else {
+                        continue;
+                    }
+
+                    let chan_id = chan.short_channel_id.unwrap();
+
+                    let channels_gossip = list_channels(rpc_path, Some(chan_id), None, None)
+                        .await?
+                        .channels;
+                    match channels_gossip.len() {
+                        0 => {
+                            warn!("channel_health: {} not in our gossip", chan_id.to_string());
+                            should_disconnect = true;
+                        }
+                        1 => {
+                            if channels_gossip.first().unwrap().source == my_pubkey {
+                                warn!(
+                                    "channel_health: {} has only our side in our gossip",
+                                    chan_id.to_string()
+                                );
+                            } else {
+                                warn!(
+                                    "channel_health: {} has only their side in our gossip",
+                                    chan_id.to_string()
+                                );
+                            }
+                            should_disconnect = true;
+                        }
+                        2 => {
+                            for chan_gossip in &channels_gossip {
+                                let active = chan_gossip.active;
+                                let public = chan_gossip.public;
+                                if private && !active {
+                                    warn!(
+                                        "channel_health: our private channel with {} is not active",
+                                        alias_map
+                                            .get(&chan.peer_id.unwrap())
+                                            .unwrap_or(&chan.peer_id.unwrap().to_string()),
+                                    );
+                                    should_disconnect = true;
+                                } else if !private && (!active || !public) {
+                                    warn!(
+                                        "channel_health: our public channel with {} is {} active and {} public",
+                                        alias_map
+                                            .get(&chan.peer_id.unwrap())
+                                            .unwrap_or(&chan.peer_id.unwrap().to_string()),
+                                        active,
+                                        public
+                                    );
+                                    should_disconnect = true;
+                                }
+                                if chan_gossip.source == my_pubkey {
+                                    if chan_gossip.last_update as u64 + 86_400 <= unix_now {
+                                        debug!(
+                                            "channel_health: our last update for {} is old",
+                                            alias_map
+                                                .get(&chan.peer_id.unwrap())
+                                                .unwrap_or(&chan.peer_id.unwrap().to_string())
+                                        );
+                                        let new_max_htlc;
+
+                                        let random_number = {
+                                            let mut rng = rand::thread_rng();
+                                            if rng.gen_bool(0.5) {
+                                                1
+                                            } else {
+                                                -1
+                                            }
+                                        };
+                                        if chan_gossip.htlc_maximum_msat.unwrap().msat()
+                                            > chan_gossip.htlc_minimum_msat.msat()
+                                        {
+                                            if chan_gossip.htlc_maximum_msat.unwrap().msat()
+                                                < chan.total_msat.unwrap().msat()
+                                                    - chan.our_reserve_msat.unwrap().msat()
+                                            {
+                                                new_max_htlc =
+                                                    (chan_gossip.htlc_maximum_msat.unwrap().msat()
+                                                        as i64
+                                                        + random_number as i64)
+                                                        as u64
+                                            } else {
+                                                new_max_htlc =
+                                                    chan_gossip.htlc_maximum_msat.unwrap().msat()
+                                                        - 1
+                                            }
+                                        } else {
+                                            new_max_htlc =
+                                                chan_gossip.htlc_maximum_msat.unwrap().msat() + 1
+                                        }
+                                        match set_channel(
+                                            rpc_path,
+                                            chan.short_channel_id.unwrap().to_string(),
+                                            None,
+                                            None,
+                                            None,
+                                            Some(Amount::from_msat(new_max_htlc)),
+                                            None,
+                                        )
+                                        .await
+                                        {
+                                            Ok(_o) => info!(
+                                                "Sent new channel update for {}.",
+                                                alias_map
+                                                    .get(&chan.peer_id.unwrap())
+                                                    .unwrap_or(&chan.peer_id.unwrap().to_string())
+                                            ),
+                                            Err(e) => warn!("Error in calling set_channel: {}", e),
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        _ => warn!(
+                            "channel_health: UNUSUAL amount of sides for {}",
+                            chan_id.to_string()
+                        ),
+                    }
+
+                    if should_disconnect {
+                        match disconnect(rpc_path, chan.peer_id.unwrap()).await {
+                            Ok(_res) => info!(
+                                "channel_health: disconnected {}",
+                                alias_map
+                                    .get(&chan.peer_id.unwrap())
+                                    .unwrap_or(&chan.peer_id.unwrap().to_string())
+                            ),
+                            Err(e) => warn!("channel_health: disconnect error: {}", e.to_string()),
+                        }
+                    }
+                }
+            }
+            info!("channel_health: finished in {}s", now.elapsed().as_secs());
+        }
+        time::sleep(Duration::from_secs(3_600)).await;
     }
 }
