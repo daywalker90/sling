@@ -103,9 +103,8 @@ Formula is ``min(depleteuptopercent * channel_capacity, depleteuptoamount)``. If
 ## How to set options
 ``sling`` is a dynamic plugin, so you can start it after cln is already running. You have two different methods of setting the options:
 
-1. when starting the plugin via ``lightning-cli plugin -k subcommand=start plugin=/path/to/sling``
-    **Example: ``lightning-cli -k plugin subcommand=start plugin=/path/to/sling sling-refresh-peers-interval=6``
-2. the cln config file: just like other cln options in the config file: ``sling-refresh-peers-interval=6``
+1. when starting the plugin. Example: ``lightning-cli -k plugin subcommand=start plugin=/path/to/sling sling-refresh-peers-interval=6``
+2. in the cln config file. Example: ``sling-refresh-peers-interval=6``
 
 :warning:Warning: If you use the cln config file to set ``sling`` options make sure you include ``plugin=/path/to/sling`` (or have the plugin in the folder where cln automatically starts plugins from at startup) otherwise cln will not start next time!
 
