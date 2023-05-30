@@ -15,14 +15,17 @@ serde_json = "1.0"
 tokio = { version = "1", features = ["fs","sync","rt-multi-thread","process"] }
 # tokio-stream = "0.1"
 # futures = "0.3"
-cln-rpc = {path= "../lightning/cln-rpc"}
+
 # env_logger = "0.10"
-#cln-plugin = "0.1"
-cln-plugin = {path= "../lightning/plugins"}
+
+cln-rpc = "0.1.3"
+cln-plugin = "0.1.4"
+# cln-plugin = {path= "../lightning/plugins"}
+# cln-rpc = {path= "../lightning/cln-rpc"}
+
 tabled = "0.12"
 num-format = "0.4"
 struct-field-names-as-array = "0.2"
-# pickledb = "0.5.1"
 chrono = "0.4"
 rand = "0.8"
 parking_lot = "0.12"
@@ -37,4 +40,4 @@ jemallocator = "0.5.0"
 [profile.release]
 codegen-units = 1
 lto = "fat"
-# debug = true
+debug = false

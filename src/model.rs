@@ -18,16 +18,21 @@ use serde_json::json;
 use tabled::Tabled;
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 
-use crate::PLUGIN_NAME;
-
 pub const SUCCESSES_SUFFIX: &str = "_successes.json";
 pub const FAILURES_SUFFIX: &str = "_failures.json";
+pub const NO_ALIAS_SET: &str = "NO_ALIAS_SET";
+
+pub const PLUGIN_NAME: &str = "sling";
+pub const GRAPH_FILE_NAME: &str = "graph.json";
+pub const JOB_FILE_NAME: &str = "jobs.json";
+pub const EXCEPTS_CHANS_FILE_NAME: &str = "excepts.json";
+pub const EXCEPTS_PEERS_FILE_NAME: &str = "excepts_peers.json";
 
 #[derive(Clone)]
 pub struct PluginState {
     pub config: Arc<Mutex<Config>>,
-    pub peer_channels: Arc<Mutex<BTreeMap<String, ListpeerchannelsChannels>>>,
-    pub graph: Arc<Mutex<LnGraph>>,
+    pub peer_channels: Arc<tokio::sync::Mutex<BTreeMap<String, ListpeerchannelsChannels>>>,
+    pub graph: Arc<tokio::sync::Mutex<LnGraph>>,
     pub pays: Arc<RwLock<HashMap<String, String>>>,
     pub alias_peer_map: Arc<Mutex<HashMap<PublicKey, String>>>,
     pub pull_jobs: Arc<Mutex<HashSet<String>>>,
@@ -35,14 +40,14 @@ pub struct PluginState {
     pub excepts_chans: Arc<Mutex<Vec<ShortChannelId>>>,
     pub excepts_peers: Arc<Mutex<Vec<PublicKey>>>,
     pub tempbans: Arc<Mutex<HashMap<String, u64>>>,
-    pub job_state: Arc<Mutex<HashMap<String, JobState>>>,
+    pub job_state: Arc<Mutex<HashMap<String, Vec<JobState>>>>,
 }
 impl PluginState {
     pub fn new() -> PluginState {
         PluginState {
             config: Arc::new(Mutex::new(Config::new())),
-            peer_channels: Arc::new(Mutex::new(BTreeMap::new())),
-            graph: Arc::new(Mutex::new(LnGraph::new())),
+            peer_channels: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
+            graph: Arc::new(tokio::sync::Mutex::new(LnGraph::new())),
             pays: Arc::new(RwLock::new(HashMap::new())),
             alias_peer_map: Arc::new(Mutex::new(HashMap::new())),
             pull_jobs: Arc::new(Mutex::new(HashSet::new())),
@@ -65,6 +70,8 @@ pub struct Config {
     pub reset_liquidity_interval: (String, u64),
     pub depleteuptopercent: (String, f64),
     pub depleteuptoamount: (String, u64),
+    pub paralleljobs: (String, u8),
+    pub timeoutpay: (String, u16),
     pub max_htlc_count: (String, u64),
     pub lightning_cli: (String, String),
     pub stats_delete_failures_age: (String, u64),
@@ -72,6 +79,7 @@ pub struct Config {
     pub stats_delete_successes_age: (String, u64),
     pub stats_delete_successes_size: (String, u64),
     pub cltv_delta: (String, Option<u16>),
+    pub channel_health: (String, bool),
 }
 impl Config {
     pub fn new() -> Config {
@@ -90,7 +98,9 @@ impl Config {
                 PLUGIN_NAME.to_string() + "-depleteuptoamount",
                 2_000_000_000,
             ),
-            max_htlc_count: (PLUGIN_NAME.to_string() + "-max-htlc-count", 3),
+            paralleljobs: (PLUGIN_NAME.to_string() + "-paralleljobs", 1),
+            timeoutpay: (PLUGIN_NAME.to_string() + "-timeoutpay", 120),
+            max_htlc_count: (PLUGIN_NAME.to_string() + "-max-htlc-count", 5),
             lightning_cli: (
                 PLUGIN_NAME.to_string() + "-lightning-cli",
                 "/usr/local/bin/lightning-cli".to_string(),
@@ -109,6 +119,7 @@ impl Config {
                 10_000,
             ),
             cltv_delta: ("cltv-delta".to_string(), None),
+            channel_health: (PLUGIN_NAME.to_string() + "-channel-health", false),
         }
     }
 }
@@ -118,20 +129,23 @@ pub struct JobState {
     latest_state: JobMessage,
     active: bool,
     should_stop: bool,
+    id: u8,
 }
 impl JobState {
-    pub fn new(latest_state: JobMessage) -> Self {
+    pub fn new(latest_state: JobMessage, id: u8) -> Self {
         JobState {
             latest_state,
             active: true,
             should_stop: false,
+            id,
         }
     }
-    pub fn missing() -> &'static Self {
-        &JobState {
+    pub fn missing() -> Self {
+        JobState {
             latest_state: JobMessage::NoJob,
             active: false,
             should_stop: false,
+            id: 0,
         }
     }
     pub fn statechange(&mut self, latest_state: JobMessage) {
@@ -151,6 +165,9 @@ impl JobState {
     }
     pub fn set_active(&mut self, active: bool) {
         self.active = active;
+    }
+    pub fn id(&self) -> u8 {
+        self.id
     }
 }
 
@@ -257,6 +274,8 @@ pub struct Job {
     pub depleteuptopercent: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub depleteuptoamount: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub paralleljobs: Option<u8>,
 }
 
 impl Job {
@@ -340,6 +359,10 @@ impl Job {
             Some(da) => result.insert("depleteuptoamount", (da / 1_000).to_string()),
             None => None,
         };
+        match self.paralleljobs {
+            Some(pj) => result.insert("paralleljobs", pj.to_string()),
+            None => None,
+        };
         json!(result)
     }
 }
@@ -365,12 +388,12 @@ impl DirectedChannel {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LnGraph {
-    pub graph: HashMap<PublicKey, Vec<DirectedChannel>>,
+    pub graph: BTreeMap<PublicKey, Vec<DirectedChannel>>,
 }
 impl LnGraph {
     pub fn new() -> Self {
         LnGraph {
-            graph: HashMap::new(),
+            graph: BTreeMap::new(),
         }
     }
     pub fn update(&mut self, new_graph: LnGraph) {
@@ -436,10 +459,10 @@ impl LnGraph {
     }
     pub fn get_channel(
         &self,
-        source: PublicKey,
-        channel: ShortChannelId,
+        source: &PublicKey,
+        channel: &ShortChannelId,
     ) -> Result<DirectedChannel, Error> {
-        match self.graph.get(&source) {
+        match self.graph.get(source) {
             Some(e) => {
                 let result = e
                     .into_iter()
@@ -585,6 +608,20 @@ impl FailureReb {
         }
         Ok(vec)
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChannelPartnerStats {
+    pub scid: String,
+    pub alias: String,
+    pub sats: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PeerPartnerStats {
+    pub peer_id: String,
+    pub alias: String,
+    pub count: u64,
 }
 
 #[derive(Debug, Tabled)]

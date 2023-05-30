@@ -7,30 +7,6 @@ use tokio::fs;
 
 use crate::model::PluginState;
 
-// pub fn validateargs(args: serde_json::Value, mut config: Config) -> Result<Config, Error> {
-//     match args {
-//         serde_json::Value::Object(i) => {
-//             for arg in i.iter() {
-//                 match arg.0 {
-//                     name if name.eq(&config.utf8.0) => match arg.1 {
-//                         serde_json::Value::Bool(b) => config.utf8.1 = *b,
-//                         _ => {
-//                             return Err(anyhow!(
-//                                 "Error: {} needs to be bool (true or false).",
-//                                 config.utf8.0
-//                             ))
-//                         }
-//                     },
-//                     other => return Err(anyhow!("option not found:{:?}", other)),
-//                 };
-//             }
-//         }
-//         _ => (),
-//     };
-
-//     Ok(config)
-// }
-
 pub async fn read_config(
     plugin: &ConfiguredPlugin<PluginState, tokio::io::Stdin, tokio::io::Stdout>,
     state: PluginState,
@@ -142,11 +118,11 @@ pub async fn read_config(
                     opt if opt.eq(&config.reset_liquidity_interval.0) => {
                         match value.parse::<u64>() {
                             Ok(n) => {
-                                if n > 0 {
+                                if n >= 10 {
                                     config.reset_liquidity_interval.1 = n
                                 } else {
                                     return Err(anyhow!(
-                                        "Error: Number needs to be greater than 0 for {}.",
+                                        "Error: Number needs to be greater than or equal to 10 for {}.",
                                         config.reset_liquidity_interval.0
                                     ));
                                 }
@@ -163,11 +139,11 @@ pub async fn read_config(
                     }
                     opt if opt.eq(&config.depleteuptopercent.0) => match value.parse::<f64>() {
                         Ok(n) => {
-                            if n >= 0.0 && n <= 1.0 {
+                            if n >= 0.0 && n < 1.0 {
                                 config.depleteuptopercent.1 = n
                             } else {
                                 return Err(anyhow!(
-                                    "Error: Number needs to be between 0 and 1 for {}.",
+                                    "Error: Number needs to be between 0 and <1 for {}.",
                                     config.depleteuptopercent.0
                                 ));
                             }
@@ -188,6 +164,46 @@ pub async fn read_config(
                                 "Error: Could not parse a positive number from `{}` for {}: {}",
                                 value,
                                 config.depleteuptoamount.0,
+                                e
+                            ))
+                        }
+                    },
+                    opt if opt.eq(&config.paralleljobs.0) => match value.parse::<u8>() {
+                        Ok(n) => {
+                            if n > 0 {
+                                config.paralleljobs.1 = n
+                            } else {
+                                return Err(anyhow!(
+                                    "Error: Number needs to be greater than 0 for {}.",
+                                    config.paralleljobs.0
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            return Err(anyhow!(
+                                "Error: Could not parse a positive number from `{}` for {}: {}",
+                                value,
+                                config.paralleljobs.0,
+                                e
+                            ))
+                        }
+                    },
+                    opt if opt.eq(&config.timeoutpay.0) => match value.parse::<u16>() {
+                        Ok(n) => {
+                            if n > 0 {
+                                config.timeoutpay.1 = n
+                            } else {
+                                return Err(anyhow!(
+                                    "Error: Number needs to be greater than 0 for {}.",
+                                    config.timeoutpay.0
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            return Err(anyhow!(
+                                "Error: Could not parse a positive number from `{}` for {}: {}",
+                                value,
+                                config.timeoutpay.0,
                                 e
                             ))
                         }
@@ -264,6 +280,17 @@ pub async fn read_config(
                             }
                         }
                     }
+                    opt if opt.eq(&config.channel_health.0) => match value.parse::<bool>() {
+                        Ok(b) => config.channel_health.1 = b,
+                        Err(e) => {
+                            return Err(anyhow!(
+                                "Error: Could not parse bool from `{}` for {}: {}",
+                                value,
+                                config.channel_health.0,
+                                e
+                            ))
+                        }
+                    },
                     _ => (),
                 }
             }
@@ -330,11 +357,11 @@ pub fn get_startup_options(
     };
     config.reset_liquidity_interval.1 = match plugin.option(&config.reset_liquidity_interval.0) {
         Some(options::Value::Integer(i)) => {
-            if i > 0 {
+            if i >= 10 {
                 i as u64
             } else {
                 return Err(anyhow!(
-                    "Error: {} needs to be greater than 0 and not `{}`.",
+                    "Error: {} needs to be greater than or equal to 10 and not `{}`.",
                     config.reset_liquidity_interval.0,
                     i
                 ));
@@ -346,11 +373,11 @@ pub fn get_startup_options(
     config.depleteuptopercent.1 = match plugin.option(&config.depleteuptopercent.0) {
         Some(options::Value::String(i)) => match i.parse::<f64>() {
             Ok(f) => {
-                if f >= 0.0 && f <= 1.0 {
+                if f >= 0.0 && f < 1.0 {
                     f
                 } else {
                     return Err(anyhow!(
-                        "Error: {} needs to be greater than 0 and not `{}`.",
+                        "Error: {} needs to be greater than 0 and <1, not `{}`.",
                         config.depleteuptopercent.0,
                         f
                     ));
@@ -371,6 +398,36 @@ pub fn get_startup_options(
         Some(options::Value::Integer(i)) => (i * 1_000) as u64,
         Some(_) => config.depleteuptoamount.1,
         None => config.depleteuptoamount.1,
+    };
+    config.paralleljobs.1 = match plugin.option(&config.paralleljobs.0) {
+        Some(options::Value::Integer(i)) => {
+            if i > 0 {
+                i as u8
+            } else {
+                return Err(anyhow!(
+                    "Error: {} needs to be greater than 0 and not `{}`.",
+                    config.paralleljobs.0,
+                    i
+                ));
+            }
+        }
+        Some(_) => config.paralleljobs.1,
+        None => config.paralleljobs.1,
+    };
+    config.timeoutpay.1 = match plugin.option(&config.timeoutpay.0) {
+        Some(options::Value::Integer(i)) => {
+            if i > 0 {
+                i as u16
+            } else {
+                return Err(anyhow!(
+                    "Error: {} needs to be greater than 0 and not `{}`.",
+                    config.timeoutpay.0,
+                    i
+                ));
+            }
+        }
+        Some(_) => config.timeoutpay.1,
+        None => config.timeoutpay.1,
     };
     config.max_htlc_count.1 = match plugin.option(&config.max_htlc_count.0) {
         Some(options::Value::Integer(i)) => {
@@ -410,6 +467,11 @@ pub fn get_startup_options(
             Some(_) => config.stats_delete_successes_size.1,
             None => config.stats_delete_successes_size.1,
         };
+    config.channel_health.1 = match plugin.option(&config.channel_health.0) {
+        Some(options::Value::Boolean(b)) => b,
+        Some(_) => config.channel_health.1,
+        None => config.channel_health.1,
+    };
 
     Ok(())
 }

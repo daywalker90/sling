@@ -1,20 +1,19 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     path::Path,
     str::FromStr,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use crate::{
-    disconnect, list_channels, list_nodes, list_peer_channels,
     model::{
         DirectedChannel, FailureReb, LnGraph, PluginState, SuccessReb, FAILURES_SUFFIX,
         SUCCESSES_SUFFIX,
     },
-    set_channel,
+    rpc::{disconnect, list_channels, list_nodes, list_peer_channels, set_channel},
     util::{
-        get_all_normal_channels_from_listpeerchannels, make_rpc_path, read_graph, read_jobs,
-        refresh_joblists, write_graph,
+        feeppm_effective, get_all_normal_channels_from_listpeerchannels, make_rpc_path, read_graph,
+        read_jobs, refresh_joblists, write_graph,
     },
     PLUGIN_NAME,
 };
@@ -61,8 +60,7 @@ pub async fn refresh_aliasmap(plugin: Plugin<PluginState>) -> Result<(), Error> 
     }
 }
 
-pub async fn refresh_listpeerchannels(plugin: Plugin<PluginState>) -> Result<(), Error> {
-    let rpc_path = make_rpc_path(&plugin);
+pub async fn refresh_listpeerchannels_loop(plugin: Plugin<PluginState>) -> Result<(), Error> {
     let interval = plugin
         .state()
         .config
@@ -73,27 +71,34 @@ pub async fn refresh_listpeerchannels(plugin: Plugin<PluginState>) -> Result<(),
 
     loop {
         {
-            let now = Instant::now();
-            *plugin.state().peer_channels.lock() = list_peer_channels(&rpc_path)
-                .await?
-                .channels
-                .ok_or(anyhow!("refresh_listpeerchannels: no channels found!"))?
-                .into_iter()
-                .filter_map(|channel| channel.short_channel_id.map(|id| (id.to_string(), channel)))
-                .collect();
-            debug!(
-                "Peerchannels refreshed in {}ms",
-                now.elapsed().as_millis().to_string()
-            );
+            refresh_listpeerchannels(&plugin).await?;
         }
         time::sleep(Duration::from_secs(interval)).await;
     }
 }
 
+pub async fn refresh_listpeerchannels(plugin: &Plugin<PluginState>) -> Result<(), Error> {
+    let rpc_path = make_rpc_path(&plugin);
+
+    let now = Instant::now();
+    *plugin.state().peer_channels.lock().await = list_peer_channels(&rpc_path)
+        .await?
+        .channels
+        .ok_or(anyhow!("refresh_listpeerchannels: no channels found!"))?
+        .into_iter()
+        .filter_map(|channel| channel.short_channel_id.map(|id| (id.to_string(), channel)))
+        .collect();
+    debug!(
+        "Peerchannels refreshed in {}ms",
+        now.elapsed().as_millis().to_string()
+    );
+    Ok(())
+}
+
 pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
     let rpc_path = make_rpc_path(&plugin);
     let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
-    *plugin.state().graph.lock() = read_graph(&sling_dir).await?;
+    *plugin.state().graph.lock().await = read_graph(&sling_dir).await?;
     let interval = plugin
         .state()
         .config
@@ -111,15 +116,15 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                 "Getting all channels done in {}s!",
                 now.elapsed().as_secs().to_string()
             );
-            let peer_channels = plugin.state().peer_channels.lock().clone();
             let jobs = read_jobs(
                 &Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME),
-                &peer_channels,
+                &plugin,
             )
             .await?;
 
             let amounts = jobs.values().map(|job| job.amount);
-            let min_amount = amounts.clone().min().unwrap_or(1_000);
+            // * 2 because we set our liquidity beliefs to / 2 anyways
+            let min_amount = amounts.clone().min().unwrap_or(1_000) * 2;
             let max_amount = amounts.max().unwrap_or(10_000_000_000);
             let maxppms = jobs.values().map(|job| job.maxppm);
             // let min_maxppm = maxppms.min().unwrap_or(0);
@@ -133,21 +138,26 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                 .as_secs()
                 - 1_209_600) as u32;
 
-            plugin.state().graph.lock().update(LnGraph {
+            plugin.state().graph.lock().await.update(LnGraph {
                 graph: channels
                     .into_iter()
                     .filter(|chan| {
-                        (chan.active
-                            && chan.last_update >= two_w_ago
-                            && chan.delay <= 288
+                        (feeppm_effective(
+                            chan.fee_per_millionth,
+                            chan.base_fee_millisatoshi,
+                            max_amount,
+                        ) as u32
+                            <= max_maxppm
                             && Amount::msat(&chan.htlc_maximum_msat.unwrap_or(chan.amount_msat))
                                 >= min_amount
                             && Amount::msat(&chan.htlc_minimum_msat) <= max_amount
-                            && chan.fee_per_millionth <= max_maxppm)
+                            && chan.last_update >= two_w_ago
+                            && chan.delay <= 288
+                            && chan.active)
                             || chan.source == mypubkey
                             || chan.destination == mypubkey
                     })
-                    .fold(HashMap::new(), |mut map, chan| {
+                    .fold(BTreeMap::new(), |mut map, chan| {
                         map.entry(chan.source)
                             .or_insert_with(Vec::new)
                             .push(DirectedChannel::new(chan));
@@ -176,13 +186,18 @@ pub async fn refresh_liquidity(plugin: Plugin<PluginState>) -> Result<(), Error>
     loop {
         {
             let now = Instant::now();
-            plugin.state().graph.lock().refresh_liquidity(interval);
+            plugin
+                .state()
+                .graph
+                .lock()
+                .await
+                .refresh_liquidity(interval);
             info!(
                 "Refreshed Liquidity in {}ms!",
                 now.elapsed().as_millis().to_string()
             );
         }
-        time::sleep(Duration::from_secs(900)).await;
+        time::sleep(Duration::from_secs(600)).await;
     }
 }
 
@@ -213,8 +228,13 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
             let push_jobs = plugin.state().push_jobs.lock().clone();
             let mut all_jobs: Vec<String> =
                 pull_jobs.into_iter().chain(push_jobs.into_iter()).collect();
-            let peer_channels = plugin.state().peer_channels.lock().clone();
-            let scid_peer_map = get_all_normal_channels_from_listpeerchannels(&peer_channels);
+
+            let scid_peer_map;
+            {
+                let peer_channels = plugin.state().peer_channels.lock().await;
+                scid_peer_map = get_all_normal_channels_from_listpeerchannels(&peer_channels);
+            }
+
             all_jobs.retain(|c| scid_peer_map.contains_key(c));
             for scid in &all_jobs {
                 match SuccessReb::read_from_file(

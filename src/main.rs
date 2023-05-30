@@ -2,29 +2,47 @@ extern crate serde_json;
 
 use std::path::Path;
 
+use crate::config::{get_startup_options, read_config};
+use crate::model::{EXCEPTS_CHANS_FILE_NAME, EXCEPTS_PEERS_FILE_NAME};
+use crate::rpc::{check_lightning_dir, get_info};
+use crate::util::{make_rpc_path, read_excepts, refresh_joblists};
 use anyhow::anyhow;
 use cln_plugin::{options, Builder};
 use cln_rpc::primitives::PublicKey;
 use cln_rpc::primitives::ShortChannelId;
+use htlc::htlc_handler;
+use jobs::slinggo;
+use jobs::slingstop;
 use log::{debug, info, warn};
-use sling::htlc::htlc_handler;
-use sling::util::slingjobsettings;
-use sling::util::slingversion;
-use sling::{
-    check_lightning_dir,
-    config::*,
-    get_info,
-    jobs::{slinggo, slingstop},
-    model::{Config, PluginState},
-    stats::slingstats,
-    tasks,
-    util::{
-        make_rpc_path, read_excepts, refresh_joblists, slingdeletejob, slingexceptchan,
-        slingexceptpeer, slingjob,
-    },
-    EXCEPTS_CHANS_FILE_NAME, EXCEPTS_PEERS_FILE_NAME, PLUGIN_NAME,
-};
+use model::Config;
+use model::PluginState;
+use model::PLUGIN_NAME;
+use notifications::shutdown_handler;
+use stats::slingstats;
 use tokio::{self};
+use util::slingdeletejob;
+use util::slingexceptchan;
+use util::slingexceptpeer;
+use util::slingjob;
+use util::slingjobsettings;
+use util::slingversion;
+
+mod config;
+mod dijkstra;
+mod errors;
+mod htlc;
+mod jobs;
+mod model;
+mod notifications;
+mod rpc;
+mod slings;
+mod stats;
+mod tasks;
+mod util;
+
+#[cfg(test)]
+mod tests;
+
 #[cfg(all(not(windows), not(target_env = "musl")))]
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
@@ -94,6 +112,22 @@ async fn main() -> Result<(), anyhow::Error> {
             ),
         ))
         .option(options::ConfigOption::new(
+            &defaultconfig.paralleljobs.0,
+            options::Value::OptInteger,
+            &format!(
+                "Number of parallel tasks for a job. Default is {}",
+                defaultconfig.paralleljobs.1
+            ),
+        ))
+        .option(options::ConfigOption::new(
+            &defaultconfig.timeoutpay.0,
+            options::Value::OptInteger,
+            &format!(
+                "Timeout for rebalances until we give up and continue. Default is {}",
+                defaultconfig.timeoutpay.1
+            ),
+        ))
+        .option(options::ConfigOption::new(
             &defaultconfig.max_htlc_count.0,
             options::Value::OptInteger,
             &format!(
@@ -141,6 +175,14 @@ async fn main() -> Result<(), anyhow::Error> {
                 defaultconfig.stats_delete_successes_size.1
             ),
         ))
+        .option(options::ConfigOption::new(
+            &defaultconfig.channel_health.0,
+            options::Value::OptBoolean,
+            &format!(
+                "Switch on/off experimental channel health task. Default is {}",
+                defaultconfig.channel_health.1
+            ),
+        ))
         .rpcmethod(
             &(PLUGIN_NAME.to_string() + "-job"),
             "add sling job",
@@ -186,6 +228,7 @@ async fn main() -> Result<(), anyhow::Error> {
             "print version",
             slingversion,
         )
+        .subscribe("shutdown", shutdown_handler)
         .dynamic()
         .configure()
         .await?
@@ -217,7 +260,7 @@ async fn main() -> Result<(), anyhow::Error> {
         }
         let peersclone = plugin.clone();
         tokio::spawn(async move {
-            match tasks::refresh_listpeerchannels(peersclone).await {
+            match tasks::refresh_listpeerchannels_loop(peersclone).await {
                 Ok(()) => (),
                 Err(e) => warn!("Error in refresh_listpeers thread: {:?}", e),
             };
@@ -273,13 +316,17 @@ async fn main() -> Result<(), anyhow::Error> {
             };
         });
         let channelhealthclone = plugin.clone();
-        tokio::spawn(async move {
-            match tasks::channel_health(channelhealthclone).await {
-                Ok(()) => (),
-                Err(e) => warn!("Error in channel_health thread: {:?}", e),
-            };
-        });
-        plugin.join().await
+        if channelhealthclone.state().config.lock().channel_health.1 {
+            tokio::spawn(async move {
+                match tasks::channel_health(channelhealthclone).await {
+                    Ok(()) => (),
+                    Err(e) => warn!("Error in channel_health thread: {:?}", e),
+                };
+            });
+        }
+
+        plugin.join().await?;
+        std::process::exit(0);
     } else {
         Err(anyhow!("Error starting the plugin!"))
     }

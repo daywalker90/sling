@@ -12,9 +12,9 @@ use std::{
 pub fn dijkstra(
     mypubkey: &PublicKey,
     lngraph: &LnGraph,
-    start: PublicKey,
-    goal: PublicKey,
-    slingchan: DijkstraNode,
+    start: &PublicKey,
+    goal: &PublicKey,
+    slingchan: &DijkstraNode,
     job: &Job,
     candidatelist: &Vec<ShortChannelId>,
     exclude: &HashSet<String>,
@@ -28,8 +28,8 @@ pub fn dijkstra(
     let mut predecessor = HashMap::new();
     let mut visit_next = BinaryHeap::new();
     let zero_score = u64::default();
-    scores.insert(start, slingchan.clone());
-    visit_next.push(MinScored(zero_score, start));
+    scores.insert(*start, slingchan.clone());
+    visit_next.push(MinScored(zero_score, *start));
     while let Some(MinScored(node_score, node)) = visit_next.pop() {
         if visited.contains(&node) {
             // debug!(
@@ -39,7 +39,7 @@ pub fn dijkstra(
             // );
             continue;
         }
-        if &goal == &node {
+        if goal == &node {
             // debug!(
             //     "{}: arrived at goal: {}  {}",
             //     slingchan.channel.short_channel_id.to_string(),

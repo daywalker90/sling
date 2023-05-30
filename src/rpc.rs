@@ -8,33 +8,13 @@ use cln_rpc::{
     ClnRpc,
 };
 use log::debug;
-use model::PluginState;
 use tokio::{process::Command, time::Instant};
 
-use crate::errors::*;
+use crate::{
+    errors::*,
+    model::{PluginState, PLUGIN_NAME},
+};
 use cln_rpc::primitives::*;
-pub mod config;
-pub mod dijkstra;
-pub mod errors;
-pub mod htlc;
-pub mod jobs;
-pub mod model;
-pub mod sling;
-pub mod stats;
-pub mod tasks;
-pub mod util;
-
-pub const NO_ALIAS_SET: &str = "NO_ALIAS_SET";
-pub const NODE_GOSSIP_MISS: &str = "NODE_GOSSIP_MISS";
-
-pub const PLUGIN_NAME: &str = "sling";
-pub const GRAPH_FILE_NAME: &str = "graph.json";
-pub const JOB_FILE_NAME: &str = "jobs.json";
-pub const EXCEPTS_CHANS_FILE_NAME: &str = "excepts.json";
-pub const EXCEPTS_PEERS_FILE_NAME: &str = "excepts_peers.json";
-
-#[cfg(test)]
-mod tests;
 
 pub async fn set_channel(
     rpc_path: &PathBuf,
@@ -75,33 +55,6 @@ pub async fn disconnect(rpc_path: &PathBuf, id: PublicKey) -> Result<DisconnectR
     match disconnect_request {
         Response::Disconnect(info) => Ok(info),
         e => Err(anyhow!("Unexpected result in disconnect: {:?}", e)),
-    }
-}
-
-pub async fn list_funds(rpc_path: &PathBuf) -> Result<ListfundsResponse, Error> {
-    let mut rpc = ClnRpc::new(&rpc_path).await?;
-    let listfunds_request = rpc
-        .call(Request::ListFunds(ListfundsRequest { spent: Some(false) }))
-        .await
-        .map_err(|e| anyhow!("Error calling list_funds: {:?}", e))?;
-    match listfunds_request {
-        Response::ListFunds(info) => Ok(info),
-        e => Err(anyhow!("Unexpected result in list_funds: {:?}", e)),
-    }
-}
-
-pub async fn list_peers(rpc_path: &PathBuf) -> Result<ListpeersResponse, Error> {
-    let mut rpc = ClnRpc::new(&rpc_path).await?;
-    let listpeers_request = rpc
-        .call(Request::ListPeers(ListpeersRequest {
-            id: None,
-            level: None,
-        }))
-        .await
-        .map_err(|e| anyhow!("Error calling list_peers: {:?}", e))?;
-    match listpeers_request {
-        Response::ListPeers(info) => Ok(info),
-        e => Err(anyhow!("Unexpected result in list_peers: {:?}", e)),
     }
 }
 
@@ -171,27 +124,6 @@ pub async fn get_info(rpc_path: &PathBuf) -> Result<GetinfoResponse, Error> {
     }
 }
 
-pub async fn list_forwards(
-    rpc_path: &PathBuf,
-    status: Option<ListforwardsStatus>,
-    in_channel: Option<ShortChannelId>,
-    out_channel: Option<ShortChannelId>,
-) -> Result<ListforwardsResponse, Error> {
-    let mut rpc = ClnRpc::new(&rpc_path).await?;
-    let listforwards_request = rpc
-        .call(Request::ListForwards(ListforwardsRequest {
-            status,
-            in_channel,
-            out_channel,
-        }))
-        .await
-        .map_err(|e| anyhow!("Error calling list_forwards: {:?}", e))?;
-    match listforwards_request {
-        Response::ListForwards(info) => Ok(info),
-        e => Err(anyhow!("Unexpected result in list_forwards: {:?}", e)),
-    }
-}
-
 pub async fn slingsend(
     rpc_path: &PathBuf,
     route: Vec<SendpayRoute>,
@@ -224,15 +156,14 @@ pub async fn waitsendpay(
     lightning_dir: &PathBuf,
     lightning_cli: &String,
     payment_hash: Sha256,
-    _timeout: Option<u32>,
-    _partid: Option<u64>,
+    timeout: u16,
 ) -> Result<WaitsendpayResponse, WaitsendpayError> {
     // debug!("{}", lightning_dir.to_str().unwrap());
     let waitsendpay_request = Command::new(lightning_cli)
         .arg("--lightning-dir=".to_string() + lightning_dir.to_str().unwrap())
         .arg("waitsendpay")
         .arg((payment_hash).to_string())
-        .arg("120")
+        .arg(timeout.to_string())
         .output()
         .await;
     match waitsendpay_request {
@@ -270,33 +201,22 @@ pub async fn check_lightning_dir(
         .arg("getinfo")
         .output()
         .await;
-    let response = match getinfo_request {
+    match getinfo_request {
         Ok(output) => {
             match serde_json::from_str::<GetinfoResponse>(&String::from_utf8_lossy(&output.stdout))
             {
-                Ok(o) => o,
-                Err(e) => {
-                    return Err(anyhow!(
-                        "Unexpected error in parsing delpay response: {} {:?}",
-                        e,
-                        output
-                    ))
-                }
+                Ok(_o) => Ok(()),
+                Err(e) => Err(anyhow!(
+                    "Unexpected error in parsing GetinfoResponse: {} {:?}",
+                    e,
+                    output
+                )),
             }
         }
-        Err(e) => return Err(anyhow!("Unexpected error in delpay: {}", e)),
-    };
-    if response.lightning_dir == plugin.configuration().lightning_dir.clone() {
-        debug!("got working lightning-cli");
-        debug!(
-            "{} {}",
-            response.lightning_dir,
-            plugin.configuration().lightning_dir.clone()
-        );
-        Ok(())
-    } else {
-        Err(anyhow!(
-            "lightning-dir from lightning-cli not matching plugin state"
-        ))
+        Err(e) => Err(anyhow!(
+            "Your {}-lightning-cli is probably wrong!: {}",
+            PLUGIN_NAME.to_string(),
+            e
+        )),
     }
 }

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, path::Path, str::FromStr};
 
@@ -6,15 +7,17 @@ use chrono::Local;
 use chrono::TimeZone;
 use cln_plugin::Plugin;
 
-use cln_rpc::primitives::ShortChannelId;
+use cln_rpc::model::ListpeerchannelsChannels;
+use cln_rpc::primitives::{PublicKey, ShortChannelId};
 use log::{debug, info};
 use num_format::{Locale, ToFormattedString};
 use serde_json::json;
 use tabled::Table;
 
-use crate::model::{JobState, PluginState, StatSummary};
+use crate::model::{
+    ChannelPartnerStats, JobState, PeerPartnerStats, PluginState, StatSummary, NO_ALIAS_SET,
+};
 use crate::util::{get_all_normal_channels_from_listpeerchannels, refresh_joblists};
-use crate::NO_ALIAS_SET;
 use crate::{
     model::{FailureReb, SuccessReb},
     PLUGIN_NAME,
@@ -32,6 +35,7 @@ pub async fn slingstats(
                 plugin.state().config.lock().stats_delete_successes_age.1;
             let stats_delete_failures_age =
                 plugin.state().config.lock().stats_delete_failures_age.1;
+            let peer_channels = plugin.state().peer_channels.lock().await.clone();
             if a.len() > 1 {
                 Err(anyhow!(
                     "Please provide exactly one short_channel_id or nothing for a summary"
@@ -44,18 +48,21 @@ pub async fn slingstats(
                 let push_jobs = plugin.state().push_jobs.lock().clone();
                 let mut all_jobs: Vec<String> =
                     pull_jobs.into_iter().chain(push_jobs.into_iter()).collect();
-                let alias_map = plugin.state().alias_peer_map.lock().clone();
-                let peers = plugin.state().peer_channels.lock().clone();
+
+                let scid_peer_map = get_all_normal_channels_from_listpeerchannels(&peer_channels);
+
                 let mut normal_channels_alias: HashMap<String, String> = HashMap::new();
-                let scid_peer_map = get_all_normal_channels_from_listpeerchannels(&peers);
-                for (scid, peer) in &scid_peer_map {
-                    normal_channels_alias.insert(
-                        scid.clone(),
-                        alias_map
-                            .get(&peer)
-                            .unwrap_or(&"ALIAS_NOT_FOUND".to_string())
-                            .clone(),
-                    );
+                {
+                    let alias_map = plugin.state().alias_peer_map.lock();
+                    for (scid, peer) in &scid_peer_map {
+                        normal_channels_alias.insert(
+                            scid.clone(),
+                            alias_map
+                                .get(&peer)
+                                .unwrap_or(&"ALIAS_NOT_FOUND".to_string())
+                                .clone(),
+                        );
+                    }
                 }
                 all_jobs.retain(|c| normal_channels_alias.contains_key(c));
                 for scid in &all_jobs {
@@ -95,7 +102,12 @@ pub async fn slingstats(
                     let mut total_amount_msat = 0;
                     let mut most_recent_completed_at = 0;
                     let mut weighted_fee_ppm = 0;
-                    let jobstate = jobstates.get(job).unwrap_or(JobState::missing());
+                    let jobstate: Vec<String> = jobstates
+                        .get(job)
+                        .unwrap_or(&vec![JobState::missing()])
+                        .iter()
+                        .map(|jt| jt.id().to_string() + ":" + &jt.state().to_string())
+                        .collect();
                     for success_reb in successes.get(&job).unwrap_or(&Vec::new()) {
                         if success_reb.completed_at
                             >= now - stats_delete_successes_age * 24 * 60 * 60
@@ -150,7 +162,7 @@ pub async fn slingstats(
                             .clone(),
                         scid: job.clone(),
                         pubkey: scid_peer_map.get(&job.clone()).unwrap().to_string(),
-                        status: jobstate.state().to_string(),
+                        status: jobstate.join("\n"),
                         rebamount: (total_amount_msat / 1_000).to_formatted_string(&Locale::en),
                         w_feeppm: weighted_fee_ppm,
                         last_route_taken,
@@ -184,13 +196,24 @@ pub async fn slingstats(
                                 Vec::new()
                             }
                         };
+                        let alias_map = plugin.state().alias_peer_map.lock().clone();
                         let success_json = if successes.len() > 0 {
-                            success_stats(successes, stats_delete_successes_age)
+                            success_stats(
+                                successes,
+                                stats_delete_successes_age,
+                                &alias_map,
+                                &peer_channels,
+                            )
                         } else {
                             json!({"successes_in_time_window":""})
                         };
                         let failures_json = if failures.len() > 0 {
-                            failure_stats(failures, stats_delete_failures_age)
+                            failure_stats(
+                                failures,
+                                stats_delete_failures_age,
+                                &alias_map,
+                                &peer_channels,
+                            )
                         } else {
                             json!({"failures_in_time_window":""})
                         };
@@ -208,13 +231,19 @@ pub async fn slingstats(
     }
 }
 
-fn success_stats(successes: Vec<SuccessReb>, time_window: u64) -> serde_json::Value {
+fn success_stats(
+    successes: Vec<SuccessReb>,
+    time_window: u64,
+    alias_map: &HashMap<PublicKey, String>,
+    peer_channels: &BTreeMap<String, ListpeerchannelsChannels>,
+) -> serde_json::Value {
     let mut total_amount_msat = 0;
     let mut channel_partner_counts = HashMap::new();
     let mut hop_counts = HashMap::new();
     let mut most_recent_completed_at = 0;
     let mut total_transactions = 0;
     let mut weighted_fee_ppm = 0;
+    let mut fee_ppms = Vec::new();
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -230,17 +259,18 @@ fn success_stats(successes: Vec<SuccessReb>, time_window: u64) -> serde_json::Va
             *hop_counts.entry(success_reb.hops).or_insert(0) += 1;
             most_recent_completed_at =
                 std::cmp::max(most_recent_completed_at, success_reb.completed_at);
+            fee_ppms.push(success_reb.fee_ppm);
             total_transactions += 1;
         }
     }
     if total_transactions == 0 {
         return json!({"successes_in_time_window":""});
     }
+    fee_ppms.sort();
     let most_common_hop_count = hop_counts
         .into_iter()
         .max_by_key(|&(_, count)| count)
         .map(|(hops, _)| hops);
-    let average_amount_msat = total_amount_msat as f64 / total_transactions as f64;
     weighted_fee_ppm = weighted_fee_ppm / total_amount_msat;
 
     let mut channel_partners = channel_partner_counts.into_iter().collect::<Vec<_>>();
@@ -255,18 +285,30 @@ fn success_stats(successes: Vec<SuccessReb>, time_window: u64) -> serde_json::Va
 
     json!({"successes_in_time_window":{
         "total_amount_sats":total_amount_msat/1_000,
-        "average_amount_sats":(average_amount_msat/1_000.0) as u64,
-        "weighted_fee_ppm":weighted_fee_ppm,
+        "feeppm_weighted_avg":weighted_fee_ppm,
+        "feeppm_min": fee_ppms.iter().min().unwrap(),
+        "feeppm_max": fee_ppms.iter().max().unwrap(),
+        "feeppm_median": fee_ppms[fee_ppms.len()/2],
+        "feeppm_90th_percentile": fee_ppms[(fee_ppms.len() as f64 * 0.9).ceil() as usize],
         "top_5_channel_partners":top_5_channel_partners.iter().map(|(partner, count)| {
-            json!({partner: count})
+            json!(ChannelPartnerStats{
+                scid: partner.clone(),
+                alias: alias_map.get(&peer_channels.get(partner).unwrap().peer_id.unwrap()).unwrap().clone(),
+                sats: *count,
+            })
         }).collect::<Vec<_>>(),
         "most_common_hop_count":most_common_hop_count,
-        "most_recent_completed_at": Local.timestamp_opt(most_recent_completed_at as i64,0).unwrap().format("%Y-%m-%d %H:%M:%S").to_string(),
+        "time_of_last_rebalance": Local.timestamp_opt(most_recent_completed_at as i64,0).unwrap().format("%Y-%m-%d %H:%M:%S").to_string(),
         "total_rebalances":total_transactions
     }})
 }
 
-fn failure_stats(failures: Vec<FailureReb>, time_window: u64) -> serde_json::Value {
+fn failure_stats(
+    failures: Vec<FailureReb>,
+    time_window: u64,
+    alias_map: &HashMap<PublicKey, String>,
+    peer_channels: &BTreeMap<String, ListpeerchannelsChannels>,
+) -> serde_json::Value {
     let mut total_amount_msat = 0;
     let mut channel_partner_counts = HashMap::new();
     let mut hop_counts = HashMap::new();
@@ -301,7 +343,6 @@ fn failure_stats(failures: Vec<FailureReb>, time_window: u64) -> serde_json::Val
         .into_iter()
         .max_by_key(|&(_, count)| count)
         .map(|(hops, _)| hops);
-    let average_amount_msat = total_amount_msat as f64 / total_transactions as f64;
 
     let mut channel_partners = channel_partner_counts.into_iter().collect::<Vec<_>>();
     let mut failure_reasons = reason_counts.into_iter().collect::<Vec<_>>();
@@ -329,18 +370,28 @@ fn failure_stats(failures: Vec<FailureReb>, time_window: u64) -> serde_json::Val
 
     json!({"failures_in_time_window":{
         "total_amount_tried_sats":total_amount_msat/1_000,
-        "average_amount_tried_sats":(average_amount_msat/1_000.0) as u64,
         "top_5_failure_reasons":top_5_failure_reasons.iter().map(|(reason, count)| {
             json!({reason: count})
         }).collect::<Vec<_>>(),
         "top_5_fail_nodes":top_5_fail_nodes.iter().map(|(node, count)| {
-            json!({node: count})
+            json!(PeerPartnerStats{
+                peer_id: node.clone(),
+                alias: match PublicKey::from_str(node){
+                    Ok(pk) => alias_map.get(&pk).unwrap().clone(),
+                    Err(_e) => "".to_string(),
+                },
+                count: *count,
+            })
         }).collect::<Vec<_>>(),
         "top_5_channel_partners":top_5_channel_partners.iter().map(|(partner, count)| {
-            json!({partner: count})
+            json!(ChannelPartnerStats{
+                scid: partner.clone(),
+                alias: alias_map.get(&peer_channels.get(partner).unwrap().peer_id.unwrap()).unwrap().clone(),
+                sats: *count,
+            })
         }).collect::<Vec<_>>(),
         "most_common_hop_count":most_common_hop_count,
-        "most_recent_created_at": Local.timestamp_opt(most_recent_created_at as i64,0).unwrap().format("%Y-%m-%d %H:%M:%S").to_string(),
+        "time_of_last_attempt": Local.timestamp_opt(most_recent_created_at as i64,0).unwrap().format("%Y-%m-%d %H:%M:%S").to_string(),
         "total_rebalances_tried":total_transactions
     }})
 }

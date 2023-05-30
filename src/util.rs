@@ -2,7 +2,6 @@ use bitcoin::hashes::Hash;
 use bitcoin::hashes::HashEngine;
 use cln_rpc::model::ListchannelsChannels;
 use cln_rpc::model::ListpeerchannelsChannels;
-use cln_rpc::model::ListpeerchannelsChannelsHtlcsDirection;
 use cln_rpc::model::ListpeerchannelsChannelsState;
 use cln_rpc::primitives::PublicKey;
 use cln_rpc::primitives::Sha256;
@@ -17,12 +16,15 @@ use std::time::Duration;
 use std::{collections::HashMap, path::Path};
 
 use crate::jobs::slingstop;
-use crate::list_peer_channels;
 use crate::model::PluginState;
+use crate::model::EXCEPTS_CHANS_FILE_NAME;
+use crate::model::EXCEPTS_PEERS_FILE_NAME;
+use crate::model::GRAPH_FILE_NAME;
+use crate::model::JOB_FILE_NAME;
 use crate::model::{Job, JobMessage, JobState, LnGraph, SatDirection};
-use crate::EXCEPTS_PEERS_FILE_NAME;
 
-use crate::{EXCEPTS_CHANS_FILE_NAME, GRAPH_FILE_NAME, JOB_FILE_NAME, PLUGIN_NAME};
+use crate::tasks::refresh_listpeerchannels;
+use crate::PLUGIN_NAME;
 use anyhow::{anyhow, Error};
 use bitcoin::consensus::encode::serialize_hex;
 use cln_plugin::Plugin;
@@ -52,6 +54,7 @@ pub async fn slingjob(
         "candidates",
         "depleteuptopercent",
         "depleteuptoamount",
+        "paralleljobs",
     ];
 
     match v {
@@ -141,8 +144,8 @@ pub async fn slingjob(
             };
             match depleteuptopercent {
                 Some(dp) => {
-                    if dp < 0.0 || dp > 1.0 {
-                        return Err(anyhow!("depleteuptopercent must be between 0.0 and 1.0"));
+                    if dp < 0.0 || dp >= 1.0 {
+                        return Err(anyhow!("depleteuptopercent must be between 0.0 and <1.0"));
                     }
                 }
                 None => (),
@@ -156,6 +159,23 @@ pub async fn slingjob(
                 ),
                 None => None,
             };
+
+            let paralleljobs = match ar.get("paralleljobs") {
+                Some(h) => Some(
+                    h.as_u64()
+                        .ok_or(anyhow!("paralleljobs must be an integer"))?
+                        as u8,
+                ),
+                None => None,
+            };
+            match paralleljobs {
+                Some(h) => {
+                    if h < 1 {
+                        return Err(anyhow!("paralleljobs must be atleast 1"));
+                    }
+                }
+                None => (),
+            }
 
             let candidatelist = {
                 let mut tmpcandidatelist = Vec::new();
@@ -181,7 +201,7 @@ pub async fn slingjob(
                     "Atleast one of outppm and candidatelist need to be set."
                 ));
             }
-            let peer_channels = p.state().peer_channels.lock().clone();
+            let peer_channels = p.state().peer_channels.lock().await.clone();
             let job = Job {
                 sat_direction,
                 amount,
@@ -192,6 +212,7 @@ pub async fn slingjob(
                 maxhops,
                 depleteuptopercent,
                 depleteuptoamount,
+                paralleljobs,
             };
             let our_listpeers_channel =
                 get_normal_channel_from_listpeerchannels(&peer_channels, &chan_id.to_string());
@@ -214,8 +235,7 @@ pub async fn slingjobsettings(
     args: serde_json::Value,
 ) -> Result<serde_json::Value, Error> {
     let sling_dir = Path::new(&p.configuration().lightning_dir).join(PLUGIN_NAME);
-    let peers = p.state().peer_channels.lock().clone();
-    let jobs = read_jobs(&sling_dir, &peers).await?;
+    let jobs = read_jobs(&sling_dir, &p).await?;
     let mut json_jobs: Vec<serde_json::Value> = vec![];
     match args {
         serde_json::Value::Array(a) => {
@@ -249,16 +269,10 @@ pub async fn slingjobsettings(
 
 pub async fn refresh_joblists(p: Plugin<PluginState>) -> Result<(), Error> {
     let now = Instant::now();
-    let peer_channels = list_peer_channels(&make_rpc_path(&p.clone()))
-        .await?
-        .channels
-        .ok_or(anyhow!("refresh_joblists: no channels found!"))?
-        .into_iter()
-        .filter_map(|channel| channel.short_channel_id.map(|id| (id.to_string(), channel)))
-        .collect();
+    refresh_listpeerchannels(&p).await?;
     let jobs = read_jobs(
         &Path::new(&p.configuration().lightning_dir).join(PLUGIN_NAME),
-        &peer_channels,
+        &p,
     )
     .await?;
     let mut pull_jobs = p.state().pull_jobs.lock();
@@ -330,8 +344,9 @@ pub async fn slingversion(
 
 pub async fn read_jobs(
     sling_dir: &PathBuf,
-    peer_channels: &BTreeMap<String, ListpeerchannelsChannels>,
+    plugin: &Plugin<PluginState>,
 ) -> Result<BTreeMap<String, Job>, Error> {
+    let peer_channels = plugin.state().peer_channels.lock().await;
     let jobfile = sling_dir.join(JOB_FILE_NAME);
     let jobfilecontent = fs::read_to_string(jobfile.clone()).await;
     let mut jobs: BTreeMap<String, Job>;
@@ -348,7 +363,7 @@ pub async fn read_jobs(
             jobs = BTreeMap::new();
         }
     };
-    let channels = get_all_normal_channels_from_listpeerchannels(peer_channels);
+    let channels = get_all_normal_channels_from_listpeerchannels(&peer_channels);
     let channels = channels.keys().collect::<Vec<&String>>();
 
     jobs.retain(|c, _j| channels.contains(&c));
@@ -362,12 +377,17 @@ async fn write_job(
     job: Option<Job>,
     remove: bool,
 ) -> Result<BTreeMap<String, Job>, Error> {
-    let peer_channels = p.state().peer_channels.lock().clone();
-    let mut jobs = read_jobs(&sling_dir, &peer_channels).await?;
+    let mut jobs = read_jobs(&sling_dir, &p).await?;
     let job_change;
     let my_job;
     let jobstates = p.state().job_state.lock().clone();
-    if jobstates.contains_key(&chan_id) && jobstates.get(&chan_id).unwrap().is_active() {
+    if jobstates.contains_key(&chan_id)
+        && jobstates
+            .get(&chan_id)
+            .unwrap()
+            .iter()
+            .any(|j| j.is_active())
+    {
         slingstop(
             p.clone(),
             serde_json::Value::Array(vec![serde_json::Value::String(chan_id.clone())]),
@@ -382,6 +402,7 @@ async fn write_job(
                 job_states.remove(&chan_id);
                 job_change = "Removing";
             } else {
+                job_states.remove(&chan_id);
                 job_change = "Updating";
             }
         } else {
@@ -393,7 +414,9 @@ async fn write_job(
     } else {
         my_job = job.unwrap();
         info!(
-            "{} job for {} with amount {}msat, maxppm {}, outppm {:?}, target: {:?}, maxhops: {:?} and candidatelist {:?}",
+            "{} job for {} with amount: {}msat, maxppm: {}, outppm: {:?}, target: {:?},\n
+            maxhops: {:?}, candidatelist: {:?},\n
+            depleteuptopercent: {:?}, depleteuptoamount: {:?}, paralleljobs: {:?}",
             job_change,
             &chan_id,
             &my_job.amount,
@@ -402,9 +425,13 @@ async fn write_job(
             &my_job.target,
             &my_job.maxhops,
             &my_job.candidatelist,
+            &my_job.depleteuptopercent,
+            &my_job.depleteuptoamount,
+            &my_job.paralleljobs,
         );
         jobs.insert(chan_id, my_job);
     }
+    let peer_channels = p.state().peer_channels.lock().await.clone();
     let mut jobs_to_remove = Vec::new();
     if peer_channels.len() > 0 {
         for (chan_id, _job) in &jobs {
@@ -427,7 +454,7 @@ pub async fn slingexceptchan(
     plugin: Plugin<PluginState>,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, Error> {
-    let peer_channels = plugin.state().peer_channels.lock().clone();
+    let peer_channels = plugin.state().peer_channels.lock().await;
     match args {
         serde_json::Value::Array(a) => {
             if a.len() > 2 || a.len() == 0 {
@@ -528,7 +555,7 @@ pub async fn slingexceptpeer(
     plugin: Plugin<PluginState>,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, Error> {
-    let peer_channels = plugin.state().peer_channels.lock().clone();
+    let peer_channels = plugin.state().peer_channels.lock().await;
     match args {
         serde_json::Value::Array(a) => {
             if a.len() > 2 || a.len() == 0 {
@@ -698,12 +725,12 @@ pub async fn read_graph(sling_dir: &PathBuf) -> Result<LnGraph, Error> {
     Ok(graph)
 }
 pub async fn write_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
-    let graph = plugin.state().graph.lock().clone();
+    let graph = plugin.state().graph.lock().await;
     let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
     let now = Instant::now();
     fs::write(
         sling_dir.join(GRAPH_FILE_NAME),
-        serde_json::to_string(&graph)?,
+        serde_json::to_string(&graph.clone())?,
     )
     .await?;
     debug!(
@@ -724,14 +751,20 @@ async fn create_sling_dir(sling_dir: &PathBuf) -> Result<(), Error> {
 }
 
 pub fn channel_jobstate_update(
-    jobstates: Arc<Mutex<HashMap<String, JobState>>>,
+    jobstates: Arc<Mutex<HashMap<String, Vec<JobState>>>>,
     chan_id: ShortChannelId,
+    task_id: u8,
     latest_state: JobMessage,
     active: Option<bool>,
     should_stop: Option<bool>,
 ) {
     let mut jobstates_mut = jobstates.lock();
-    let jobstate = jobstates_mut.get_mut(&chan_id.to_string()).unwrap();
+    let jobstate = jobstates_mut
+        .get_mut(&chan_id.to_string())
+        .unwrap()
+        .iter_mut()
+        .find(|jt| jt.id() == task_id)
+        .unwrap();
     jobstate.statechange(latest_state);
     match active {
         Some(a) => jobstate.set_active(a),
@@ -759,27 +792,9 @@ pub fn get_preimage_paymend_hash_pair() -> (String, Sha256) {
     (pi_str, payment_hash)
 }
 
-pub fn get_out_htlc_count(channel: &ListpeerchannelsChannels) -> u64 {
+pub fn get_total_htlc_count(channel: &ListpeerchannelsChannels) -> u64 {
     match &channel.htlcs {
-        Some(htlcs) => htlcs
-            .into_iter()
-            .filter(|htlc| match htlc.direction.unwrap() {
-                ListpeerchannelsChannelsHtlcsDirection::OUT => true,
-                ListpeerchannelsChannelsHtlcsDirection::IN => false,
-            })
-            .count() as u64,
-        None => 0,
-    }
-}
-pub fn get_in_htlc_count(channel: &ListpeerchannelsChannels) -> u64 {
-    match &channel.htlcs {
-        Some(htlcs) => htlcs
-            .into_iter()
-            .filter(|htlc| match htlc.direction.unwrap() {
-                ListpeerchannelsChannelsHtlcsDirection::OUT => false,
-                ListpeerchannelsChannelsHtlcsDirection::IN => true,
-            })
-            .count() as u64,
+        Some(htlcs) => htlcs.len() as u64,
         None => 0,
     }
 }
@@ -792,7 +807,11 @@ pub fn edge_cost(edge: &ListchannelsChannels, amount: u64) -> u64 {
     //     (edge.base_fee_millisatoshi as f64
     //         + edge.fee_per_millionth as f64 / 1_000_000.0 * amount as f64) as u64
     // );
-    fee_total_msat_precise(edge.fee_per_millionth, edge.base_fee_millisatoshi, amount).ceil() as u64
+    std::cmp::max(
+        fee_total_msat_precise(edge.fee_per_millionth, edge.base_fee_millisatoshi, amount).ceil()
+            as u64,
+        1,
+    )
 }
 
 pub fn feeppm_effective(feeppm: u32, basefee_msat: u32, amount_msat: u64) -> u64 {
@@ -864,13 +883,22 @@ pub fn get_all_normal_channels_from_listpeerchannels(
 
 pub async fn my_sleep(
     seconds: u64,
-    job_state: Arc<Mutex<HashMap<String, JobState>>>,
+    job_state: Arc<Mutex<HashMap<String, Vec<JobState>>>>,
     chan_id: &ShortChannelId,
+    task_id: u8,
 ) {
     let timer = Instant::now();
     let chan_id = chan_id.to_string();
     while timer.elapsed() < Duration::from_secs(seconds) {
-        if job_state.lock().get(&chan_id).unwrap().should_stop() {
+        if job_state
+            .lock()
+            .get(&chan_id)
+            .unwrap()
+            .iter()
+            .find(|jt| jt.id() == task_id)
+            .unwrap()
+            .should_stop()
+        {
             break;
         }
         time::sleep(Duration::from_secs(1)).await;

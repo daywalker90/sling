@@ -11,7 +11,7 @@ pub struct WaitsendpayError {
     pub message: String,
     pub data: Option<WaitsendpayErrorData>,
 }
-/// status of the payment
+// status of the payment
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 pub enum WaitsendpayErrorStatus {
     #[serde(rename = "pending")]
