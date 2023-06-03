@@ -293,7 +293,7 @@ fn success_stats(
         "top_5_channel_partners":top_5_channel_partners.iter().map(|(partner, count)| {
             json!(ChannelPartnerStats{
                 scid: partner.clone(),
-                alias: alias_map.get(&peer_channels.get(partner).unwrap().peer_id.unwrap()).unwrap().clone(),
+                alias: if let Some(chan) = &peer_channels.get(partner){alias_map.get(&chan.peer_id.unwrap()).unwrap().clone()} else {"NOT_FOUND".to_string()},
                 sats: *count,
             })
         }).collect::<Vec<_>>(),
@@ -377,8 +377,8 @@ fn failure_stats(
             json!(PeerPartnerStats{
                 peer_id: node.clone(),
                 alias: match PublicKey::from_str(node){
-                    Ok(pk) => alias_map.get(&pk).unwrap().clone(),
-                    Err(_e) => "".to_string(),
+                    Ok(pk) => alias_map.get(&pk).unwrap_or(&"NOT_FOUND".to_string()).clone(),
+                    Err(_e) => "INVALID_PUBKEY".to_string(),
                 },
                 count: *count,
             })
@@ -386,7 +386,7 @@ fn failure_stats(
         "top_5_channel_partners":top_5_channel_partners.iter().map(|(partner, count)| {
             json!(ChannelPartnerStats{
                 scid: partner.clone(),
-                alias: alias_map.get(&peer_channels.get(partner).unwrap().peer_id.unwrap()).unwrap().clone(),
+                alias: if let Some(chan) = &peer_channels.get(partner){alias_map.get(&chan.peer_id.unwrap()).unwrap().clone()} else {"NOT_FOUND".to_string()},
                 sats: *count,
             })
         }).collect::<Vec<_>>(),
