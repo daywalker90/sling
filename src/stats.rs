@@ -289,7 +289,7 @@ fn success_stats(
         "feeppm_min": fee_ppms.iter().min().unwrap(),
         "feeppm_max": fee_ppms.iter().max().unwrap(),
         "feeppm_median": fee_ppms[fee_ppms.len()/2],
-        "feeppm_90th_percentile": fee_ppms[(fee_ppms.len() as f64 * 0.9).ceil() as usize],
+        "feeppm_90th_percentile": fee_ppms[std::cmp::max(0,(fee_ppms.len() as f64 * 0.9).ceil() as i32 - 1) as usize],
         "top_5_channel_partners":top_5_channel_partners.iter().map(|(partner, count)| {
             json!(ChannelPartnerStats{
                 scid: partner.clone(),
