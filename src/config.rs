@@ -300,6 +300,20 @@ pub async fn read_config(
     Ok(())
 }
 
+pub fn get_cli_location(
+    plugin: &ConfiguredPlugin<PluginState, tokio::io::Stdin, tokio::io::Stdout>,
+    state: PluginState,
+) -> Result<(), Error> {
+    let mut config = state.config.lock();
+    config.lightning_cli.1 = match plugin.option(&config.lightning_cli.0) {
+        Some(options::Value::String(i)) => i,
+        Some(_) => config.lightning_cli.1.clone(),
+        None => config.lightning_cli.1.clone(),
+    };
+
+    Ok(())
+}
+
 pub fn get_startup_options(
     plugin: &ConfiguredPlugin<PluginState, tokio::io::Stdin, tokio::io::Stdout>,
     state: PluginState,

@@ -103,7 +103,7 @@ impl Config {
             max_htlc_count: (PLUGIN_NAME.to_string() + "-max-htlc-count", 5),
             lightning_cli: (
                 PLUGIN_NAME.to_string() + "-lightning-cli",
-                "/usr/local/bin/lightning-cli".to_string(),
+                "lightning-cli".to_string(),
             ),
             stats_delete_failures_age: (PLUGIN_NAME.to_string() + "-stats-delete-failures-age", 30),
             stats_delete_failures_size: (

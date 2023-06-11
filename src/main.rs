@@ -2,7 +2,7 @@ extern crate serde_json;
 
 use std::path::Path;
 
-use crate::config::{get_startup_options, read_config};
+use crate::config::{get_cli_location, get_startup_options, read_config};
 use crate::model::{EXCEPTS_CHANS_FILE_NAME, EXCEPTS_PEERS_FILE_NAME};
 use crate::rpc::{check_lightning_dir, get_info};
 use crate::util::{make_rpc_path, read_excepts, refresh_joblists};
@@ -234,6 +234,11 @@ async fn main() -> Result<(), anyhow::Error> {
         .await?
     {
         Some(plugin) => {
+            info!("get cli location");
+            match get_cli_location(&plugin, state.clone()) {
+                Ok(()) => &(),
+                Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
+            };
             info!("read config");
             match read_config(&plugin, state.clone()).await {
                 Ok(()) => &(),
