@@ -15,7 +15,7 @@ A core lightning plugin to automatically rebalance multiple channels.
 ## Installation
 For general plugin installation instructions see the plugins repo [README.md](https://github.com/lightningd/plugins/blob/master/README.md#Installation)
 
-:warning:Make sure to change the option ``sling-lightning-cli`` if it is different from ``/usr/local/bin/lightning-cli``, see [Options](#options) for more info
+:warning:Make sure to change the option ``sling-lightning-cli`` if you don't want sling to use the ``lightning-cli`` from PATH, see [Options](#options) for more info
 
 ## Building
 You can build the plugin yourself instead of using the release binaries.
@@ -111,7 +111,7 @@ Formula is ``min(depleteuptopercent * channel_capacity, depleteuptoamount)``. If
 You can mix these methods but if you set the same option with multiple of these methods the priority is 1. -> 2.
 
 ## Options
-* :warning:``sling-lightning-cli``: location of your lightning-cli, since rpc methods in cln-rpc don't return enough info in an error case we have to call these via cli. Default is ``/usr/local/bin/lightning-cli``
+* :warning:``sling-lightning-cli``: location of your lightning-cli, since rpc methods in cln-rpc don't return enough info in an error case we have to call these via cli. Default is ``lightning-cli`` from PATH
 * ``sling-refresh-peers-interval``: ``sling`` periodically calls listpeers every ``refresh-peers-interval`` seconds
 and jobs use the data of the last call to check for balances etc. So this option could severely impact rebalancing target precision
 if it's value is too high. Default is ``1``s

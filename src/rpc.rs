@@ -8,6 +8,7 @@ use cln_rpc::{
     ClnRpc,
 };
 use log::debug;
+use serde_json::Value;
 use tokio::{process::Command, time::Instant};
 
 use crate::{
@@ -185,6 +186,38 @@ pub async fn waitsendpay(
             message: e.to_string(),
             data: None,
         }),
+    }
+}
+
+pub async fn get_config_path(
+    network_dir: &String,
+    lightning_cli: String,
+) -> Result<Option<String>, Error> {
+    let network_dir = PathBuf::from_str(&network_dir).unwrap();
+    let mut lightning_dir = network_dir.clone();
+    lightning_dir.pop();
+    debug!("{}  |  {}", lightning_dir.to_str().unwrap(), lightning_cli);
+    let listconfigs_request = Command::new(lightning_cli)
+        .arg("--lightning-dir=".to_string() + lightning_dir.to_str().unwrap())
+        .arg("listconfigs")
+        .output()
+        .await;
+    match listconfigs_request {
+        Ok(output) => match serde_json::from_str::<Value>(&String::from_utf8_lossy(&output.stdout))
+        {
+            Ok(o) => match o.get("conf") {
+                Some(c) => Ok(Some(c.as_str().unwrap().to_string())),
+                None => Ok(None),
+            },
+            Err(e) => Err(anyhow!(
+                "Could not read listconfigs response: {}",
+                e.to_string()
+            )),
+        },
+        Err(e) => Err(anyhow!(
+            "Unexpected result in listconfigs: {}",
+            e.to_string()
+        )),
     }
 }
 

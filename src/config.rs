@@ -5,25 +5,33 @@ use std::path::Path;
 
 use tokio::fs;
 
-use crate::model::PluginState;
+use crate::{model::PluginState, rpc::get_config_path};
 
 pub async fn read_config(
     plugin: &ConfiguredPlugin<PluginState, tokio::io::Stdin, tokio::io::Stdout>,
     state: PluginState,
 ) -> Result<(), Error> {
-    let mut configfile = String::new();
+    let mut config_file_content = String::new();
     let dir = plugin.clone().configuration().lightning_dir;
-    match fs::read_to_string(Path::new(&dir).join("config")).await {
-        Ok(file) => configfile = file,
-        Err(_) => {
-            match fs::read_to_string(Path::new(&dir).parent().unwrap().join("config")).await {
-                Ok(file2) => configfile = file2,
-                Err(_) => warn!("No config file found!"),
-            }
-        }
-    }
     let mut config = state.config.lock();
-    for line in configfile.lines() {
+    let config_file_path = get_config_path(&dir, config.lightning_cli.1.clone()).await?;
+    match config_file_path {
+        Some(p) => match fs::read_to_string(Path::new(&p)).await {
+            Ok(f) => config_file_content = f,
+            Err(e) => return Err(anyhow!("Could not read config file! {}", e.to_string())),
+        },
+        None => match fs::read_to_string(Path::new(&dir).join("config")).await {
+            Ok(file) => config_file_content = file,
+            Err(_) => {
+                match fs::read_to_string(Path::new(&dir).parent().unwrap().join("config")).await {
+                    Ok(file2) => config_file_content = file2,
+                    Err(_) => warn!("No config file found!"),
+                }
+            }
+        },
+    }
+
+    for line in config_file_content.lines() {
         if line.contains('=') {
             let splitline = line.split('=').collect::<Vec<&str>>();
             if splitline.len() == 2 {
