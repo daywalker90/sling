@@ -3,7 +3,7 @@ use cln_plugin::Plugin;
 use log::debug;
 use serde_json::json;
 
-use crate::{model::PluginState, PLUGIN_NAME};
+use crate::model::{PluginState, PLUGIN_NAME};
 
 pub async fn htlc_handler(
     plugin: Plugin<PluginState>,

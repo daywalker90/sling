@@ -2,10 +2,9 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
-use crate::model::{JobMessage, JobState, PluginState};
+use crate::model::{JobMessage, JobState, PluginState, PLUGIN_NAME};
 use crate::slings::sling;
 use crate::util::{make_rpc_path, read_jobs, refresh_joblists, write_graph};
-use crate::PLUGIN_NAME;
 use anyhow::{anyhow, Error};
 use cln_plugin::Plugin;
 

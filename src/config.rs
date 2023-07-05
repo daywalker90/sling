@@ -12,7 +12,7 @@ pub async fn read_config(
     state: PluginState,
 ) -> Result<(), Error> {
     let mut config_file_content = String::new();
-    let dir = plugin.clone().configuration().lightning_dir;
+    let dir = plugin.configuration().lightning_dir;
     let mut config = state.config.lock();
     let config_file_path = get_config_path(&dir, config.lightning_cli.1.clone()).await?;
     match config_file_path {

@@ -1,6 +1,7 @@
+use crate::util::feeppm_effective;
+
 #[test]
 fn test_effective_feeppm() {
-    use crate::util::feeppm_effective;
     assert_eq!(feeppm_effective(0, 0, 1_000), 0);
     assert_eq!(feeppm_effective(0, 0, 200_000), 0);
     assert_eq!(feeppm_effective(0, 0, 9_999_999_999), 0);

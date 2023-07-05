@@ -122,7 +122,7 @@ if it's value is too high. Default is ``1``s
 * ``sling-depleteuptoamount``: Up to what amount to pull/push sats from/to candidate channels. Also see [Depleteformula](#depleteformula). Default is ``2000000``sats
 * ``sling-paralleljobs``: How many routes to take in parallel for any job. Default is ``1``
 * ``sling-timeoutpay``: How long we wait for a rebalance to resolve. After this we just continue with the next route. Default is ``120``s
-* ``sling-max-htlc-count``: Max number of pending htlcs allowed in participating channels (softcap). Should be higher that your highest ``parraleljobs``. Default is ``5``
+* ``sling-max-htlc-count``: Max number of pending htlcs allowed in participating channels (softcap). Should be higher than your highest ``parraleljobs``. Default is ``5``
 * ``sling-stats-delete-failures-age``: Max age of failure stats in days and also time window for sling-stats. Default is ``30`` days, use ``0`` to never delete stats based on age
 * ``sling-stats-delete-successes-age``: Max age of success stats in days and also time window for sling-stats. Default is ``30`` days, use ``0`` to never delete stats based on age
 * ``sling-stats-delete-failures-size``: Max number of failure stats per channel. Default is ``10000``, use ``0`` to never delete stats based on count

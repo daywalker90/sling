@@ -16,12 +16,10 @@ use tabled::Table;
 
 use crate::model::{
     ChannelPartnerStats, JobState, PeerPartnerStats, PluginState, StatSummary, NO_ALIAS_SET,
-};
-use crate::util::{get_all_normal_channels_from_listpeerchannels, refresh_joblists};
-use crate::{
-    model::{FailureReb, SuccessReb},
     PLUGIN_NAME,
 };
+use crate::model::{FailureReb, SuccessReb};
+use crate::util::{get_all_normal_channels_from_listpeerchannels, refresh_joblists};
 
 pub async fn slingstats(
     plugin: Plugin<PluginState>,

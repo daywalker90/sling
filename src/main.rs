@@ -1,31 +1,18 @@
-extern crate serde_json;
-
-use std::path::Path;
-
-use crate::config::{get_cli_location, get_startup_options, read_config};
-use crate::model::{EXCEPTS_CHANS_FILE_NAME, EXCEPTS_PEERS_FILE_NAME};
-use crate::rpc::{check_lightning_dir, get_info};
-use crate::util::{make_rpc_path, read_excepts, refresh_joblists};
 use anyhow::anyhow;
 use cln_plugin::{options, Builder};
 use cln_rpc::primitives::PublicKey;
 use cln_rpc::primitives::ShortChannelId;
+use config::*;
 use htlc::htlc_handler;
-use jobs::slinggo;
-use jobs::slingstop;
+use jobs::*;
 use log::{debug, info, warn};
-use model::Config;
-use model::PluginState;
-use model::PLUGIN_NAME;
-use notifications::shutdown_handler;
-use stats::slingstats;
+use model::*;
+use notifications::*;
+use rpc::*;
+use stats::*;
+use std::path::Path;
 use tokio::{self};
-use util::slingdeletejob;
-use util::slingexceptchan;
-use util::slingexceptpeer;
-use util::slingjob;
-use util::slingjobsettings;
-use util::slingversion;
+use util::*;
 
 mod config;
 mod dijkstra;

@@ -7,6 +7,7 @@ use cln_rpc::{model::*, primitives::*};
 use log::{debug, info, warn};
 
 use parking_lot::Mutex;
+use sling::{Job, SatDirection};
 use std::cmp::{max, min};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -20,8 +21,8 @@ use tokio::time::Instant;
 
 use crate::dijkstra::dijkstra;
 use crate::model::{
-    Config, DijkstraNode, FailureReb, Job, JobMessage, JobState, LnGraph, PluginState,
-    SatDirection, SuccessReb,
+    Config, DijkstraNode, FailureReb, JobMessage, JobState, LnGraph, PluginState, SuccessReb,
+    PLUGIN_NAME,
 };
 use crate::rpc::{slingsend, waitsendpay};
 use crate::util::{
@@ -29,7 +30,6 @@ use crate::util::{
     get_normal_channel_from_listpeerchannels, get_preimage_paymend_hash_pair, get_total_htlc_count,
     is_channel_normal, my_sleep,
 };
-use crate::PLUGIN_NAME;
 
 pub async fn sling(
     rpc_path: &PathBuf,
