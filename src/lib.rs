@@ -9,7 +9,7 @@ use log::debug;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq, Eq)]
 pub enum SatDirection {
     #[serde(alias = "pull")]
     Pull,
@@ -36,7 +36,7 @@ impl fmt::Display for SatDirection {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct Job {
     pub sat_direction: SatDirection,
     pub amount: u64,
