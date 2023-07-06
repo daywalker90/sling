@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fmt::{self, Display, Formatter},
-    path::PathBuf,
+    path::Path,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -57,6 +57,12 @@ impl PluginState {
             job_state: Arc::new(Mutex::new(HashMap::new())),
         }
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct Task<'a> {
+    pub chan_id: &'a ShortChannelId,
+    pub task_id: u8,
 }
 
 #[derive(Clone, Debug)]
@@ -252,6 +258,18 @@ impl DirectedChannel {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct PublicKeyPair<'a> {
+    pub my_pubkey: &'a PublicKey,
+    pub other_pubkey: &'a PublicKey,
+}
+
+#[derive(Clone, Debug)]
+pub struct ExcludeGraph<'a> {
+    pub exclude_chans: &'a HashSet<String>,
+    pub exclude_peers: &'a [PublicKey],
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LnGraph {
     pub graph: BTreeMap<PublicKey, Vec<DirectedChannel>>,
@@ -264,7 +282,7 @@ impl LnGraph {
     }
     pub fn update(&mut self, new_graph: LnGraph) {
         for (new_node, new_channels) in new_graph.graph.iter() {
-            let old_channels = self.graph.entry(new_node.clone()).or_default();
+            let old_channels = self.graph.entry(*new_node).or_default();
             let new_short_channel_ids: HashSet<String> = new_channels
                 .iter()
                 .map(|c| c.channel.short_channel_id.to_string())
@@ -331,7 +349,7 @@ impl LnGraph {
         match self.graph.get(source) {
             Some(e) => {
                 let result = e
-                    .into_iter()
+                    .iter()
                     .filter(|&i| i.channel.short_channel_id.to_string() == channel.to_string())
                     .collect::<Vec<&DirectedChannel>>();
                 if result.len() != 1 {
@@ -352,18 +370,15 @@ impl LnGraph {
 
     pub fn edges(
         &self,
-        mypubkey: &PublicKey,
-        node: &PublicKey,
-        exclude: &HashSet<String>,
-        exclude_peers: &Vec<PublicKey>,
+        keypair: &PublicKeyPair,
+        exclude_graph: &ExcludeGraph,
         amount: &u64,
-        candidatelist: &Vec<ShortChannelId>,
+        candidatelist: &[ShortChannelId],
         tempbans: &HashMap<String, u64>,
     ) -> Vec<&DirectedChannel> {
-        match self.graph.get(&node) {
+        match self.graph.get(keypair.other_pubkey) {
             Some(e) => {
-                return e
-                    .into_iter()
+                e.iter()
                     .filter(|&i| {
                         // debug!(
                         //     "{}: liq:{} amt:{}",
@@ -372,26 +387,26 @@ impl LnGraph {
                         //     amount
                         // );
                         let chan_str = i.channel.short_channel_id.to_string();
-                        !exclude.contains(&chan_str)
+                        !exclude_graph.exclude_chans.contains(&chan_str)
                             && !tempbans.contains_key(&chan_str)
                             && i.liquidity >= *amount
                             && Amount::msat(&i.channel.htlc_minimum_msat) <= *amount
                             && Amount::msat(
                                 &i.channel.htlc_maximum_msat.unwrap_or(i.channel.amount_msat),
                             ) >= *amount
-                            && !exclude_peers.contains(&i.channel.source)
-                            && !exclude_peers.contains(&i.channel.destination)
-                            && if i.channel.source == *mypubkey
-                                || i.channel.destination == *mypubkey
+                            && !exclude_graph.exclude_peers.contains(&i.channel.source)
+                            && !exclude_graph.exclude_peers.contains(&i.channel.destination)
+                            && if i.channel.source == *keypair.my_pubkey
+                                || i.channel.destination == *keypair.my_pubkey
                             {
                                 candidatelist.iter().any(|c| c.to_string() == chan_str)
                             } else {
                                 true
                             }
                     })
-                    .collect::<Vec<&DirectedChannel>>();
+                    .collect::<Vec<&DirectedChannel>>()
             }
-            None => return Vec::<&DirectedChannel>::new(),
+            None => Vec::<&DirectedChannel>::new(),
         }
     }
 }
@@ -408,7 +423,7 @@ impl SuccessReb {
     pub async fn write_to_file(
         &self,
         chan_id: ShortChannelId,
-        sling_dir: &PathBuf,
+        sling_dir: &Path,
     ) -> Result<(), Error> {
         let serialized = serde_json::to_string(self)?;
         let mut file = OpenOptions::new()
@@ -422,7 +437,7 @@ impl SuccessReb {
     }
 
     pub async fn read_from_file(
-        sling_dir: &PathBuf,
+        sling_dir: &Path,
         chan_id: ShortChannelId,
     ) -> Result<Vec<SuccessReb>, Error> {
         let contents =
@@ -448,7 +463,7 @@ impl FailureReb {
     pub async fn write_to_file(
         &self,
         chan_id: ShortChannelId,
-        sling_dir: &PathBuf,
+        sling_dir: &Path,
     ) -> Result<(), Error> {
         let serialized = serde_json::to_string(self)?;
         let mut file = OpenOptions::new()
@@ -462,7 +477,7 @@ impl FailureReb {
     }
 
     pub async fn read_from_file(
-        sling_dir: &PathBuf,
+        sling_dir: &Path,
         chan_id: ShortChannelId,
     ) -> Result<Vec<FailureReb>, Error> {
         let contents =

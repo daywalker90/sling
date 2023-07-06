@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt, str::FromStr};
 
-use anyhow::{anyhow, Error};
+use anyhow::*;
 use cln_rpc::{
     model::ListpeerchannelsChannels,
     primitives::{Amount, ShortChannelId},
@@ -16,18 +16,22 @@ pub enum SatDirection {
     #[serde(alias = "push")]
     Push,
 }
-impl SatDirection {
-    pub fn from_str(s: &str) -> Result<Self, Error> {
+
+impl FromStr for SatDirection {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "pull" => Ok(SatDirection::Pull),
             "push" => Ok(SatDirection::Push),
             _ => Err(anyhow!("could not parse flow direction from `{}`", s)),
         }
     }
-    pub fn to_str(&self) -> &str {
-        match self {
-            SatDirection::Pull => "pull",
-            SatDirection::Push => "push",
+}
+impl fmt::Display for SatDirection {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            SatDirection::Pull => write!(f, "pull"),
+            SatDirection::Push => write!(f, "push"),
         }
     }
 }
@@ -75,10 +79,7 @@ impl Job {
         }
     }
     pub fn target_cap(&self, channel: &ListpeerchannelsChannels) -> u64 {
-        let target = match self.target {
-            Some(t) => t,
-            None => 0.5,
-        };
+        let target = self.target.unwrap_or(0.5);
 
         let total_msat = Amount::msat(&channel.total_msat.unwrap());
         let their_reserve_msat = Amount::msat(&channel.their_reserve_msat.unwrap());
@@ -101,7 +102,7 @@ impl Job {
     }
     pub fn to_json(&self) -> serde_json::Value {
         let mut result = HashMap::new();
-        result.insert("direction", String::from(self.sat_direction.to_str()));
+        result.insert("direction", self.sat_direction.to_string());
         result.insert("amount", (self.amount / 1_000).to_string());
         result.insert("maxppm", self.maxppm.to_string());
         match self.outppm {

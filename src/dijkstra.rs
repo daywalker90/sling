@@ -1,4 +1,4 @@
-use crate::model::{DijkstraNode, LnGraph};
+use crate::model::{DijkstraNode, ExcludeGraph, LnGraph, PublicKeyPair};
 use crate::util::{edge_cost, fee_total_msat_precise};
 use anyhow::Error;
 use cln_rpc::{model::*, primitives::*};
@@ -9,18 +9,16 @@ use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
 };
-
+#[allow(clippy::too_many_arguments)]
 pub fn dijkstra(
-    mypubkey: &PublicKey,
+    my_pubkey: &PublicKey,
     lngraph: &LnGraph,
     start: &PublicKey,
     goal: &PublicKey,
     slingchan: &DijkstraNode,
     job: &Job,
-    candidatelist: &Vec<ShortChannelId>,
-    exclude: &HashSet<String>,
-    exclude_peers: &Vec<PublicKey>,
-    hops: u64,
+    candidatelist: &[ShortChannelId],
+    exclude_graph: &ExcludeGraph,
     last_delay: u16,
     tempbans: &HashMap<String, u64>,
 ) -> Result<Vec<SendpayRoute>, Error> {
@@ -29,6 +27,10 @@ pub fn dijkstra(
     let mut predecessor = HashMap::new();
     let mut visit_next = BinaryHeap::new();
     let zero_score = u64::default();
+    let max_hops = match job.maxhops {
+        Some(h) => h + 1,
+        None => 9,
+    };
     scores.insert(*start, slingchan.clone());
     visit_next.push(MinScored(zero_score, *start));
     while let Some(MinScored(node_score, node)) = visit_next.pop() {
@@ -50,17 +52,18 @@ pub fn dijkstra(
             break;
         }
         let current_hops = scores.get(&node).unwrap().hops;
-        if current_hops + 2 > hops {
+        if current_hops + 2 > max_hops {
             continue;
         }
         for edge in lngraph.edges(
-            mypubkey,
-            &node,
-            exclude,
-            exclude_peers,
+            &PublicKeyPair {
+                my_pubkey,
+                other_pubkey: &node,
+            },
+            exclude_graph,
             &job.amount,
-            &candidatelist,
-            &tempbans,
+            candidatelist,
+            tempbans,
         ) {
             let next = edge.channel.destination;
             if visited.contains(&next) {
@@ -71,7 +74,7 @@ pub fn dijkstra(
                 // );
                 continue;
             }
-            let next_score = if edge.channel.source == *mypubkey {
+            let next_score = if edge.channel.source == *my_pubkey {
                 0
             } else {
                 node_score + edge_cost(&edge.channel, job.amount)
@@ -86,7 +89,7 @@ pub fn dijkstra(
             let dijkstra_node = DijkstraNode {
                 score: next_score,
                 channel: edge.channel.clone(),
-                destination: next.clone(),
+                destination: next,
                 hops: current_hops + 1,
             };
             match scores.entry(next) {
@@ -99,7 +102,7 @@ pub fn dijkstra(
                         // );
                         *ent.into_mut() = dijkstra_node;
                         visit_next.push(MinScored(next_score, next));
-                        predecessor.insert(next.clone(), node.clone());
+                        predecessor.insert(next, node);
                     }
                 }
                 Vacant(ent) => {
@@ -111,22 +114,22 @@ pub fn dijkstra(
                     // );
                     ent.insert(dijkstra_node);
                     visit_next.push(MinScored(next_score, next));
-                    predecessor.insert(next.clone(), node.clone());
+                    predecessor.insert(next, node);
                 }
             }
         }
         visited.insert(node);
     }
 
-    Ok(build_route(
+    build_route(
         &predecessor,
-        &goal,
+        goal,
         &scores,
         job,
-        &start,
-        &slingchan,
+        start,
+        slingchan,
         last_delay,
-    )?)
+    )
 }
 
 fn build_route(
@@ -141,11 +144,11 @@ fn build_route(
     let mut dijkstra_path = Vec::new();
     // debug!("predecssors: {:?}", predecessor);
     let mut prev;
-    match predecessor.get(&goal) {
+    match predecessor.get(goal) {
         Some(node) => prev = node,
         None => return Ok(vec![]),
     };
-    dijkstra_path.push(scores.get(&goal).unwrap().clone());
+    dijkstra_path.push(scores.get(goal).unwrap().clone());
     // debug!(
     //     "{}: found potential new route with #hops: {}",
     //     slingchan.channel.short_channel_id.to_string(),
@@ -153,8 +156,8 @@ fn build_route(
     // );
 
     while prev != start {
-        let spr = scores.get(&prev).unwrap().clone();
-        prev = predecessor.get(&prev).unwrap();
+        let spr = scores.get(prev).unwrap().clone();
+        prev = predecessor.get(prev).unwrap();
         dijkstra_path.push(spr);
     }
     match job.sat_direction {
@@ -198,7 +201,7 @@ fn build_route(
                 )
                 .ceil() as u64,
         );
-        delay = delay + hop.channel.delay as u16;
+        delay += hop.channel.delay as u16;
     }
     Ok(sendpay_route)
 }

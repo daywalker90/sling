@@ -8,8 +8,8 @@ use std::{
 use anyhow::{anyhow, Error};
 use cln_plugin::Plugin;
 use cln_rpc::{
-    model::ListpeerchannelsChannelsState,
-    primitives::{Amount, ShortChannelId},
+    model::{ListchannelsChannels, ListpeerchannelsChannels, ListpeerchannelsChannelsState},
+    primitives::{Amount, PublicKey, ShortChannelId},
 };
 
 use log::{debug, info, warn};
@@ -68,7 +68,7 @@ pub async fn refresh_listpeerchannels_loop(plugin: Plugin<PluginState>) -> Resul
 }
 
 pub async fn refresh_listpeerchannels(plugin: &Plugin<PluginState>) -> Result<(), Error> {
-    let rpc_path = make_rpc_path(&plugin);
+    let rpc_path = make_rpc_path(plugin);
 
     let now = Instant::now();
     *plugin.state().peer_channels.lock().await = list_peer_channels(&rpc_path)
@@ -120,7 +120,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
             // let min_maxppm = maxppms.min().unwrap_or(0);
             let max_maxppm = maxppms.max().unwrap_or(3_000);
 
-            let mypubkey = plugin.state().config.lock().pubkey.unwrap().clone();
+            let mypubkey = plugin.state().config.lock().pubkey.unwrap();
 
             let two_w_ago = (SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -267,32 +267,29 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
             let fail_age = sys_time_now - stats_delete_failures_age * 24 * 60 * 60;
             for (chan_id, rebs) in successes {
                 let rebs_len = rebs.len();
-                let filtered_rebs;
-                if stats_delete_successes_age > 0 {
-                    filtered_rebs = rebs
-                        .into_iter()
+                let filtered_rebs = if stats_delete_successes_age > 0 {
+                    rebs.into_iter()
                         .filter(|c| c.completed_at >= succ_age)
-                        .collect::<Vec<SuccessReb>>();
+                        .collect::<Vec<SuccessReb>>()
                 } else {
-                    filtered_rebs = rebs;
-                }
+                    rebs
+                };
                 let filtered_rebs_len = filtered_rebs.len();
                 debug!(
                     "{}: filtered {} success entries because of age",
                     chan_id,
                     rebs_len - filtered_rebs_len
                 );
-                let pruned_rebs;
-                if stats_delete_successes_size > 0
+                let pruned_rebs = if stats_delete_successes_size > 0
                     && filtered_rebs_len as u64 > stats_delete_successes_size
                 {
-                    pruned_rebs = filtered_rebs
+                    filtered_rebs
                         .into_iter()
                         .skip(filtered_rebs_len - stats_delete_successes_size as usize)
-                        .collect::<Vec<SuccessReb>>();
+                        .collect::<Vec<SuccessReb>>()
                 } else {
-                    pruned_rebs = filtered_rebs;
-                }
+                    filtered_rebs
+                };
                 debug!(
                     "{}: filtered {} success entries because of size",
                     chan_id,
@@ -314,32 +311,29 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
             }
             for (chan_id, rebs) in failures {
                 let rebs_len = rebs.len();
-                let filtered_rebs;
-                if stats_delete_failures_age > 0 {
-                    filtered_rebs = rebs
-                        .into_iter()
+                let filtered_rebs = if stats_delete_failures_age > 0 {
+                    rebs.into_iter()
                         .filter(|c| c.created_at >= fail_age)
-                        .collect::<Vec<FailureReb>>();
+                        .collect::<Vec<FailureReb>>()
                 } else {
-                    filtered_rebs = rebs;
-                }
+                    rebs
+                };
                 let filtered_rebs_len = filtered_rebs.len();
                 debug!(
                     "{}: filtered {} failure entries because of age",
                     chan_id,
                     rebs_len - filtered_rebs_len
                 );
-                let pruned_rebs;
-                if stats_delete_failures_size > 0
+                let pruned_rebs = if stats_delete_failures_size > 0
                     && filtered_rebs_len as u64 > stats_delete_failures_size
                 {
-                    pruned_rebs = filtered_rebs
+                    filtered_rebs
                         .into_iter()
                         .skip(filtered_rebs_len - stats_delete_failures_size as usize)
-                        .collect::<Vec<FailureReb>>();
+                        .collect::<Vec<FailureReb>>()
                 } else {
-                    pruned_rebs = filtered_rebs;
-                }
+                    filtered_rebs
+                };
                 debug!(
                     "{}: filtered {} failure entries because of size",
                     chan_id,
@@ -377,169 +371,190 @@ pub async fn channel_health(plugin: Plugin<PluginState>) -> Result<(), Error> {
             let peer_channels = list_peer_channels(rpc_path).await?;
             let alias_map = plugin.state().alias_peer_map.lock().clone();
             let my_pubkey = plugin.state().config.lock().pubkey.unwrap();
-            let unix_now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
-            if let Some(channels) = peer_channels.channels {
-                for chan in &channels {
-                    let mut should_disconnect = false;
-                    if let Some(c) = chan.peer_connected {
-                        if c {
-                            ()
-                        } else {
-                            continue;
-                        }
-                    } else {
+
+            let channels = if let Some(chans) = peer_channels.channels {
+                chans
+            } else {
+                return Err(anyhow!("no channels obj"));
+            };
+            for chan in &channels {
+                if let Some(c) = chan.peer_connected {
+                    if !c {
                         continue;
                     }
+                } else {
+                    continue;
+                }
 
-                    if let Some(s) = chan.state {
-                        match s {
-                            ListpeerchannelsChannelsState::CHANNELD_NORMAL => (),
-                            _ => continue,
-                        }
-                    } else {
-                        continue;
+                if let Some(s) = chan.state {
+                    match s {
+                        ListpeerchannelsChannelsState::CHANNELD_NORMAL => (),
+                        _ => continue,
                     }
+                } else {
+                    continue;
+                }
 
-                    let private;
-                    if let Some(p) = chan.private {
-                        private = p
-                    } else {
-                        continue;
-                    }
+                let private;
+                if let Some(p) = chan.private {
+                    private = p
+                } else {
+                    continue;
+                }
 
-                    let chan_id = chan.short_channel_id.unwrap();
+                let chan_id = chan.short_channel_id.unwrap();
 
-                    let channels_gossip = list_channels(rpc_path, Some(chan_id), None, None)
-                        .await?
-                        .channels;
-                    match channels_gossip.len() {
-                        0 => {
-                            warn!("channel_health: {} not in our gossip", chan_id.to_string());
-                            should_disconnect = true;
-                        }
-                        1 => {
-                            if channels_gossip.first().unwrap().source == my_pubkey {
-                                warn!(
-                                    "channel_health: {} has only our side in our gossip",
-                                    chan_id.to_string()
-                                );
-                            } else {
-                                warn!(
-                                    "channel_health: {} has only their side in our gossip",
-                                    chan_id.to_string()
-                                );
-                            }
-                            should_disconnect = true;
-                        }
-                        2 => {
-                            for chan_gossip in &channels_gossip {
-                                let active = chan_gossip.active;
-                                let public = chan_gossip.public;
-                                if private && !active {
-                                    warn!(
-                                        "channel_health: our private channel with {} is not active",
-                                        alias_map
-                                            .get(&chan.peer_id.unwrap())
-                                            .unwrap_or(&chan.peer_id.unwrap().to_string()),
-                                    );
-                                    should_disconnect = true;
-                                } else if !private && (!active || !public) {
-                                    warn!(
-                                        "channel_health: our public channel with {} is {} active and {} public",
-                                        alias_map
-                                            .get(&chan.peer_id.unwrap())
-                                            .unwrap_or(&chan.peer_id.unwrap().to_string()),
-                                        active,
-                                        public
-                                    );
-                                    should_disconnect = true;
-                                }
-                                if chan_gossip.source == my_pubkey {
-                                    if chan_gossip.last_update as u64 + 86_400 <= unix_now {
-                                        debug!(
-                                            "channel_health: our last update for {} is old",
-                                            alias_map
-                                                .get(&chan.peer_id.unwrap())
-                                                .unwrap_or(&chan.peer_id.unwrap().to_string())
-                                        );
-                                        let new_max_htlc;
+                let channels_gossip = list_channels(rpc_path, Some(chan_id), None, None)
+                    .await?
+                    .channels;
 
-                                        let random_number = {
-                                            let mut rng = rand::thread_rng();
-                                            if rng.gen_bool(0.5) {
-                                                1
-                                            } else {
-                                                -1
-                                            }
-                                        };
-                                        if chan_gossip.htlc_maximum_msat.unwrap().msat()
-                                            > chan_gossip.htlc_minimum_msat.msat()
-                                        {
-                                            if chan_gossip.htlc_maximum_msat.unwrap().msat()
-                                                < chan.total_msat.unwrap().msat()
-                                                    - chan.our_reserve_msat.unwrap().msat()
-                                            {
-                                                new_max_htlc =
-                                                    (chan_gossip.htlc_maximum_msat.unwrap().msat()
-                                                        as i64
-                                                        + random_number as i64)
-                                                        as u64
-                                            } else {
-                                                new_max_htlc =
-                                                    chan_gossip.htlc_maximum_msat.unwrap().msat()
-                                                        - 1
-                                            }
-                                        } else {
-                                            new_max_htlc =
-                                                chan_gossip.htlc_maximum_msat.unwrap().msat() + 1
-                                        }
-                                        match set_channel(
-                                            rpc_path,
-                                            chan.short_channel_id.unwrap().to_string(),
-                                            None,
-                                            None,
-                                            None,
-                                            Some(Amount::from_msat(new_max_htlc)),
-                                            None,
-                                        )
-                                        .await
-                                        {
-                                            Ok(_o) => info!(
-                                                "Sent new channel update for {}.",
-                                                alias_map
-                                                    .get(&chan.peer_id.unwrap())
-                                                    .unwrap_or(&chan.peer_id.unwrap().to_string())
-                                            ),
-                                            Err(e) => warn!("Error in calling set_channel: {}", e),
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        _ => warn!(
-                            "channel_health: UNUSUAL amount of sides for {}",
-                            chan_id.to_string()
+                let should_disconnect = check_gossip(
+                    rpc_path,
+                    channels_gossip,
+                    chan_id,
+                    my_pubkey,
+                    chan,
+                    &alias_map,
+                    private,
+                )
+                .await?;
+
+                if should_disconnect {
+                    match disconnect(rpc_path, chan.peer_id.unwrap()).await {
+                        Ok(_res) => info!(
+                            "channel_health: disconnected {}",
+                            alias_map
+                                .get(&chan.peer_id.unwrap())
+                                .unwrap_or(&chan.peer_id.unwrap().to_string())
                         ),
-                    }
-
-                    if should_disconnect {
-                        match disconnect(rpc_path, chan.peer_id.unwrap()).await {
-                            Ok(_res) => info!(
-                                "channel_health: disconnected {}",
-                                alias_map
-                                    .get(&chan.peer_id.unwrap())
-                                    .unwrap_or(&chan.peer_id.unwrap().to_string())
-                            ),
-                            Err(e) => warn!("channel_health: disconnect error: {}", e.to_string()),
-                        }
+                        Err(e) => warn!("channel_health: disconnect error: {}", e.to_string()),
                     }
                 }
             }
+
             info!("channel_health: finished in {}s", now.elapsed().as_secs());
         }
         time::sleep(Duration::from_secs(3_600)).await;
     }
+}
+
+async fn check_gossip(
+    rpc_path: &Path,
+    channels_gossip: Vec<ListchannelsChannels>,
+    chan_id: ShortChannelId,
+    my_pubkey: PublicKey,
+    chan: &ListpeerchannelsChannels,
+    alias_map: &HashMap<PublicKey, String>,
+    private: bool,
+) -> Result<bool, Error> {
+    let unix_now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let mut should_disconnect = false;
+    match channels_gossip.len() {
+        0 => {
+            warn!("channel_health: {} not in our gossip", chan_id.to_string());
+            should_disconnect = true;
+        }
+        1 => {
+            if channels_gossip.first().unwrap().source == my_pubkey {
+                warn!(
+                    "channel_health: {} has only our side in our gossip",
+                    chan_id.to_string()
+                );
+            } else {
+                warn!(
+                    "channel_health: {} has only their side in our gossip",
+                    chan_id.to_string()
+                );
+            }
+            should_disconnect = true;
+        }
+        2 => {
+            for chan_gossip in &channels_gossip {
+                let active = chan_gossip.active;
+                let public = chan_gossip.public;
+                if private && !active {
+                    warn!(
+                        "channel_health: our private channel with {} is not active",
+                        alias_map
+                            .get(&chan.peer_id.unwrap())
+                            .unwrap_or(&chan.peer_id.unwrap().to_string()),
+                    );
+                    should_disconnect = true;
+                } else if !private && (!active || !public) {
+                    warn!(
+                        "channel_health: our public channel with {} is {} active and {} public",
+                        alias_map
+                            .get(&chan.peer_id.unwrap())
+                            .unwrap_or(&chan.peer_id.unwrap().to_string()),
+                        active,
+                        public
+                    );
+                    should_disconnect = true;
+                }
+                if chan_gossip.source == my_pubkey
+                    && chan_gossip.last_update as u64 + 86_400 <= unix_now
+                {
+                    debug!(
+                        "channel_health: our last update for {} is old",
+                        alias_map
+                            .get(&chan.peer_id.unwrap())
+                            .unwrap_or(&chan.peer_id.unwrap().to_string())
+                    );
+                    let new_max_htlc;
+
+                    let random_number = {
+                        let mut rng = rand::thread_rng();
+                        if rng.gen_bool(0.5) {
+                            1
+                        } else {
+                            -1
+                        }
+                    };
+                    if chan_gossip.htlc_maximum_msat.unwrap().msat()
+                        > chan_gossip.htlc_minimum_msat.msat()
+                    {
+                        if chan_gossip.htlc_maximum_msat.unwrap().msat()
+                            < chan.total_msat.unwrap().msat()
+                                - chan.our_reserve_msat.unwrap().msat()
+                        {
+                            new_max_htlc = (chan_gossip.htlc_maximum_msat.unwrap().msat() as i64
+                                + random_number as i64)
+                                as u64
+                        } else {
+                            new_max_htlc = chan_gossip.htlc_maximum_msat.unwrap().msat() - 1
+                        }
+                    } else {
+                        new_max_htlc = chan_gossip.htlc_maximum_msat.unwrap().msat() + 1
+                    }
+                    match set_channel(
+                        rpc_path,
+                        chan.short_channel_id.unwrap().to_string(),
+                        None,
+                        None,
+                        None,
+                        Some(Amount::from_msat(new_max_htlc)),
+                        None,
+                    )
+                    .await
+                    {
+                        Ok(_o) => info!(
+                            "Sent new channel update for {}.",
+                            alias_map
+                                .get(&chan.peer_id.unwrap())
+                                .unwrap_or(&chan.peer_id.unwrap().to_string())
+                        ),
+                        Err(e) => warn!("Error in calling set_channel: {}", e),
+                    }
+                }
+            }
+        }
+        _ => warn!(
+            "channel_health: UNUSUAL amount of sides for {}",
+            chan_id.to_string()
+        ),
+    }
+    Ok(should_disconnect)
 }

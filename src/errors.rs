@@ -15,17 +15,17 @@ pub struct WaitsendpayError {
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 pub enum WaitsendpayErrorStatus {
     #[serde(rename = "pending")]
-    PENDING,
+    Pending,
     #[serde(rename = "failed")]
-    FAILED,
+    Failed,
 }
 
 impl TryFrom<i32> for WaitsendpayErrorStatus {
     type Error = anyhow::Error;
     fn try_from(c: i32) -> Result<WaitsendpayErrorStatus, anyhow::Error> {
         match c {
-            1 => Ok(WaitsendpayErrorStatus::PENDING),
-            -1 => Ok(WaitsendpayErrorStatus::FAILED),
+            1 => Ok(WaitsendpayErrorStatus::Pending),
+            -1 => Ok(WaitsendpayErrorStatus::Failed),
             o => Err(anyhow::anyhow!(
                 "Unknown variant {} for enum WaitsendpayErrorStatus",
                 o
@@ -81,11 +81,11 @@ pub struct WaitsendpayErrorData {
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 pub enum DelpayStatus {
     #[serde(rename = "complete")]
-    COMPLETE,
+    Complete,
     #[serde(rename = "failed")]
-    FAILED,
+    Failed,
     #[serde(rename = "pending")]
-    PENDING,
+    Pending,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

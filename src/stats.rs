@@ -1,3 +1,4 @@
+use std::cmp::max;
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, path::Path, str::FromStr};
@@ -38,7 +39,7 @@ pub async fn slingstats(
                 Err(anyhow!(
                     "Please provide exactly one short_channel_id or nothing for a summary"
                 ))
-            } else if a.len() == 0 {
+            } else if a.is_empty() {
                 let mut successes = HashMap::new();
                 let mut failures = HashMap::new();
                 refresh_joblists(plugin.clone()).await?;
@@ -56,7 +57,7 @@ pub async fn slingstats(
                         normal_channels_alias.insert(
                             scid.clone(),
                             alias_map
-                                .get(&peer)
+                                .get(peer)
                                 .unwrap_or(&"ALIAS_NOT_FOUND".to_string())
                                 .clone(),
                         );
@@ -118,7 +119,7 @@ pub async fn slingstats(
                         }
                     }
                     if total_amount_msat > 0 {
-                        weighted_fee_ppm = weighted_fee_ppm / total_amount_msat;
+                        weighted_fee_ppm /= total_amount_msat;
                     }
 
                     let last_route_failure = match failures.get(&job).unwrap_or(&Vec::new()).last()
@@ -175,11 +176,11 @@ pub async fn slingstats(
                         .to_ascii_lowercase()
                 });
                 let tabled = Table::new(table);
-                Ok(json!({"format-hint":"simple","result":format!("{}", tabled.to_string(),)}))
+                Ok(json!({"format-hint":"simple","result":format!("{}", tabled,)}))
             } else {
                 match a.first().unwrap() {
                     serde_json::Value::String(i) => {
-                        let scid = ShortChannelId::from_str(&i)?;
+                        let scid = ShortChannelId::from_str(i)?;
                         let successes = match SuccessReb::read_from_file(&sling_dir, scid).await {
                             Ok(o) => o,
                             Err(e) => {
@@ -195,7 +196,7 @@ pub async fn slingstats(
                             }
                         };
                         let alias_map = plugin.state().alias_peer_map.lock().clone();
-                        let success_json = if successes.len() > 0 {
+                        let success_json = if !successes.is_empty() {
                             success_stats(
                                 successes,
                                 stats_delete_successes_age,
@@ -205,7 +206,7 @@ pub async fn slingstats(
                         } else {
                             json!({"successes_in_time_window":""})
                         };
-                        let failures_json = if failures.len() > 0 {
+                        let failures_json = if !failures.is_empty() {
                             failure_stats(
                                 failures,
                                 stats_delete_failures_age,
@@ -269,7 +270,7 @@ fn success_stats(
         .into_iter()
         .max_by_key(|&(_, count)| count)
         .map(|(hops, _)| hops);
-    weighted_fee_ppm = weighted_fee_ppm / total_amount_msat;
+    weighted_fee_ppm /= total_amount_msat;
 
     let mut channel_partners = channel_partner_counts.into_iter().collect::<Vec<_>>();
 
@@ -280,6 +281,13 @@ fn success_stats(
     } else {
         &channel_partners[..]
     };
+    let feeppm_90th_percentile =
+        fee_ppms[max(0, (fee_ppms.len() as f64 * 0.9).ceil() as i32 - 1) as usize];
+    let time_of_last_rebalance = Local
+        .timestamp_opt(most_recent_completed_at as i64, 0)
+        .unwrap()
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string();
 
     json!({"successes_in_time_window":{
         "total_amount_sats":total_amount_msat/1_000,
@@ -287,16 +295,16 @@ fn success_stats(
         "feeppm_min": fee_ppms.iter().min().unwrap(),
         "feeppm_max": fee_ppms.iter().max().unwrap(),
         "feeppm_median": fee_ppms[fee_ppms.len()/2],
-        "feeppm_90th_percentile": fee_ppms[std::cmp::max(0,(fee_ppms.len() as f64 * 0.9).ceil() as i32 - 1) as usize],
+        "feeppm_90th_percentile": feeppm_90th_percentile,
         "top_5_channel_partners":top_5_channel_partners.iter().map(|(partner, count)| {
             json!(ChannelPartnerStats{
                 scid: partner.clone(),
-                alias: if let Some(chan) = &peer_channels.get(partner){alias_map.get(&chan.peer_id.unwrap()).unwrap().clone()} else {"NOT_FOUND".to_string()},
+                alias: get_stats_alias(peer_channels,partner, alias_map),
                 sats: *count,
             })
         }).collect::<Vec<_>>(),
         "most_common_hop_count":most_common_hop_count,
-        "time_of_last_rebalance": Local.timestamp_opt(most_recent_completed_at as i64,0).unwrap().format("%Y-%m-%d %H:%M:%S").to_string(),
+        "time_of_last_rebalance": time_of_last_rebalance,
         "total_rebalances":total_transactions
     }})
 }
@@ -365,6 +373,11 @@ fn failure_stats(
     } else {
         &fail_nodes[..]
     };
+    let time_of_last_attempt = Local
+        .timestamp_opt(most_recent_created_at as i64, 0)
+        .unwrap()
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string();
 
     json!({"failures_in_time_window":{
         "total_amount_tried_sats":total_amount_msat/1_000,
@@ -384,12 +397,24 @@ fn failure_stats(
         "top_5_channel_partners":top_5_channel_partners.iter().map(|(partner, count)| {
             json!(ChannelPartnerStats{
                 scid: partner.clone(),
-                alias: if let Some(chan) = &peer_channels.get(partner){alias_map.get(&chan.peer_id.unwrap()).unwrap().clone()} else {"NOT_FOUND".to_string()},
+                alias: get_stats_alias(peer_channels,partner, alias_map),
                 sats: *count,
             })
         }).collect::<Vec<_>>(),
         "most_common_hop_count":most_common_hop_count,
-        "time_of_last_attempt": Local.timestamp_opt(most_recent_created_at as i64,0).unwrap().format("%Y-%m-%d %H:%M:%S").to_string(),
+        "time_of_last_attempt": time_of_last_attempt,
         "total_rebalances_tried":total_transactions
     }})
+}
+
+fn get_stats_alias(
+    peer_channels: &BTreeMap<String, ListpeerchannelsChannels>,
+    partner: &String,
+    alias_map: &HashMap<PublicKey, String>,
+) -> String {
+    if let Some(chan) = &peer_channels.get(partner) {
+        alias_map.get(&chan.peer_id.unwrap()).unwrap().clone()
+    } else {
+        "NOT_FOUND".to_string()
+    }
 }

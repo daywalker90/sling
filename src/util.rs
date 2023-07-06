@@ -18,6 +18,7 @@ use std::{collections::HashMap, path::Path};
 
 use crate::jobs::slingstop;
 use crate::model::PluginState;
+use crate::model::Task;
 use crate::model::EXCEPTS_CHANS_FILE_NAME;
 use crate::model::EXCEPTS_PEERS_FILE_NAME;
 use crate::model::GRAPH_FILE_NAME;
@@ -67,49 +68,38 @@ pub async fn slingjob(
                 }
             }
 
-            let chan_id;
-            match ar.get("scid") {
-                Some(scid) => {
-                    chan_id = ShortChannelId::from_str(
-                        scid.as_str().ok_or(anyhow!("invalid string for scid"))?,
-                    )?
-                }
+            let chan_id = match ar.get("scid") {
+                Some(scid) => ShortChannelId::from_str(
+                    scid.as_str().ok_or(anyhow!("invalid string for scid"))?,
+                )?,
                 None => return Err(anyhow!("Missing scid")),
-            }
+            };
 
-            let sat_direction;
-            match ar.get("direction") {
-                Some(dir) => {
-                    sat_direction = SatDirection::from_str(
-                        dir.as_str()
-                            .ok_or(anyhow!("invalid string for direction"))?,
-                    )?
-                }
+            let sat_direction = match ar.get("direction") {
+                Some(dir) => SatDirection::from_str(
+                    dir.as_str()
+                        .ok_or(anyhow!("invalid string for direction"))?,
+                )?,
                 None => return Err(anyhow!("Missing direction")),
-            }
+            };
 
             //also convert to msat
-            let amount;
-            match ar.get("amount") {
+            let amount = match ar.get("amount") {
                 Some(amt) => {
-                    amount = amt
-                        .as_u64()
+                    amt.as_u64()
                         .ok_or(anyhow!("amount must be a positive integer"))?
                         * 1_000
                 }
                 None => return Err(anyhow!("Missing amount")),
-            }
+            };
             if amount == 0 {
                 return Err(anyhow!("amount must be greater than 0"));
             }
 
-            let maxppm;
-            match ar.get("maxppm") {
-                Some(ppm) => {
-                    maxppm = ppm.as_u64().ok_or(anyhow!("maxppm must be an integer"))? as u32
-                }
+            let maxppm = match ar.get("maxppm") {
+                Some(ppm) => ppm.as_u64().ok_or(anyhow!("maxppm must be an integer"))? as u32,
                 None => return Err(anyhow!("Missing maxppm")),
-            }
+            };
 
             let outppm = match ar.get("outppm") {
                 Some(o) => Some(o.as_u64().ok_or(anyhow!("outppm must be an integer"))?),
@@ -128,13 +118,10 @@ pub async fn slingjob(
                 Some(h) => Some(h.as_u64().ok_or(anyhow!("maxhops must be an integer"))?),
                 None => None,
             };
-            match maxhops {
-                Some(h) => {
-                    if h < 2 {
-                        return Err(anyhow!("maxhops must be atleast 2"));
-                    }
+            if let Some(h) = maxhops {
+                if h < 2 {
+                    return Err(anyhow!("maxhops must be atleast 2"));
                 }
-                None => (),
             }
 
             let depleteuptopercent = match ar.get("depleteuptopercent") {
@@ -144,13 +131,10 @@ pub async fn slingjob(
                 ),
                 None => None,
             };
-            match depleteuptopercent {
-                Some(dp) => {
-                    if dp < 0.0 || dp >= 1.0 {
-                        return Err(anyhow!("depleteuptopercent must be between 0.0 and <1.0"));
-                    }
+            if let Some(dp) = depleteuptopercent {
+                if !(0.0..1.0).contains(&dp) {
+                    return Err(anyhow!("depleteuptopercent must be between 0.0 and <1.0"));
                 }
-                None => (),
             }
 
             let depleteuptoamount = match ar.get("depleteuptoamount") {
@@ -170,13 +154,10 @@ pub async fn slingjob(
                 ),
                 None => None,
             };
-            match paralleljobs {
-                Some(h) => {
-                    if h < 1 {
-                        return Err(anyhow!("paralleljobs must be atleast 1"));
-                    }
+            if let Some(h) = paralleljobs {
+                if h < 1 {
+                    return Err(anyhow!("paralleljobs must be atleast 1"));
                 }
-                None => (),
             }
 
             let candidatelist = {
@@ -245,7 +226,7 @@ pub async fn slingjobsettings(
                 return Err(anyhow!(
                     "Please provide exactly one short_channel_id or nothing for all"
                 ));
-            } else if a.len() == 0 {
+            } else if a.is_empty() {
                 for (id, job) in jobs {
                     json_jobs.push(json!({id:job.to_json()}));
                 }
@@ -358,8 +339,9 @@ pub async fn read_jobs(
         Ok(file) => jobs = serde_json::from_str(&file).unwrap_or(BTreeMap::new()),
         Err(e) => {
             warn!(
-                "Could not open {}: {}. Maybe this is the first time using sling? Creating new file.",
-                jobfile.to_str().unwrap(), e.to_string()
+                "Couldn't open {}: {}. First time using sling? Creating new file.",
+                jobfile.to_str().unwrap(),
+                e.to_string()
             );
             File::create(jobfile.clone()).await?;
             jobs = BTreeMap::new();
@@ -435,9 +417,9 @@ async fn write_job(
     }
     let peer_channels = p.state().peer_channels.lock().await.clone();
     let mut jobs_to_remove = Vec::new();
-    if peer_channels.len() > 0 {
-        for (chan_id, _job) in &jobs {
-            if let None = get_normal_channel_from_listpeerchannels(&peer_channels, chan_id) {
+    if !peer_channels.is_empty() {
+        for chan_id in jobs.keys() {
+            if get_normal_channel_from_listpeerchannels(&peer_channels, chan_id).is_none() {
                 jobs_to_remove.push(chan_id.clone());
             }
         }
@@ -459,20 +441,17 @@ pub async fn slingexceptchan(
     let peer_channels = plugin.state().peer_channels.lock().await;
     match args {
         serde_json::Value::Array(a) => {
-            if a.len() > 2 || a.len() == 0 {
-                return Err(anyhow!(
+            if a.len() > 2 || a.is_empty() {
+                Err(anyhow!(
                     "Please either provide `add`/`remove` and a short_channel_id or just `list`"
-                ));
+                ))
             } else if a.len() == 2 {
                 match a.get(0).unwrap() {
                     serde_json::Value::String(i) => {
-                        let scid;
-                        match a.get(1).unwrap() {
-                            serde_json::Value::String(s) => {
-                                scid = ShortChannelId::from_str(&s)?;
-                            }
+                        let scid = match a.get(1).unwrap() {
+                            serde_json::Value::String(s) => ShortChannelId::from_str(s)?,
                             o => return Err(anyhow!("not a vaild short_channel_id: {}", o)),
-                        }
+                        };
                         let mut excepts = plugin.state().excepts_chans.lock();
                         let mut contains = false;
                         for chan_id in excepts.clone() {
@@ -490,7 +469,7 @@ pub async fn slingexceptchan(
                                 } else {
                                     let pull_jobs = plugin.state().pull_jobs.lock().clone();
                                     let push_jobs = plugin.state().push_jobs.lock().clone();
-                                    if let Some(_) = peer_channels.get(&scid.to_string()) {
+                                    if peer_channels.get(&scid.to_string()).is_some() {
                                         if pull_jobs.contains(&scid.to_string())
                                             || push_jobs.contains(&scid.to_string())
                                         {
@@ -558,95 +537,100 @@ pub async fn slingexceptpeer(
     args: serde_json::Value,
 ) -> Result<serde_json::Value, Error> {
     let peer_channels = plugin.state().peer_channels.lock().await;
-    match args {
-        serde_json::Value::Array(a) => {
-            if a.len() > 2 || a.len() == 0 {
+    let array = match args {
+        serde_json::Value::Array(a) => a,
+        _ => return Err(anyhow!("invalid arguments")),
+    };
+    if array.len() > 2 || array.is_empty() {
+        Err(anyhow!(
+            "Either provide `add`/`remove` and a node_id or just `list`"
+        ))
+    } else if array.len() == 2 {
+        let command = match array.get(0).unwrap() {
+            serde_json::Value::String(c) => c,
+            _ => {
                 return Err(anyhow!(
-                    "Please either provide `add`/`remove` and a node_id or just `list`"
-                ));
-            } else if a.len() == 2 {
-                match a.get(0).unwrap() {
-                    serde_json::Value::String(i) => {
-                        let pubkey;
-                        match a.get(1).unwrap() {
-                            serde_json::Value::String(s) => {
-                                pubkey = PublicKey::from_str(&s)?;
-                            }
-                            o => return Err(anyhow!("not a vaild node_id: {}", o)),
+                    "Invalid command. Use `add`/`remove` <node_id> or `list`"
+                ))
+            }
+        };
+        let pubkey = match array.get(1).unwrap() {
+            serde_json::Value::String(s) => PublicKey::from_str(s)?,
+            o => return Err(anyhow!("invaild node_id: {}", o)),
+        };
+        {
+            let mut excepts_peers = plugin.state().excepts_peers.lock();
+            let contains = excepts_peers.contains(&pubkey);
+            match command {
+                opt if opt.eq("add") => {
+                    if contains {
+                        return Err(anyhow!("{} is already in excepts", pubkey.to_string()));
+                    } else {
+                        let pull_jobs = plugin.state().pull_jobs.lock().clone();
+                        let push_jobs = plugin.state().push_jobs.lock().clone();
+                        let all_jobs: Vec<String> =
+                            pull_jobs.into_iter().chain(push_jobs.into_iter()).collect();
+                        let mut all_job_peers: Vec<PublicKey> = vec![];
+                        debug!("{:?}", all_jobs);
+                        for job in &all_jobs {
+                            match peer_channels.get(job) {
+                                Some(peer) => all_job_peers.push(peer.peer_id.unwrap()),
+                                None => return Err(anyhow!("peer not found")),
+                            };
                         }
-                        let mut excepts_peers = plugin.state().excepts_peers.lock();
-                        let contains = excepts_peers.contains(&pubkey);
-                        match i {
-                            opt if opt.eq("add") => {
-                                if contains {
-                                    return Err(anyhow!(
-                                        "{} is already in excepts",
-                                        pubkey.to_string()
-                                    ));
-                                } else {
-                                    let pull_jobs = plugin.state().pull_jobs.lock().clone();
-                                    let push_jobs = plugin.state().push_jobs.lock().clone();
-                                    let all_jobs: Vec<String> =
-                                        pull_jobs.into_iter().chain(push_jobs.into_iter()).collect();
-                                    let mut all_job_peers: Vec<PublicKey> = vec![];
-                                    debug!("{:?}",all_jobs);
-                                    for job in &all_jobs{
-                                        match peer_channels.get(job){
-                                            Some(peer)=> all_job_peers.push(peer.peer_id.unwrap()),
-                                            None=> return Err(anyhow!(
-                                                "peer not found"
-                                            )),
-                                        };
-                                    }
-                                    if all_job_peers.contains(&pubkey) {
-                                        return Err(anyhow!(
-                                            "this peer has a job already and can't be an except too"
-                                        ));
-                                    } else {
-                                        excepts_peers.push(pubkey);
-                                    }
-                                }
-                            }
-                            opt if opt.eq("remove") => {
-                                if contains {
-                                    excepts_peers.retain(|&x| x != pubkey);
-                                } else {
-                                    return Err(anyhow!(
-                                        "node_id {} not in excepts, nothing to remove",
-                                        pubkey.to_string()
-                                    ));
-                                }
-                            }
-                            _ => return Err(anyhow!("Unknown commmand. Please either provide `add`/`remove` and a node_id or just `list`")),
+                        if all_job_peers.contains(&pubkey) {
+                            return Err(anyhow!(
+                                "this peer has a job already and can't be an except too"
+                            ));
+                        } else {
+                            excepts_peers.push(pubkey);
                         }
                     }
-                    _ => return Err(anyhow!("Invalid command. Please either provide `add`/`remove` and a node_id or just `list`")),
                 }
-                let excepts = plugin.state().excepts_peers.lock().clone();
-                let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
-                write_excepts::<PublicKey>(excepts, EXCEPTS_PEERS_FILE_NAME, &sling_dir).await?;
-                Ok(json!({ "result": "success" }))
-            } else {
-                match a.get(0).unwrap() {
-                    serde_json::Value::String(i) => {
-                        let excepts = plugin.state().excepts_peers.lock();
-                        match i {
-                            opt if opt.eq("list") => Ok(json!(excepts.clone())),
-                            _ => Err(anyhow!("unknown commmand, did you misspell `list` or forgot the node_id?")),
-                        }
+                opt if opt.eq("remove") => {
+                    if contains {
+                        excepts_peers.retain(|&x| x != pubkey);
+                    } else {
+                        return Err(anyhow!(
+                            "node_id {} not in excepts, nothing to remove",
+                            pubkey.to_string()
+                        ));
                     }
-                    _ => Err(anyhow!("Invalid command. Please either provide `add`/`remove` and a node_id or just `list`")),
+                }
+                _ => {
+                    return Err(anyhow!(
+                        "Unknown commmand. Use `add`/`remove` <node_id> or `list`"
+                    ))
                 }
             }
         }
-        _ => Err(anyhow!("invalid arguments")),
+        let excepts = plugin.state().excepts_peers.lock().clone();
+        let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
+        write_excepts::<PublicKey>(excepts, EXCEPTS_PEERS_FILE_NAME, &sling_dir).await?;
+        Ok(json!({ "result": "success" }))
+    } else {
+        let command = match array.get(0).unwrap() {
+            serde_json::Value::String(i) => i,
+            _ => {
+                return Err(anyhow!(
+                    "Invalid command. Use `add`/`remove` <node_id> or `list`"
+                ))
+            }
+        };
+        let excepts = plugin.state().excepts_peers.lock();
+        match command {
+            opt if opt.eq("list") => Ok(json!(excepts.clone())),
+            _ => Err(anyhow!(
+                "unknown commmand, use `list` or forgot the node_id?"
+            )),
+        }
     }
 }
 
 async fn write_excepts<T: ToString>(
     excepts: Vec<T>,
     file: &str,
-    sling_dir: &PathBuf,
+    sling_dir: &Path,
 ) -> Result<(), Error> {
     let excepts_tostring = excepts
         .into_iter()
@@ -672,13 +656,14 @@ pub async fn read_excepts<T: FromStr>(
     let excepts_tostring: Vec<String>;
     let mut excepts: Vec<T> = Vec::new();
 
-    create_sling_dir(&sling_dir).await?;
+    create_sling_dir(sling_dir).await?;
     match exceptsfilecontent {
         Ok(file) => excepts_tostring = serde_json::from_str(&file).unwrap_or(Vec::new()),
         Err(e) => {
             warn!(
-                "Could not open {}: {}. Maybe this is the first time using sling? Creating new file.",
-                exceptsfile.to_str().unwrap(), e.to_string()
+                "Could not open {}: {}. First time using sling? Creating new file.",
+                exceptsfile.to_str().unwrap(),
+                e.to_string()
             );
             File::create(exceptsfile.clone()).await?;
             excepts_tostring = Vec::new();
@@ -716,8 +701,9 @@ pub async fn read_graph(sling_dir: &PathBuf) -> Result<LnGraph, Error> {
         }
         Err(e) => {
             warn!(
-                "Could not open {}: {}. Maybe this is the first time using sling? Creating new file.",
-                graphfile.to_str().unwrap(), e.to_string()
+                "Could not open {}: {}. First time using sling? Creating new file.",
+                graphfile.to_str().unwrap(),
+                e.to_string()
             );
             File::create(graphfile.clone()).await?;
             graph = LnGraph::new();
@@ -754,31 +740,26 @@ async fn create_sling_dir(sling_dir: &PathBuf) -> Result<(), Error> {
 
 pub fn channel_jobstate_update(
     jobstates: Arc<Mutex<HashMap<String, Vec<JobState>>>>,
-    chan_id: ShortChannelId,
-    task_id: u8,
-    latest_state: JobMessage,
+    task: &Task,
+    latest_state: &JobMessage,
     active: Option<bool>,
     should_stop: Option<bool>,
 ) {
     let mut jobstates_mut = jobstates.lock();
     let jobstate = jobstates_mut
-        .get_mut(&chan_id.to_string())
+        .get_mut(&task.chan_id.to_string())
         .unwrap()
         .iter_mut()
-        .find(|jt| jt.id() == task_id)
+        .find(|jt| jt.id() == task.task_id)
         .unwrap();
-    jobstate.statechange(latest_state);
-    match active {
-        Some(a) => jobstate.set_active(a),
-        None => (),
+    jobstate.statechange(*latest_state);
+    if let Some(a) = active {
+        jobstate.set_active(a);
     }
-    match should_stop {
-        Some(s) => {
-            if s {
-                jobstate.stop()
-            }
+    if let Some(s) = should_stop {
+        if s {
+            jobstate.stop()
         }
-        None => (),
     }
 }
 
@@ -841,10 +822,8 @@ pub fn make_rpc_path(plugin: &Plugin<PluginState>) -> PathBuf {
 
 pub fn is_channel_normal(channel: &ListpeerchannelsChannels) -> bool {
     match channel.state {
-        Some(state) => match state {
-            ListpeerchannelsChannelsState::CHANNELD_NORMAL => true,
-            _ => false,
-        },
+        Some(ListpeerchannelsChannelsState::CHANNELD_NORMAL) => true,
+        Some(_) => false,
         None => false,
     }
 }
@@ -876,28 +855,27 @@ pub fn get_all_normal_channels_from_listpeerchannels(
         if is_channel_normal(channel) {
             scid_peer_map.insert(
                 channel.short_channel_id.unwrap().to_string(),
-                channel.peer_id.unwrap().clone(),
+                channel.peer_id.unwrap(),
             );
         }
     }
     scid_peer_map
 }
 
-pub async fn my_sleep(
+pub async fn my_sleep<'a>(
     seconds: u64,
     job_state: Arc<Mutex<HashMap<String, Vec<JobState>>>>,
-    chan_id: &ShortChannelId,
-    task_id: u8,
+    task: &Task<'a>,
 ) {
     let timer = Instant::now();
-    let chan_id = chan_id.to_string();
+    let chan_id = task.chan_id.to_string();
     while timer.elapsed() < Duration::from_secs(seconds) {
         if job_state
             .lock()
             .get(&chan_id)
             .unwrap()
             .iter()
-            .find(|jt| jt.id() == task_id)
+            .find(|jt| jt.id() == task.task_id)
             .unwrap()
             .should_stop()
         {

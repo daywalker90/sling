@@ -6,12 +6,10 @@ use cln_rpc::{model::*, primitives::*};
 
 use log::{debug, info, warn};
 
-use parking_lot::Mutex;
 use sling::{Job, SatDirection};
 use std::cmp::{max, min};
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::Arc;
 
 use std::time::SystemTime;
 use std::{collections::HashMap, time::UNIX_EPOCH};
@@ -21,8 +19,8 @@ use tokio::time::Instant;
 
 use crate::dijkstra::dijkstra;
 use crate::model::{
-    Config, DijkstraNode, FailureReb, JobMessage, JobState, LnGraph, PluginState, SuccessReb,
-    PLUGIN_NAME,
+    Config, DijkstraNode, ExcludeGraph, FailureReb, JobMessage, LnGraph, PluginState,
+    PublicKeyPair, SuccessReb, Task, PLUGIN_NAME,
 };
 use crate::rpc::{slingsend, waitsendpay};
 use crate::util::{
@@ -31,40 +29,33 @@ use crate::util::{
     is_channel_normal, my_sleep,
 };
 
-pub async fn sling(
+pub async fn sling<'a>(
     rpc_path: &PathBuf,
-    chan_id: ShortChannelId,
-    job: Job,
-    task_id: u8,
+    job: &Job,
+    task: &Task<'a>,
     plugin: &Plugin<PluginState>,
 ) -> Result<(), Error> {
     let config = plugin.state().config.lock().clone();
-    let mypubkey = config.pubkey.unwrap().clone();
+    let mypubkey = config.pubkey.unwrap();
 
     let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
-    let mut networkdir = PathBuf::from_str(&plugin.configuration().lightning_dir.clone()).unwrap();
+    let mut networkdir = PathBuf::from_str(&plugin.configuration().lightning_dir).unwrap();
     networkdir.pop();
-
-    let last_delay = match config.cltv_delta.1 {
-        Some(c) => max(144, c),
-        None => 144,
-    };
 
     loop {
         {
             let graph = plugin.state().graph.lock().await;
 
-            if graph.graph.len() == 0 {
+            if graph.graph.is_empty() {
                 info!(
                     "{}/{}: graph is still empty. Sleeping...",
-                    chan_id.to_string(),
-                    task_id
+                    task.chan_id.to_string(),
+                    task.task_id
                 );
                 channel_jobstate_update(
                     plugin.state().job_state.clone(),
-                    chan_id,
-                    task_id,
-                    JobMessage::GraphEmpty,
+                    task,
+                    &JobMessage::GraphEmpty,
                     None,
                     None,
                 );
@@ -72,14 +63,14 @@ pub async fn sling(
                 break;
             }
         }
-        my_sleep(600, plugin.state().job_state.clone(), &chan_id, task_id).await;
+        my_sleep(600, plugin.state().job_state.clone(), task).await;
     }
     let other_peer;
     {
         let peer_channels = plugin.state().peer_channels.lock().await;
 
         other_peer = peer_channels
-            .get(&chan_id.to_string())
+            .get(&task.chan_id.to_string())
             .ok_or(anyhow!("other_peer: channel not found"))?
             .peer_id
             .ok_or(anyhow!("other_peer: peer id gone"))?;
@@ -92,19 +83,22 @@ pub async fn sling(
             .state()
             .job_state
             .lock()
-            .get(&chan_id.to_string())
+            .get(&task.chan_id.to_string())
             .unwrap()
             .iter()
-            .find(|jt| jt.id() == task_id)
+            .find(|jt| jt.id() == task.task_id)
             .unwrap()
             .should_stop();
         if should_stop {
-            info!("{}/{}: Stopped job!", chan_id.to_string(), task_id);
+            info!(
+                "{}/{}: Stopped job!",
+                task.chan_id.to_string(),
+                task.task_id
+            );
             channel_jobstate_update(
                 plugin.state().job_state.clone(),
-                chan_id,
-                task_id,
-                JobMessage::Stopped,
+                task,
+                &JobMessage::Stopped,
                 Some(false),
                 None,
             );
@@ -114,33 +108,27 @@ pub async fn sling(
         let tempbans = plugin.state().tempbans.lock().clone();
         let peer_channels = plugin.state().peer_channels.lock().await.clone();
 
-        match health_check(
+        if let Some(r) = health_check(
+            plugin.clone(),
             &peer_channels,
-            chan_id,
-            task_id,
-            &job,
+            task,
+            job,
             other_peer,
-            plugin.state().job_state.clone(),
-            &config,
             &tempbans,
         )
         .await
         {
-            Some(r) => {
-                if r {
-                    continue 'outer;
-                } else {
-                    break 'outer;
-                }
+            if r {
+                continue 'outer;
+            } else {
+                break 'outer;
             }
-            None => (),
         }
 
         channel_jobstate_update(
             plugin.state().job_state.clone(),
-            chan_id,
-            task_id,
-            JobMessage::Rebalancing,
+            task,
+            &JobMessage::Rebalancing,
             None,
             None,
         );
@@ -148,42 +136,40 @@ pub async fn sling(
         let route = match next_route(
             plugin,
             &peer_channels,
-            &job,
+            job,
             &tempbans,
-            &config,
-            &chan_id,
-            task_id,
-            &other_peer,
+            task,
+            &PublicKeyPair {
+                my_pubkey: &mypubkey,
+                other_pubkey: &other_peer,
+            },
             &mut success_route,
-            &mypubkey,
-            last_delay,
         )
         .await
         {
             Ok(r) => r,
             Err(_e) => {
                 success_route = None;
-                my_sleep(600, plugin.state().job_state.clone(), &chan_id, task_id).await;
+                my_sleep(600, plugin.state().job_state.clone(), task).await;
                 continue 'outer;
             }
         };
 
-        if route.len() == 0 {
+        if route.is_empty() {
             info!(
                 "{}/{}: could not find a route. Sleeping...",
-                chan_id.to_string(),
-                task_id
+                task.chan_id.to_string(),
+                task.task_id
             );
             channel_jobstate_update(
                 plugin.state().job_state.clone(),
-                chan_id,
-                task_id,
-                JobMessage::NoRoute,
+                task,
+                &JobMessage::NoRoute,
                 None,
                 None,
             );
             success_route = None;
-            my_sleep(600, plugin.state().job_state.clone(), &chan_id, task_id).await;
+            my_sleep(600, plugin.state().job_state.clone(), task).await;
             continue 'outer;
         }
 
@@ -193,8 +179,8 @@ pub async fn sling(
         );
         info!(
             "{}/{}: Found {}ppm route with {} hops. Total: {}ms",
-            chan_id.to_string(),
-            task_id,
+            task.chan_id.to_string(),
+            task.task_id,
             fee_ppm_effective,
             route.len() - 1,
             now.elapsed().as_millis().to_string()
@@ -203,18 +189,17 @@ pub async fn sling(
         if fee_ppm_effective > job.maxppm {
             info!(
                 "{}/{}: route not cheap enough! Sleeping...",
-                chan_id.to_string(),
-                task_id
+                task.chan_id.to_string(),
+                task.task_id
             );
             channel_jobstate_update(
                 plugin.state().job_state.clone(),
-                chan_id,
-                task_id,
-                JobMessage::TooExp,
+                task,
+                &JobMessage::TooExp,
                 None,
                 None,
             );
-            my_sleep(600, plugin.state().job_state.clone(), &chan_id, task_id).await;
+            my_sleep(600, plugin.state().job_state.clone(), task).await;
             success_route = None;
             continue 'outer;
         }
@@ -224,8 +209,8 @@ pub async fn sling(
             for r in &route {
                 debug!(
                     "{}/{}: route: {} {:3} {:17} {}",
-                    chan_id.to_string(),
-                    task_id,
+                    task.chan_id.to_string(),
+                    task.task_id,
                     Amount::msat(&r.amount_msat),
                     r.delay,
                     r.channel.to_string(),
@@ -238,8 +223,8 @@ pub async fn sling(
         let route_claim_peer = route[(route.len() / 2) - 1].id;
         debug!(
             "{}/{}: setting liquidity on {} to 0 to not get same route for parallel tasks.",
-            chan_id.to_string(),
-            task_id,
+            task.chan_id.to_string(),
+            task.task_id,
             route_claim_chan.to_string()
         );
         let route_claim_liq = match plugin
@@ -275,7 +260,7 @@ pub async fn sling(
         // );
 
         let send_response;
-        match slingsend(&rpc_path, route.clone(), payment_hash, None, None).await {
+        match slingsend(rpc_path, route.clone(), payment_hash, None, None).await {
             Ok(resp) => {
                 plugin
                     .state()
@@ -288,8 +273,8 @@ pub async fn sling(
                 if e.to_string().contains("First peer not ready") {
                     info!(
                         "{}/{}: First peer not ready, banning it for now...",
-                        chan_id.to_string(),
-                        task_id
+                        task.chan_id.to_string(),
+                        task.task_id
                     );
                     plugin.state().tempbans.lock().insert(
                         route.first().unwrap().channel.to_string(),
@@ -302,7 +287,7 @@ pub async fn sling(
                     FailureReb {
                         amount_msat: job.amount,
                         failure_reason: "FIRST_PEER_NOT_READY".to_string(),
-                        failure_node: route.first().unwrap().id.clone(),
+                        failure_node: route.first().unwrap().id,
                         channel_partner: match job.sat_direction {
                             SatDirection::Pull => route.first().unwrap().channel,
                             SatDirection::Push => route.last().unwrap().channel,
@@ -313,22 +298,21 @@ pub async fn sling(
                             .unwrap()
                             .as_secs(),
                     }
-                    .write_to_file(chan_id, &sling_dir)
+                    .write_to_file(*task.chan_id, &sling_dir)
                     .await?;
                     continue;
                 } else {
                     channel_jobstate_update(
                         plugin.state().job_state.clone(),
-                        chan_id,
-                        task_id,
-                        JobMessage::Error,
+                        task,
+                        &JobMessage::Error,
                         None,
                         Some(false),
                     );
                     warn!(
                         "{}/{}: Unexpected sendpay error: {}",
-                        chan_id.to_string(),
-                        task_id,
+                        task.chan_id.to_string(),
+                        task.task_id,
                         e.to_string()
                     );
                     break 'outer;
@@ -337,8 +321,8 @@ pub async fn sling(
         };
         info!(
             "{}/{}: Sent on route. Total: {}ms",
-            chan_id.to_string(),
-            task_id,
+            task.chan_id.to_string(),
+            task.task_id,
             now.elapsed().as_millis().to_string()
         );
 
@@ -354,8 +338,8 @@ pub async fn sling(
             Ok(o) => {
                 info!(
                     "{}/{}: Rebalance SUCCESSFULL after {}s. Sent {}sats plus {}msats fee",
-                    chan_id.to_string(),
-                    task_id,
+                    task.chan_id.to_string(),
+                    task.task_id,
                     now.elapsed().as_secs().to_string(),
                     Amount::msat(&o.amount_msat.unwrap()) / 1_000,
                     Amount::msat(&o.amount_sent_msat) - Amount::msat(&o.amount_msat.unwrap()),
@@ -374,11 +358,11 @@ pub async fn sling(
                     hops: (route.len() - 1) as u8,
                     completed_at: o.completed_at.unwrap() as u64,
                 }
-                .write_to_file(chan_id, &sling_dir)
+                .write_to_file(*task.chan_id, &sling_dir)
                 .await?;
                 success_route = Some(route);
             }
-            Err(e) => {
+            Err(err) => {
                 success_route = None;
                 plugin
                     .state()
@@ -386,279 +370,238 @@ pub async fn sling(
                     .write()
                     .remove(&send_response.payment_hash.to_string());
                 let mut special_stop = false;
-                match e.code {
-                    Some(c) => {
-                        if c == 200 {
-                            warn!(
-                                "{}/{}: Rebalance WAITSENDPAY_TIMEOUT failure after {}s: {}",
-                                chan_id.to_string(),
-                                task_id,
-                                now.elapsed().as_secs().to_string(),
-                                e.message,
-                            );
-                            let temp_ban_route = &route[..route.len() - 1];
-                            let mut source = temp_ban_route.first().unwrap().id;
-                            for hop in temp_ban_route {
-                                if hop.channel.to_string()
-                                    == temp_ban_route.first().unwrap().channel.to_string()
-                                {
-                                    source = hop.id;
-                                } else {
-                                    plugin
-                                        .state()
-                                        .graph
-                                        .lock()
-                                        .await
-                                        .graph
-                                        .get_mut(&source)
-                                        .unwrap()
-                                        .iter_mut()
-                                        .find_map(|x| {
-                                            if x.channel.short_channel_id.to_string()
-                                                == hop.channel.to_string()
-                                                && x.channel.destination != mypubkey
-                                                && x.channel.source != mypubkey
-                                            {
-                                                x.liquidity = 0;
-                                                x.timestamp = SystemTime::now()
-                                                    .duration_since(UNIX_EPOCH)
-                                                    .unwrap()
-                                                    .as_secs();
-                                                Some(x)
-                                            } else {
-                                                None
-                                            }
-                                        });
-                                }
-                            }
-                            FailureReb {
-                                amount_msat: job.amount,
-                                failure_reason: "WAITSENDPAY_TIMEOUT".to_string(),
-                                failure_node: mypubkey,
-                                channel_partner: match job.sat_direction {
-                                    SatDirection::Pull => route.first().unwrap().channel,
-                                    SatDirection::Push => route.last().unwrap().channel,
-                                },
-                                hops: (route.len() - 1) as u8,
-                                created_at: SystemTime::now()
-                                    .duration_since(UNIX_EPOCH)
+                if let Some(c) = err.code {
+                    if c == 200 {
+                        warn!(
+                            "{}/{}: Rebalance WAITSENDPAY_TIMEOUT failure after {}s: {}",
+                            task.chan_id.to_string(),
+                            task.task_id,
+                            now.elapsed().as_secs().to_string(),
+                            err.message,
+                        );
+                        let temp_ban_route = &route[..route.len() - 1];
+                        let mut source = temp_ban_route.first().unwrap().id;
+                        for hop in temp_ban_route {
+                            if hop.channel.to_string()
+                                == temp_ban_route.first().unwrap().channel.to_string()
+                            {
+                                source = hop.id;
+                            } else {
+                                plugin
+                                    .state()
+                                    .graph
+                                    .lock()
+                                    .await
+                                    .graph
+                                    .get_mut(&source)
                                     .unwrap()
-                                    .as_secs(),
-                            }
-                            .write_to_file(chan_id, &sling_dir)
-                            .await?;
-                        } else {
-                            match e.data {
-                                Some(ref data) => {
-                                    err_chan = Some(data.erring_channel);
-                                    info!(
-                                        "{}/{}: Rebalance failure after {}s: {} at node:{} chan:{}",
-                                        chan_id.to_string(),
-                                        task_id,
-                                        now.elapsed().as_secs().to_string(),
-                                        e.message,
-                                        data.erring_node,
-                                        data.erring_channel.to_string()
-                                    );
-                                    match &data.failcodename {
-                                        err if err
-                                            .eq("WIRE_INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS")
-                                            && data.erring_node == mypubkey =>
+                                    .iter_mut()
+                                    .find_map(|x| {
+                                        if x.channel.short_channel_id.to_string()
+                                            == hop.channel.to_string()
+                                            && x.channel.destination != mypubkey
+                                            && x.channel.source != mypubkey
                                         {
-                                            warn!(
-                                                "{}/{}: PAYMENT DETAILS ERROR:{:?} {:?}",
-                                                chan_id.to_string(),
-                                                task_id,
-                                                e,
-                                                route
-                                            );
-                                            special_stop = true;
-                                        }
-                                        _ => (),
-                                    }
-
-                                    FailureReb {
-                                        amount_msat: Amount::msat(&data.amount_msat.unwrap()),
-                                        failure_reason: data.failcodename.clone(),
-                                        failure_node: data.erring_node,
-                                        channel_partner: match job.sat_direction {
-                                            SatDirection::Pull => route.first().unwrap().channel,
-                                            SatDirection::Push => route.last().unwrap().channel,
-                                        },
-                                        hops: (route.len() - 1) as u8,
-                                        created_at: data.created_at,
-                                    }
-                                    .write_to_file(chan_id, &sling_dir)
-                                    .await?;
-                                    if special_stop {
-                                        channel_jobstate_update(
-                                            plugin.state().job_state.clone(),
-                                            chan_id,
-                                            task_id,
-                                            JobMessage::Error,
-                                            None,
-                                            Some(false),
-                                        );
-                                        warn!(
-                                            "{}/{}: UNEXPECTED waitsendpay failure after {}s: {:?}",
-                                            chan_id.to_string(),
-                                            task_id,
-                                            now.elapsed().as_secs().to_string(),
-                                            e
-                                        );
-                                        break 'outer;
-                                    }
-
-                                    if data.erring_channel.to_string()
-                                        == route.last().unwrap().channel.to_string()
-                                    {
-                                        warn!(
-                                            "{}/{}: Last peer has a problem or just updated their fees? {}",
-                                            chan_id.to_string(),
-                                            task_id,
-                                            data.failcodename
-                                        );
-                                        if e.message.contains("Too many HTLCs") {
-                                            my_sleep(
-                                                3,
-                                                plugin.state().job_state.clone(),
-                                                &chan_id,
-                                                task_id,
-                                            )
-                                            .await;
+                                            x.liquidity = 0;
+                                            x.timestamp = SystemTime::now()
+                                                .duration_since(UNIX_EPOCH)
+                                                .unwrap()
+                                                .as_secs();
+                                            Some(x)
                                         } else {
-                                            match job.sat_direction {
-                                                SatDirection::Pull => {
-                                                    plugin.state().tempbans.lock().insert(
-                                                        route
-                                                            .get(route.len() - 3)
-                                                            .unwrap()
-                                                            .channel
-                                                            .to_string(),
-                                                        SystemTime::now()
-                                                            .duration_since(UNIX_EPOCH)
-                                                            .unwrap()
-                                                            .as_secs(),
-                                                    );
-                                                }
-                                                SatDirection::Push => {
-                                                    plugin.state().tempbans.lock().insert(
-                                                        route.last().unwrap().channel.to_string(),
-                                                        SystemTime::now()
-                                                            .duration_since(UNIX_EPOCH)
-                                                            .unwrap()
-                                                            .as_secs(),
-                                                    );
-                                                }
-                                            }
+                                            None
                                         }
-                                    } else if data.erring_channel.to_string()
-                                        == route.first().unwrap().channel.to_string()
-                                    {
-                                        warn!(
-                                            "{}/{}: First peer has a problem {}",
-                                            chan_id.to_string(),
-                                            task_id,
-                                            e.message.clone()
-                                        );
-                                        if e.message.contains("Too many HTLCs") {
-                                            my_sleep(
-                                                3,
-                                                plugin.state().job_state.clone(),
-                                                &chan_id,
-                                                task_id,
-                                            )
-                                            .await;
-                                        } else {
-                                            match job.sat_direction {
-                                                SatDirection::Pull => {
-                                                    plugin.state().tempbans.lock().insert(
-                                                        route.first().unwrap().channel.to_string(),
-                                                        SystemTime::now()
-                                                            .duration_since(UNIX_EPOCH)
-                                                            .unwrap()
-                                                            .as_secs(),
-                                                    );
-                                                }
-                                                SatDirection::Push => {
-                                                    my_sleep(
-                                                        60,
-                                                        plugin.state().job_state.clone(),
-                                                        &chan_id,
-                                                        task_id,
-                                                    )
-                                                    .await;
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        debug!(
-                                            "{}/{}: Adjusting liquidity for {}.",
-                                            chan_id.to_string(),
-                                            task_id,
-                                            data.erring_channel.to_string()
-                                        );
-                                        plugin
-                                            .state()
-                                            .graph
-                                            .lock()
-                                            .await
-                                            .graph
-                                            .get_mut(&data.erring_node)
-                                            .unwrap()
-                                            .iter_mut()
-                                            .find_map(|x| {
-                                                if x.channel.short_channel_id == data.erring_channel
-                                                    && x.channel.destination != mypubkey
-                                                    && x.channel.source != mypubkey
-                                                {
-                                                    x.liquidity =
-                                                        Amount::msat(&data.amount_msat.unwrap())
-                                                            - 1;
-                                                    x.timestamp = SystemTime::now()
-                                                        .duration_since(UNIX_EPOCH)
-                                                        .unwrap()
-                                                        .as_secs();
-                                                    Some(x)
-                                                } else {
-                                                    None
-                                                }
-                                            });
-                                    }
-                                }
-                                None => {
-                                    channel_jobstate_update(
-                                        plugin.state().job_state.clone(),
-                                        chan_id,
-                                        task_id,
-                                        JobMessage::Error,
-                                        None,
-                                        Some(false),
-                                    );
-                                    warn!(
-                                        "{}/{}: UNEXPECTED waitsendpay failure after {}s: {:?}",
-                                        chan_id.to_string(),
-                                        task_id,
-                                        now.elapsed().as_secs().to_string(),
-                                        e
-                                    );
-                                    break 'outer;
-                                }
-                            };
+                                    });
+                            }
                         }
+                        FailureReb {
+                            amount_msat: job.amount,
+                            failure_reason: "WAITSENDPAY_TIMEOUT".to_string(),
+                            failure_node: mypubkey,
+                            channel_partner: match job.sat_direction {
+                                SatDirection::Pull => route.first().unwrap().channel,
+                                SatDirection::Push => route.last().unwrap().channel,
+                            },
+                            hops: (route.len() - 1) as u8,
+                            created_at: SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs(),
+                        }
+                        .write_to_file(*task.chan_id, &sling_dir)
+                        .await?;
+                    } else if let Some(ref data) = err.data {
+                        err_chan = Some(data.erring_channel);
+                        info!(
+                            "{}/{}: Rebalance failure after {}s: {} at node:{} chan:{}",
+                            task.chan_id.to_string(),
+                            task.task_id,
+                            now.elapsed().as_secs().to_string(),
+                            err.message,
+                            data.erring_node,
+                            data.erring_channel.to_string()
+                        );
+                        match &data.failcodename {
+                            err if err.eq("WIRE_INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS")
+                                && data.erring_node == mypubkey =>
+                            {
+                                warn!(
+                                    "{}/{}: PAYMENT DETAILS ERROR:{:?} {:?}",
+                                    task.chan_id.to_string(),
+                                    task.task_id,
+                                    err,
+                                    route
+                                );
+                                special_stop = true;
+                            }
+                            _ => (),
+                        }
+
+                        FailureReb {
+                            amount_msat: Amount::msat(&data.amount_msat.unwrap()),
+                            failure_reason: data.failcodename.clone(),
+                            failure_node: data.erring_node,
+                            channel_partner: match job.sat_direction {
+                                SatDirection::Pull => route.first().unwrap().channel,
+                                SatDirection::Push => route.last().unwrap().channel,
+                            },
+                            hops: (route.len() - 1) as u8,
+                            created_at: data.created_at,
+                        }
+                        .write_to_file(*task.chan_id, &sling_dir)
+                        .await?;
+                        if special_stop {
+                            channel_jobstate_update(
+                                plugin.state().job_state.clone(),
+                                task,
+                                &JobMessage::Error,
+                                None,
+                                Some(false),
+                            );
+                            warn!(
+                                "{}/{}: UNEXPECTED waitsendpay failure after {}s: {:?}",
+                                task.chan_id.to_string(),
+                                task.task_id,
+                                now.elapsed().as_secs().to_string(),
+                                err
+                            );
+                            break 'outer;
+                        }
+
+                        if data.erring_channel.to_string()
+                            == route.last().unwrap().channel.to_string()
+                        {
+                            warn!(
+                                "{}/{}: Last peer has a problem or just updated their fees? {}",
+                                task.chan_id.to_string(),
+                                task.task_id,
+                                data.failcodename
+                            );
+                            if err.message.contains("Too many HTLCs") {
+                                my_sleep(3, plugin.state().job_state.clone(), task).await;
+                            } else {
+                                match job.sat_direction {
+                                    SatDirection::Pull => {
+                                        plugin.state().tempbans.lock().insert(
+                                            route.get(route.len() - 3).unwrap().channel.to_string(),
+                                            SystemTime::now()
+                                                .duration_since(UNIX_EPOCH)
+                                                .unwrap()
+                                                .as_secs(),
+                                        );
+                                    }
+                                    SatDirection::Push => {
+                                        plugin.state().tempbans.lock().insert(
+                                            route.last().unwrap().channel.to_string(),
+                                            SystemTime::now()
+                                                .duration_since(UNIX_EPOCH)
+                                                .unwrap()
+                                                .as_secs(),
+                                        );
+                                    }
+                                }
+                            }
+                        } else if data.erring_channel.to_string()
+                            == route.first().unwrap().channel.to_string()
+                        {
+                            warn!(
+                                "{}/{}: First peer has a problem {}",
+                                task.chan_id.to_string(),
+                                task.task_id,
+                                err.message.clone()
+                            );
+                            if err.message.contains("Too many HTLCs") {
+                                my_sleep(3, plugin.state().job_state.clone(), task).await;
+                            } else {
+                                match job.sat_direction {
+                                    SatDirection::Pull => {
+                                        plugin.state().tempbans.lock().insert(
+                                            route.first().unwrap().channel.to_string(),
+                                            SystemTime::now()
+                                                .duration_since(UNIX_EPOCH)
+                                                .unwrap()
+                                                .as_secs(),
+                                        );
+                                    }
+                                    SatDirection::Push => {
+                                        my_sleep(60, plugin.state().job_state.clone(), task).await;
+                                    }
+                                }
+                            }
+                        } else {
+                            debug!(
+                                "{}/{}: Adjusting liquidity for {}.",
+                                task.chan_id.to_string(),
+                                task.task_id,
+                                data.erring_channel.to_string()
+                            );
+                            plugin
+                                .state()
+                                .graph
+                                .lock()
+                                .await
+                                .graph
+                                .get_mut(&data.erring_node)
+                                .unwrap()
+                                .iter_mut()
+                                .find_map(|x| {
+                                    if x.channel.short_channel_id == data.erring_channel
+                                        && x.channel.destination != mypubkey
+                                        && x.channel.source != mypubkey
+                                    {
+                                        x.liquidity = Amount::msat(&data.amount_msat.unwrap()) - 1;
+                                        x.timestamp = SystemTime::now()
+                                            .duration_since(UNIX_EPOCH)
+                                            .unwrap()
+                                            .as_secs();
+                                        Some(x)
+                                    } else {
+                                        None
+                                    }
+                                });
+                        }
+                    } else {
+                        channel_jobstate_update(
+                            plugin.state().job_state.clone(),
+                            task,
+                            &JobMessage::Error,
+                            None,
+                            Some(false),
+                        );
+                        warn!(
+                            "{}/{}: UNEXPECTED waitsendpay failure after {}s: {:?}",
+                            task.chan_id.to_string(),
+                            task.task_id,
+                            now.elapsed().as_secs().to_string(),
+                            err
+                        );
+                        break 'outer;
                     }
-                    None => (),
                 }
             }
         };
         if match err_chan {
-            Some(ec) => {
-                if ec != route_claim_chan {
-                    true
-                } else {
-                    false
-                }
-            }
+            Some(ec) => ec != route_claim_chan,
             None => true,
         } {
             plugin
@@ -687,51 +630,47 @@ pub async fn sling(
     Ok(())
 }
 
-async fn next_route(
+async fn next_route<'a>(
     plugin: &Plugin<PluginState>,
     peer_channels: &BTreeMap<String, ListpeerchannelsChannels>,
     job: &Job,
     tempbans: &HashMap<String, u64>,
-    config: &Config,
-    chan_id: &ShortChannelId,
-    task_id: u8,
-    other_peer: &PublicKey,
+    task: &Task<'a>,
+    keypair: &PublicKeyPair<'a>,
     success_route: &mut Option<Vec<SendpayRoute>>,
-    mypubkey: &PublicKey,
-    last_delay: u16,
 ) -> Result<Vec<SendpayRoute>, Error> {
     let graph = plugin.state().graph.lock().await;
+    let config = plugin.state().config.lock().clone();
     let candidatelist;
     match job.candidatelist {
         Some(ref c) => {
-            if c.len() > 0 {
+            if !c.is_empty() {
                 candidatelist =
-                    build_candidatelist(&peer_channels, &job, &graph, &tempbans, &config, Some(c))
+                    build_candidatelist(peer_channels, job, &graph, tempbans, &config, Some(c))
             } else {
                 candidatelist =
-                    build_candidatelist(&peer_channels, &job, &graph, &tempbans, &config, None)
+                    build_candidatelist(peer_channels, job, &graph, tempbans, &config, None)
             }
         }
         None => {
-            candidatelist =
-                build_candidatelist(&peer_channels, &job, &graph, &tempbans, &config, None)
+            candidatelist = build_candidatelist(peer_channels, job, &graph, tempbans, &config, None)
         }
     }
     debug!(
         "{}/{}: Candidates: {}",
-        chan_id.to_string(),
-        task_id,
+        task.chan_id.to_string(),
+        task.task_id,
         candidatelist
             .iter()
             .map(|y| y.to_string())
             .collect::<Vec<String>>()
             .join(", ")
     );
-    if tempbans.len() > 0 {
+    if !tempbans.is_empty() {
         debug!(
             "{}/{}: Tempbans: {}",
-            chan_id.to_string(),
-            task_id,
+            task.chan_id.to_string(),
+            task.task_id,
             plugin
                 .state()
                 .tempbans
@@ -743,17 +682,16 @@ async fn next_route(
                 .join(", ")
         );
     }
-    if candidatelist.len() == 0 {
+    if candidatelist.is_empty() {
         info!(
             "{}/{}: No candidates found. Adjust out_ppm or wait for liquidity. Sleeping...",
-            chan_id.to_string(),
-            task_id
+            task.chan_id.to_string(),
+            task.task_id
         );
         channel_jobstate_update(
             plugin.state().job_state.clone(),
-            *chan_id,
-            task_id,
-            JobMessage::NoCandidates,
+            task,
+            &JobMessage::NoCandidates,
             None,
             None,
         );
@@ -781,50 +719,41 @@ async fn next_route(
     match success_route {
         Some(_) => (),
         None => {
-            let slingchan_inc;
-            match graph.get_channel(other_peer, chan_id) {
-                Ok(in_chan) => slingchan_inc = in_chan,
+            let slingchan_inc = match graph.get_channel(keypair.other_pubkey, task.chan_id) {
+                Ok(in_chan) => in_chan,
                 Err(_) => {
                     warn!(
                         "{}/{}: channel not found in graph!",
-                        chan_id.to_string(),
-                        task_id
+                        task.chan_id.to_string(),
+                        task.task_id
                     );
                     channel_jobstate_update(
                         plugin.state().job_state.clone(),
-                        *chan_id,
-                        task_id,
-                        JobMessage::ChanNotInGraph,
+                        task,
+                        &JobMessage::ChanNotInGraph,
                         None,
                         None,
                     );
                     return Err(anyhow!("channel not found in graph"));
                 }
             };
-            let slingchan_out;
-            match graph.get_channel(mypubkey, chan_id) {
-                Ok(out_chan) => slingchan_out = out_chan,
+            let slingchan_out = match graph.get_channel(keypair.my_pubkey, task.chan_id) {
+                Ok(out_chan) => out_chan,
                 Err(_) => {
                     warn!(
                         "{}/{}: channel not found in graph!",
-                        chan_id.to_string(),
-                        task_id
+                        task.chan_id.to_string(),
+                        task.task_id
                     );
                     channel_jobstate_update(
                         plugin.state().job_state.clone(),
-                        *chan_id,
-                        task_id,
-                        JobMessage::ChanNotInGraph,
+                        task,
+                        &JobMessage::ChanNotInGraph,
                         None,
                         None,
                     );
                     return Err(anyhow!("channel not found in graph!"));
                 }
-            };
-
-            let maxhops = match job.maxhops {
-                Some(h) => h + 1,
-                None => 9,
             };
 
             let mut pull_jobs = plugin.state().pull_jobs.lock().clone();
@@ -835,48 +764,53 @@ async fn next_route(
                 pull_jobs.insert(except.to_string());
                 push_jobs.insert(except.to_string());
             }
-
+            let last_delay = match config.cltv_delta.1 {
+                Some(c) => max(144, c),
+                None => 144,
+            };
             match job.sat_direction {
                 SatDirection::Pull => {
                     route = dijkstra(
-                        &mypubkey,
+                        keypair.my_pubkey,
                         &graph,
-                        mypubkey,
-                        other_peer,
+                        keypair.my_pubkey,
+                        keypair.other_pubkey,
                         &DijkstraNode {
                             score: 0,
-                            destination: *mypubkey,
-                            channel: slingchan_inc.channel.clone(),
+                            destination: *keypair.my_pubkey,
+                            channel: slingchan_inc.channel,
                             hops: 0,
                         },
-                        &job,
+                        job,
                         &candidatelist,
-                        &pull_jobs,
-                        &excepts_peers,
-                        maxhops,
+                        &ExcludeGraph {
+                            exclude_chans: &pull_jobs,
+                            exclude_peers: &excepts_peers,
+                        },
                         last_delay,
-                        &tempbans,
+                        tempbans,
                     )?;
                 }
                 SatDirection::Push => {
                     route = dijkstra(
-                        &mypubkey,
+                        keypair.my_pubkey,
                         &graph,
-                        other_peer,
-                        mypubkey,
+                        keypair.other_pubkey,
+                        keypair.my_pubkey,
                         &DijkstraNode {
                             score: 0,
-                            destination: *other_peer,
-                            channel: slingchan_out.channel.clone(),
+                            destination: *keypair.other_pubkey,
+                            channel: slingchan_out.channel,
                             hops: 0,
                         },
-                        &job,
+                        job,
                         &candidatelist,
-                        &push_jobs,
-                        &excepts_peers,
-                        maxhops,
+                        &ExcludeGraph {
+                            exclude_chans: &push_jobs,
+                            exclude_peers: &excepts_peers,
+                        },
                         last_delay,
-                        &tempbans,
+                        tempbans,
                     )?;
                 }
             }
@@ -885,21 +819,21 @@ async fn next_route(
     Ok(route)
 }
 
-async fn health_check(
+async fn health_check<'a>(
+    plugin: Plugin<PluginState>,
     peer_channels: &BTreeMap<String, ListpeerchannelsChannels>,
-    chan_id: ShortChannelId,
-    task_id: u8,
+    task: &Task<'a>,
     job: &Job,
     other_peer: PublicKey,
-    job_states: Arc<Mutex<HashMap<String, Vec<JobState>>>>,
-    config: &Config,
     tempbans: &HashMap<String, u64>,
 ) -> Option<bool> {
+    let config = plugin.state().config.lock().clone();
+    let job_states = plugin.state().job_state.clone();
     let our_listpeers_channel =
-        get_normal_channel_from_listpeerchannels(&peer_channels, &chan_id.to_string());
+        get_normal_channel_from_listpeerchannels(peer_channels, &task.chan_id.to_string());
     if let Some(channel) = our_listpeers_channel {
         if is_channel_normal(&channel) {
-            if job.is_balanced(&channel, &chan_id)
+            if job.is_balanced(&channel, task.chan_id)
                 || match job.sat_direction {
                     SatDirection::Pull => {
                         Amount::msat(&channel.receivable_msat.unwrap()) < job.amount
@@ -911,35 +845,33 @@ async fn health_check(
             {
                 info!(
                     "{}/{}: already balanced. Taking a break...",
-                    chan_id.to_string(),
-                    task_id
+                    task.chan_id.to_string(),
+                    task.task_id
                 );
                 channel_jobstate_update(
                     job_states.clone(),
-                    chan_id,
-                    task_id,
-                    JobMessage::Balanced,
+                    task,
+                    &JobMessage::Balanced,
                     None,
                     None,
                 );
-                my_sleep(600, job_states.clone(), &chan_id, task_id).await;
+                my_sleep(600, job_states.clone(), task).await;
                 Some(true)
             } else if get_total_htlc_count(&channel) > config.max_htlc_count.1 {
                 info!(
                     "{}/{}: already more than {} pending htlcs. Taking a break...",
-                    chan_id.to_string(),
-                    task_id,
+                    task.chan_id.to_string(),
+                    task.task_id,
                     config.max_htlc_count.1
                 );
                 channel_jobstate_update(
                     job_states.clone(),
-                    chan_id,
-                    task_id,
-                    JobMessage::HTLCcapped,
+                    task,
+                    &JobMessage::HTLCcapped,
                     None,
                     None,
                 );
-                my_sleep(10, job_states.clone(), &chan_id, task_id).await;
+                my_sleep(10, job_states.clone(), task).await;
                 Some(true)
             } else {
                 match peer_channels
@@ -950,38 +882,36 @@ async fn health_check(
                         if !p.peer_connected.unwrap() {
                             info!(
                                 "{}/{}: not connected. Taking a break...",
-                                chan_id.to_string(),
-                                task_id
+                                task.chan_id.to_string(),
+                                task.task_id
                             );
                             channel_jobstate_update(
                                 job_states.clone(),
-                                chan_id,
-                                task_id,
-                                JobMessage::Disconnected,
+                                task,
+                                &JobMessage::Disconnected,
                                 None,
                                 None,
                             );
-                            my_sleep(60, job_states.clone(), &chan_id, task_id).await;
+                            my_sleep(60, job_states.clone(), task).await;
                             Some(true)
                         } else if match job.sat_direction {
                             SatDirection::Pull => false,
                             SatDirection::Push => true,
-                        } && tempbans.contains_key(&chan_id.to_string())
+                        } && tempbans.contains_key(&task.chan_id.to_string())
                         {
                             info!(
                                 "{}/{}: First peer not ready. Taking a break...",
-                                chan_id.to_string(),
-                                task_id
+                                task.chan_id.to_string(),
+                                task.task_id
                             );
                             channel_jobstate_update(
                                 job_states.clone(),
-                                chan_id,
-                                task_id,
-                                JobMessage::PeerNotReady,
+                                task,
+                                &JobMessage::PeerNotReady,
                                 None,
                                 None,
                             );
-                            my_sleep(20, job_states.clone(), &chan_id, task_id).await;
+                            my_sleep(20, job_states.clone(), task).await;
                             Some(true)
                         } else {
                             None
@@ -990,16 +920,15 @@ async fn health_check(
                     None => {
                         channel_jobstate_update(
                             job_states.clone(),
-                            chan_id,
-                            task_id,
-                            JobMessage::PeerNotFound,
+                            task,
+                            &JobMessage::PeerNotFound,
                             Some(false),
                             None,
                         );
                         warn!(
                             "{}/{}: peer not found. Stopping job.",
-                            chan_id.to_string(),
-                            task_id
+                            task.chan_id.to_string(),
+                            task.task_id
                         );
                         Some(false)
                     }
@@ -1008,14 +937,13 @@ async fn health_check(
         } else {
             warn!(
                 "{}/{}: not in CHANNELD_NORMAL state. Stopping Job.",
-                chan_id.to_string(),
-                task_id
+                task.chan_id.to_string(),
+                task.task_id
             );
             channel_jobstate_update(
                 job_states.clone(),
-                chan_id,
-                task_id,
-                JobMessage::ChanNotNormal,
+                task,
+                &JobMessage::ChanNotNormal,
                 Some(false),
                 None,
             );
@@ -1024,14 +952,13 @@ async fn health_check(
     } else {
         warn!(
             "{}/{}: not found. Stopping Job.",
-            chan_id.to_string(),
-            task_id
+            task.chan_id.to_string(),
+            task.task_id
         );
         channel_jobstate_update(
             job_states.clone(),
-            chan_id,
-            task_id,
-            JobMessage::ChanNotNormal,
+            task,
+            &JobMessage::ChanNotNormal,
             Some(false),
             None,
         );
@@ -1060,10 +987,10 @@ fn build_candidatelist(
 
     for channel in peer_channels.values() {
         if let Some(scid) = channel.short_channel_id {
-            if match channel.state.unwrap() {
-                ListpeerchannelsChannelsState::CHANNELD_NORMAL => true,
-                _ => false,
-            } && channel.peer_connected.unwrap()
+            if matches!(
+                channel.state.unwrap(),
+                ListpeerchannelsChannelsState::CHANNELD_NORMAL
+            ) && channel.peer_connected.unwrap()
                 && match custom_candidates {
                     Some(c) => c.iter().any(|c| *c == scid),
                     None => true,
@@ -1119,7 +1046,7 @@ fn build_candidatelist(
                 } && !tempbans.contains_key(&scid.to_string())
                     && get_total_htlc_count(channel) <= config.max_htlc_count.1
                 {
-                    candidatelist.push(scid.clone());
+                    candidatelist.push(scid);
                 }
             }
         }

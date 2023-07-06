@@ -13,7 +13,7 @@ pub async fn read_config(
 ) -> Result<(), Error> {
     let mut config_file_content = String::new();
     let dir = plugin.configuration().lightning_dir;
-    let mut config = state.config.lock();
+    let config = state.config.lock().clone();
     let config_file_path = get_config_path(&dir, config.lightning_cli.1.clone()).await?;
     match config_file_path {
         Some(p) => match fs::read_to_string(Path::new(&p)).await {
@@ -31,11 +31,13 @@ pub async fn read_config(
         },
     }
 
+    let mut config = state.config.lock();
+
     for line in config_file_content.lines() {
         if line.contains('=') {
             let splitline = line.split('=').collect::<Vec<&str>>();
             if splitline.len() == 2 {
-                let name = splitline.clone().into_iter().nth(0).unwrap();
+                let name = splitline.clone().into_iter().next().unwrap();
                 let value = splitline.into_iter().nth(1).unwrap();
 
                 match name {
@@ -130,7 +132,7 @@ pub async fn read_config(
                                     config.reset_liquidity_interval.1 = n
                                 } else {
                                     return Err(anyhow!(
-                                        "Error: Number needs to be greater than or equal to 10 for {}.",
+                                        "Error: Number needs to be >= 10 for {}.",
                                         config.reset_liquidity_interval.0
                                     ));
                                 }
@@ -147,7 +149,7 @@ pub async fn read_config(
                     }
                     opt if opt.eq(&config.depleteuptopercent.0) => match value.parse::<f64>() {
                         Ok(n) => {
-                            if n >= 0.0 && n < 1.0 {
+                            if (0.0..1.0).contains(&n) {
                                 config.depleteuptopercent.1 = n
                             } else {
                                 return Err(anyhow!(
@@ -395,7 +397,7 @@ pub fn get_startup_options(
     config.depleteuptopercent.1 = match plugin.option(&config.depleteuptopercent.0) {
         Some(options::Value::String(i)) => match i.parse::<f64>() {
             Ok(f) => {
-                if f >= 0.0 && f < 1.0 {
+                if (0.0..1.0).contains(&f) {
                     f
                 } else {
                     return Err(anyhow!(

@@ -1,4 +1,7 @@
-use std::{path::PathBuf, str::FromStr};
+use std::{
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 use anyhow::{anyhow, Error};
 use cln_plugin::ConfiguredPlugin;
@@ -18,7 +21,7 @@ use crate::{
 use cln_rpc::primitives::*;
 
 pub async fn set_channel(
-    rpc_path: &PathBuf,
+    rpc_path: &Path,
     id: String,
     feebase: Option<Amount>,
     feeppm: Option<u32>,
@@ -154,7 +157,7 @@ pub async fn slingsend(
 }
 
 pub async fn waitsendpay(
-    lightning_dir: &PathBuf,
+    lightning_dir: &Path,
     lightning_cli: &String,
     payment_hash: Sha256,
     timeout: u16,
@@ -176,7 +179,7 @@ pub async fn waitsendpay(
                 Ok(err) => Err(err),
                 Err(e) => Err(WaitsendpayError {
                     code: None,
-                    message: format!("{} {:?}", e.to_string(), output),
+                    message: format!("{} {:?}", e, output),
                     data: None,
                 }),
             },
@@ -190,10 +193,10 @@ pub async fn waitsendpay(
 }
 
 pub async fn get_config_path(
-    network_dir: &String,
+    network_dir: &str,
     lightning_cli: String,
 ) -> Result<Option<String>, Error> {
-    let network_dir = PathBuf::from_str(&network_dir).unwrap();
+    let network_dir = PathBuf::from_str(network_dir).unwrap();
     let mut lightning_dir = network_dir.clone();
     lightning_dir.pop();
     debug!("{}  |  {}", lightning_dir.to_str().unwrap(), lightning_cli);
@@ -225,11 +228,11 @@ pub async fn check_lightning_dir(
     plugin: &ConfiguredPlugin<PluginState, tokio::io::Stdin, tokio::io::Stdout>,
     state: PluginState,
 ) -> Result<(), Error> {
-    let network_dir = PathBuf::from_str(&plugin.configuration().lightning_dir.clone()).unwrap();
+    let network_dir = PathBuf::from_str(&plugin.configuration().lightning_dir).unwrap();
     let mut lightning_dir = network_dir.clone();
     lightning_dir.pop();
-    let config = state.config.lock();
-    let getinfo_request = Command::new(config.lightning_cli.1.clone())
+    let config = state.config.lock().clone();
+    let getinfo_request = Command::new(config.lightning_cli.1)
         .arg("--lightning-dir=".to_string() + lightning_dir.to_str().unwrap())
         .arg("getinfo")
         .output()

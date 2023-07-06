@@ -1,8 +1,9 @@
+use std::cmp::Ordering;
 use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
-use crate::model::{JobMessage, JobState, PluginState, PLUGIN_NAME};
+use crate::model::{JobMessage, JobState, PluginState, Task, PLUGIN_NAME};
 use crate::slings::sling;
 use crate::util::{make_rpc_path, read_jobs, refresh_joblists, write_graph};
 use anyhow::{anyhow, Error};
@@ -23,7 +24,7 @@ pub async fn slinggo(
         &p,
     )
     .await?;
-    if jobs.len() == 0 {
+    if jobs.is_empty() {
         return Err(anyhow!("No jobs found"));
     }
     let joblists_clone = p.clone();
@@ -35,24 +36,22 @@ pub async fn slinggo(
     let config = p.state().config.lock().clone();
 
     match args {
-        serde_json::Value::Array(a) => {
-            if a.len() > 1 {
+        serde_json::Value::Array(a) => match a.len().cmp(&(1_usize)) {
+            Ordering::Greater => {
                 return Err(anyhow!(
                     "Please provide exactly one short_channel_id or nothing"
-                ));
-            } else if a.len() == 1 {
-                match a.first().unwrap() {
-                    serde_json::Value::String(start_id) => {
-                        jobs.retain(|chanid, _j| chanid == start_id)
-                    }
-                    _ => return Err(anyhow!("invalid short_channel_id")),
-                }
+                ))
             }
-        }
+            Ordering::Equal => match a.first().unwrap() {
+                serde_json::Value::String(start_id) => jobs.retain(|chanid, _j| chanid == start_id),
+                _ => return Err(anyhow!("invalid short_channel_id")),
+            },
+            Ordering::Less => (),
+        },
         _ => return Err(anyhow!("invalid arguments")),
     }
 
-    if jobs.len() == 0 {
+    if jobs.is_empty() {
         return Err(anyhow!("Shortchannelid not found in jobs"));
     }
 
@@ -95,9 +94,11 @@ pub async fn slinggo(
                     tokio::spawn(async move {
                         match sling(
                             &make_rpc_path(&plugin),
-                            ShortChannelId::from_str(&id_clone).unwrap(),
-                            job_clone,
-                            i,
+                            &job_clone,
+                            &Task {
+                                chan_id: &ShortChannelId::from_str(&id_clone).unwrap(),
+                                task_id: i,
+                            },
                             &plugin,
                         )
                         .await
@@ -139,51 +140,47 @@ pub async fn slingstop(
     let stopped_count;
     {
         match args {
-            serde_json::Value::Array(a) => {
-                if a.len() > 1 {
+            serde_json::Value::Array(a) => match a.len().cmp(&(1_usize)) {
+                Ordering::Greater => {
                     return Err(anyhow!(
                         "Please provide exactly one short_channel_id or nothing"
-                    ));
-                } else if a.len() == 1 {
-                    match a.first().unwrap() {
-                        serde_json::Value::String(stop_id) => {
-                            {
-                                let mut job_states = p.state().job_state.lock();
-                                if job_states.contains_key(stop_id) {
-                                    let jobstate = job_states.get_mut(stop_id).unwrap();
-                                    stopped_count = jobstate.len();
-                                    for jt in jobstate {
-                                        jt.stop();
-                                        jt.statechange(JobMessage::Stopping);
-                                        debug!(
-                                            "{}/{}: Stopping job...",
-                                            stop_id.to_string(),
-                                            jt.id()
-                                        );
-                                    }
-                                } else {
-                                    return Err(anyhow!("{}: No job running", stop_id));
+                    ))
+                }
+                Ordering::Equal => match a.first().unwrap() {
+                    serde_json::Value::String(stop_id) => {
+                        {
+                            let mut job_states = p.state().job_state.lock();
+                            if job_states.contains_key(stop_id) {
+                                let jobstate = job_states.get_mut(stop_id).unwrap();
+                                stopped_count = jobstate.len();
+                                for jt in jobstate {
+                                    jt.stop();
+                                    jt.statechange(JobMessage::Stopping);
+                                    debug!("{}/{}: Stopping job...", stop_id.to_string(), jt.id());
                                 }
-                            }
-                            loop {
-                                {
-                                    let job_states = p.state().job_state.lock();
-                                    if job_states.get(stop_id).is_none()
-                                        || job_states
-                                            .get(stop_id)
-                                            .unwrap()
-                                            .iter()
-                                            .all(|j| !j.is_active())
-                                    {
-                                        break;
-                                    }
-                                }
-                                time::sleep(Duration::from_millis(200)).await;
+                            } else {
+                                return Err(anyhow!("{}: No job running", stop_id));
                             }
                         }
-                        _ => return Err(anyhow!("invalid short_channel_id")),
-                    };
-                } else {
+                        loop {
+                            {
+                                let job_states = p.state().job_state.lock();
+                                if job_states.get(stop_id).is_none()
+                                    || job_states
+                                        .get(stop_id)
+                                        .unwrap()
+                                        .iter()
+                                        .all(|j| !j.is_active())
+                                {
+                                    break;
+                                }
+                            }
+                            time::sleep(Duration::from_millis(200)).await;
+                        }
+                    }
+                    _ => return Err(anyhow!("invalid short_channel_id")),
+                },
+                Ordering::Less => {
                     let mut stopped_ids = Vec::new();
                     {
                         let mut job_states = p.state().job_state.lock();
@@ -200,7 +197,7 @@ pub async fn slingstop(
                     loop {
                         {
                             let mut job_states = p.state().job_state.lock().clone();
-                            job_states.retain(|chan, _state| stopped_ids.contains(&chan));
+                            job_states.retain(|chan, _state| stopped_ids.contains(chan));
                             let mut all_stopped = true;
                             for (_chan_id, jobstate) in job_states.iter_mut() {
                                 if jobstate.iter().any(|j| j.is_active()) {
@@ -214,7 +211,7 @@ pub async fn slingstop(
                         time::sleep(Duration::from_millis(200)).await;
                     }
                 }
-            }
+            },
             _ => return Err(anyhow!("invalid arguments")),
         };
     }
