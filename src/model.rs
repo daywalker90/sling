@@ -75,6 +75,7 @@ pub struct Config {
     pub reset_liquidity_interval: (String, u64),
     pub depleteuptopercent: (String, f64),
     pub depleteuptoamount: (String, u64),
+    pub maxhops: (String, u8),
     pub paralleljobs: (String, u8),
     pub timeoutpay: (String, u16),
     pub max_htlc_count: (String, u64),
@@ -103,6 +104,7 @@ impl Config {
                 PLUGIN_NAME.to_string() + "-depleteuptoamount",
                 2_000_000_000,
             ),
+            maxhops: (PLUGIN_NAME.to_string() + "-maxhops", 8),
             paralleljobs: (PLUGIN_NAME.to_string() + "-paralleljobs", 1),
             timeoutpay: (PLUGIN_NAME.to_string() + "-timeoutpay", 120),
             max_htlc_count: (PLUGIN_NAME.to_string() + "-max-htlc-count", 5),
@@ -225,7 +227,7 @@ pub struct DijkstraNode {
     pub score: u64,
     pub channel: ListchannelsChannels,
     pub destination: PublicKey,
-    pub hops: u64,
+    pub hops: u8,
 }
 impl PartialEq for DijkstraNode {
     fn eq(&self, other: &Self) -> bool {

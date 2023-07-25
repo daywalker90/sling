@@ -100,6 +100,14 @@ async fn main() -> Result<(), anyhow::Error> {
             ),
         ))
         .option(options::ConfigOption::new(
+            &defaultconfig.maxhops.0,
+            options::Value::OptInteger,
+            &format!(
+                "Maximum number of hops in a route. Default is {}",
+                defaultconfig.maxhops.1
+            ),
+        ))
+        .option(options::ConfigOption::new(
             &defaultconfig.paralleljobs.0,
             options::Value::OptInteger,
             &format!(

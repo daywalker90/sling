@@ -18,6 +18,7 @@ pub fn dijkstra(
     slingchan: &DijkstraNode,
     job: &Job,
     candidatelist: &[ShortChannelId],
+    max_hops: u8,
     exclude_graph: &ExcludeGraph,
     last_delay: u16,
     tempbans: &HashMap<String, u64>,
@@ -27,10 +28,7 @@ pub fn dijkstra(
     let mut predecessor = HashMap::new();
     let mut visit_next = BinaryHeap::new();
     let zero_score = u64::default();
-    let max_hops = match job.maxhops {
-        Some(h) => h + 1,
-        None => 9,
-    };
+
     scores.insert(*start, slingchan.clone());
     visit_next.push(MinScored(zero_score, *start));
     while let Some(MinScored(node_score, node)) = visit_next.pop() {

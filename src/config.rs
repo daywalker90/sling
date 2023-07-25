@@ -178,6 +178,26 @@ pub async fn read_config(
                             ))
                         }
                     },
+                    opt if opt.eq(&config.maxhops.0) => match value.parse::<u8>() {
+                        Ok(n) => {
+                            if n >= 2 {
+                                config.maxhops.1 = n
+                            } else {
+                                return Err(anyhow!(
+                                    "Error: Number needs to be >= 2 for {}.",
+                                    config.maxhops.0
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            return Err(anyhow!(
+                                "Error: Could not parse a positive number from `{}` for {}: {}",
+                                value,
+                                config.maxhops.0,
+                                e
+                            ))
+                        }
+                    },
                     opt if opt.eq(&config.paralleljobs.0) => match value.parse::<u8>() {
                         Ok(n) => {
                             if n > 0 {
@@ -422,6 +442,21 @@ pub fn get_startup_options(
         Some(options::Value::Integer(i)) => (i * 1_000) as u64,
         Some(_) => config.depleteuptoamount.1,
         None => config.depleteuptoamount.1,
+    };
+    config.maxhops.1 = match plugin.option(&config.maxhops.0) {
+        Some(options::Value::Integer(i)) => {
+            if i >= 2 {
+                i as u8
+            } else {
+                return Err(anyhow!(
+                    "Error: {} needs to be >= 2 and not `{}`.",
+                    config.maxhops.0,
+                    i
+                ));
+            }
+        }
+        Some(_) => config.maxhops.1,
+        None => config.maxhops.1,
     };
     config.paralleljobs.1 = match plugin.option(&config.paralleljobs.0) {
         Some(options::Value::Integer(i)) => {

@@ -49,7 +49,7 @@ pub struct Job {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub maxhops: Option<u64>,
+    pub maxhops: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub depleteuptopercent: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]

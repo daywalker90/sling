@@ -115,7 +115,7 @@ pub async fn slingjob(
             };
 
             let maxhops = match ar.get("maxhops") {
-                Some(h) => Some(h.as_u64().ok_or(anyhow!("maxhops must be an integer"))?),
+                Some(h) => Some(h.as_u64().ok_or(anyhow!("maxhops must be an integer"))? as u8),
                 None => None,
             };
             if let Some(h) = maxhops {

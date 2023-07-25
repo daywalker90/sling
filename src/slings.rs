@@ -768,6 +768,10 @@ async fn next_route<'a>(
                 Some(c) => max(144, c),
                 None => 144,
             };
+            let max_hops = match job.maxhops {
+                Some(h) => h + 1,
+                None => config.maxhops.1 + 1,
+            };
             match job.sat_direction {
                 SatDirection::Pull => {
                     route = dijkstra(
@@ -783,6 +787,7 @@ async fn next_route<'a>(
                         },
                         job,
                         &candidatelist,
+                        max_hops,
                         &ExcludeGraph {
                             exclude_chans: &pull_jobs,
                             exclude_peers: &excepts_peers,
@@ -805,6 +810,7 @@ async fn next_route<'a>(
                         },
                         job,
                         &candidatelist,
+                        max_hops,
                         &ExcludeGraph {
                             exclude_chans: &push_jobs,
                             exclude_peers: &excepts_peers,

@@ -120,6 +120,7 @@ if it's value is too high. Default is ``1``s
 * ``sling-reset-liquidity-interval``: After how many minutes to reset liquidity knowledge. Default is ``360``m
 * ``sling-depleteuptopercent``: Up to what percent to pull/push sats from/to candidate channels as floating point between 0 and <1. Also see [Depleteformula](#depleteformula). Default is ``0.2``
 * ``sling-depleteuptoamount``: Up to what amount to pull/push sats from/to candidate channels. Also see [Depleteformula](#depleteformula). Default is ``2000000``sats
+* ``sling-maxhops``: Maximum number of hops allowed in a route. A hop is a node that is not us. Default is ``8``
 * ``sling-paralleljobs``: How many routes to take in parallel for any job. Default is ``1``
 * ``sling-timeoutpay``: How long we wait for a rebalance to resolve. After this we just continue with the next route. Default is ``120``s
 * ``sling-max-htlc-count``: Max number of pending htlcs allowed in participating channels (softcap). Should be higher than your highest ``parraleljobs``. Default is ``5``
