@@ -13,13 +13,14 @@ use cln_rpc::primitives::{PublicKey, ShortChannelId};
 use log::{debug, info};
 use num_format::{Locale, ToFormattedString};
 use serde_json::json;
+use sling::{
+    ChannelPartnerStats, FailureReasonCount, FailuresInTimeWindow, PeerPartnerStats, SlingStats,
+    SuccessesInTimeWindow,
+};
 use tabled::Table;
 
-use crate::model::{
-    ChannelPartnerStats, JobState, PeerPartnerStats, PluginState, StatSummary, NO_ALIAS_SET,
-    PLUGIN_NAME,
-};
 use crate::model::{FailureReb, SuccessReb};
+use crate::model::{JobState, PluginState, StatSummary, NO_ALIAS_SET, PLUGIN_NAME};
 use crate::util::{get_all_normal_channels_from_listpeerchannels, refresh_joblists};
 
 pub async fn slingstats(
@@ -196,31 +197,23 @@ pub async fn slingstats(
                             }
                         };
                         let alias_map = plugin.state().alias_peer_map.lock().clone();
-                        let success_json = if !successes.is_empty() {
-                            success_stats(
+
+                        let sling_stats = SlingStats {
+                            successes_in_time_window: success_stats(
                                 successes,
                                 stats_delete_successes_age,
                                 &alias_map,
                                 &peer_channels,
-                            )
-                        } else {
-                            json!({"successes_in_time_window":""})
-                        };
-                        let failures_json = if !failures.is_empty() {
-                            failure_stats(
+                            ),
+                            failures_in_time_window: failure_stats(
                                 failures,
                                 stats_delete_failures_age,
                                 &alias_map,
                                 &peer_channels,
-                            )
-                        } else {
-                            json!({"failures_in_time_window":""})
+                            ),
                         };
 
-                        Ok(
-                            json!({ "successes_in_time_window":success_json.get("successes_in_time_window").unwrap(),
-                        "failures_in_time_window":failures_json.get("failures_in_time_window") }),
-                        )
+                        Ok(json!(sling_stats))
                     }
                     _ => Err(anyhow!("invalid short_channel_id")),
                 }
@@ -235,7 +228,10 @@ fn success_stats(
     time_window: u64,
     alias_map: &HashMap<PublicKey, String>,
     peer_channels: &BTreeMap<String, ListpeerchannelsChannels>,
-) -> serde_json::Value {
+) -> Option<SuccessesInTimeWindow> {
+    if successes.is_empty() {
+        return None;
+    }
     let mut total_amount_msat = 0;
     let mut channel_partner_counts = HashMap::new();
     let mut hop_counts = HashMap::new();
@@ -259,11 +255,11 @@ fn success_stats(
             most_recent_completed_at =
                 std::cmp::max(most_recent_completed_at, success_reb.completed_at);
             fee_ppms.push(success_reb.fee_ppm);
-            total_transactions += 1;
+            total_transactions += 1_u64;
         }
     }
     if total_transactions == 0 {
-        return json!({"successes_in_time_window":""});
+        return None;
     }
     fee_ppms.sort();
     let most_common_hop_count = hop_counts
@@ -289,24 +285,26 @@ fn success_stats(
         .format("%Y-%m-%d %H:%M:%S")
         .to_string();
 
-    json!({"successes_in_time_window":{
-        "total_amount_sats":total_amount_msat/1_000,
-        "feeppm_weighted_avg":weighted_fee_ppm,
-        "feeppm_min": fee_ppms.iter().min().unwrap(),
-        "feeppm_max": fee_ppms.iter().max().unwrap(),
-        "feeppm_median": fee_ppms[fee_ppms.len()/2],
-        "feeppm_90th_percentile": feeppm_90th_percentile,
-        "top_5_channel_partners":top_5_channel_partners.iter().map(|(partner, count)| {
-            json!(ChannelPartnerStats{
+    let successes_in_time_window = SuccessesInTimeWindow {
+        total_amount_sats: total_amount_msat / 1_000,
+        feeppm_weighted_avg: weighted_fee_ppm,
+        feeppm_min: *fee_ppms.iter().min().unwrap(),
+        feeppm_max: *fee_ppms.iter().max().unwrap(),
+        feeppm_median: fee_ppms[fee_ppms.len() / 2],
+        feeppm_90th_percentile,
+        top_5_channel_partners: top_5_channel_partners
+            .iter()
+            .map(|(partner, count)| ChannelPartnerStats {
                 scid: partner.clone(),
-                alias: get_stats_alias(peer_channels,partner, alias_map),
+                alias: get_stats_alias(peer_channels, partner, alias_map),
                 sats: *count,
             })
-        }).collect::<Vec<_>>(),
-        "most_common_hop_count":most_common_hop_count,
-        "time_of_last_rebalance": time_of_last_rebalance,
-        "total_rebalances":total_transactions
-    }})
+            .collect::<Vec<_>>(),
+        most_common_hop_count,
+        time_of_last_rebalance,
+        total_rebalances: total_transactions,
+    };
+    Some(successes_in_time_window)
 }
 
 fn failure_stats(
@@ -314,7 +312,10 @@ fn failure_stats(
     time_window: u64,
     alias_map: &HashMap<PublicKey, String>,
     peer_channels: &BTreeMap<String, ListpeerchannelsChannels>,
-) -> serde_json::Value {
+) -> Option<FailuresInTimeWindow> {
+    if failures.is_empty() {
+        return None;
+    }
     let mut total_amount_msat = 0;
     let mut channel_partner_counts = HashMap::new();
     let mut hop_counts = HashMap::new();
@@ -334,16 +335,18 @@ fn failure_stats(
                 .entry(fail_reb.channel_partner.to_string())
                 .or_insert(0) += fail_reb.amount_msat / 1_000;
             *hop_counts.entry(fail_reb.hops).or_insert(0) += 1;
-            *reason_counts.entry(fail_reb.failure_reason).or_insert(0) += 1;
+            *reason_counts
+                .entry(fail_reb.failure_reason)
+                .or_insert(0_u32) += 1;
             *fail_node_counts
                 .entry(fail_reb.failure_node.to_string())
-                .or_insert(0) += 1;
+                .or_insert(0_u32) += 1;
             most_recent_created_at = std::cmp::max(most_recent_created_at, fail_reb.created_at);
-            total_transactions += 1;
+            total_transactions += 1_u64;
         }
     }
     if total_transactions == 0 {
-        return json!({"failures_in_time_window":""});
+        return None;
     }
     let most_common_hop_count = hop_counts
         .into_iter()
@@ -379,32 +382,43 @@ fn failure_stats(
         .format("%Y-%m-%d %H:%M:%S")
         .to_string();
 
-    json!({"failures_in_time_window":{
-        "total_amount_tried_sats":total_amount_msat/1_000,
-        "top_5_failure_reasons":top_5_failure_reasons.iter().map(|(reason, count)| {
-            json!({reason: count})
-        }).collect::<Vec<_>>(),
-        "top_5_fail_nodes":top_5_fail_nodes.iter().map(|(node, count)| {
-            json!(PeerPartnerStats{
+    let failures_in_time_window = FailuresInTimeWindow {
+        total_amount_tried_sats: total_amount_msat / 1_000,
+        top_5_failure_reasons: top_5_failure_reasons
+            .iter()
+            .map(|(reason, count)| FailureReasonCount {
+                failure_reason: reason.clone(),
+                failure_count: *count,
+            })
+            .collect::<Vec<_>>(),
+        top_5_fail_nodes: top_5_fail_nodes
+            .iter()
+            .map(|(node, count)| PeerPartnerStats {
                 peer_id: node.clone(),
-                alias: match PublicKey::from_str(node){
-                    Ok(pk) => alias_map.get(&pk).unwrap_or(&"NOT_FOUND".to_string()).clone(),
+                alias: match PublicKey::from_str(node) {
+                    Ok(pk) => alias_map
+                        .get(&pk)
+                        .unwrap_or(&"NOT_FOUND".to_string())
+                        .clone(),
                     Err(_e) => "INVALID_PUBKEY".to_string(),
                 },
                 count: *count,
             })
-        }).collect::<Vec<_>>(),
-        "top_5_channel_partners":top_5_channel_partners.iter().map(|(partner, count)| {
-            json!(ChannelPartnerStats{
+            .collect::<Vec<_>>(),
+        top_5_channel_partners: top_5_channel_partners
+            .iter()
+            .map(|(partner, count)| ChannelPartnerStats {
                 scid: partner.clone(),
-                alias: get_stats_alias(peer_channels,partner, alias_map),
+                alias: get_stats_alias(peer_channels, partner, alias_map),
                 sats: *count,
             })
-        }).collect::<Vec<_>>(),
-        "most_common_hop_count":most_common_hop_count,
-        "time_of_last_attempt": time_of_last_attempt,
-        "total_rebalances_tried":total_transactions
-    }})
+            .collect::<Vec<_>>(),
+        most_common_hop_count,
+        time_of_last_attempt,
+        total_rebalances_tried: total_transactions,
+    };
+
+    Some(failures_in_time_window)
 }
 
 fn get_stats_alias(

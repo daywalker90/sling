@@ -39,7 +39,8 @@ impl fmt::Display for SatDirection {
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct Job {
     pub sat_direction: SatDirection,
-    pub amount: u64,
+    #[serde(alias = "amount")]
+    pub amount_msat: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub outppm: Option<u64>,
     pub maxppm: u32,
@@ -103,7 +104,7 @@ impl Job {
     pub fn to_json(&self) -> serde_json::Value {
         let mut result = HashMap::new();
         result.insert("direction", self.sat_direction.to_string());
-        result.insert("amount", (self.amount / 1_000).to_string());
+        result.insert("amount", (self.amount_msat / 1_000).to_string());
         result.insert("maxppm", self.maxppm.to_string());
         match self.outppm {
             Some(o) => result.insert("outppm", o.to_string()),
@@ -141,4 +142,55 @@ impl Job {
         };
         json!(result)
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ChannelPartnerStats {
+    pub scid: String,
+    pub alias: String,
+    pub sats: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct PeerPartnerStats {
+    pub peer_id: String,
+    pub alias: String,
+    pub count: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+pub struct FailureReasonCount {
+    pub failure_reason: String,
+    pub failure_count: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+pub struct FailuresInTimeWindow {
+    pub total_amount_tried_sats: u64,
+    pub top_5_failure_reasons: Vec<FailureReasonCount>,
+    pub top_5_fail_nodes: Vec<PeerPartnerStats>,
+    pub top_5_channel_partners: Vec<ChannelPartnerStats>,
+    pub most_common_hop_count: Option<u8>,
+    pub time_of_last_attempt: String,
+    pub total_rebalances_tried: u64,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+pub struct SuccessesInTimeWindow {
+    pub total_amount_sats: u64,
+    pub feeppm_weighted_avg: u64,
+    pub feeppm_min: u32,
+    pub feeppm_max: u32,
+    pub feeppm_median: u32,
+    pub feeppm_90th_percentile: u32,
+    pub top_5_channel_partners: Vec<ChannelPartnerStats>,
+    pub most_common_hop_count: Option<u8>,
+    pub time_of_last_rebalance: String,
+    pub total_rebalances: u64,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+pub struct SlingStats {
+    pub successes_in_time_window: Option<SuccessesInTimeWindow>,
+    pub failures_in_time_window: Option<FailuresInTimeWindow>,
 }

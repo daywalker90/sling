@@ -37,6 +37,7 @@ static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     std::env::set_var("CLN_PLUGIN_LOG", "trace");
+    log_panics::init();
     let state = PluginState::new();
     let defaultconfig = Config::new();
     let confplugin;

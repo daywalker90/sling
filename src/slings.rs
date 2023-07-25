@@ -285,7 +285,7 @@ pub async fn sling<'a>(
                     );
                     success_route = None;
                     FailureReb {
-                        amount_msat: job.amount,
+                        amount_msat: job.amount_msat,
                         failure_reason: "FIRST_PEER_NOT_READY".to_string(),
                         failure_node: route.first().unwrap().id,
                         channel_partner: match job.sat_direction {
@@ -415,7 +415,7 @@ pub async fn sling<'a>(
                             }
                         }
                         FailureReb {
-                            amount_msat: job.amount,
+                            amount_msat: job.amount_msat,
                             failure_reason: "WAITSENDPAY_TIMEOUT".to_string(),
                             failure_node: mypubkey,
                             channel_partner: match job.sat_direction {
@@ -836,10 +836,10 @@ async fn health_check<'a>(
             if job.is_balanced(&channel, task.chan_id)
                 || match job.sat_direction {
                     SatDirection::Pull => {
-                        Amount::msat(&channel.receivable_msat.unwrap()) < job.amount
+                        Amount::msat(&channel.receivable_msat.unwrap()) < job.amount_msat
                     }
                     SatDirection::Push => {
-                        Amount::msat(&channel.spendable_msat.unwrap()) < job.amount
+                        Amount::msat(&channel.spendable_msat.unwrap()) < job.amount_msat
                     }
                 }
             {
@@ -1006,18 +1006,18 @@ fn build_candidatelist(
                 let chan_out_ppm = feeppm_effective(
                     channel.fee_proportional_millionths.unwrap(),
                     Amount::msat(&channel.fee_base_msat.unwrap()) as u32,
-                    job.amount,
+                    job.amount_msat,
                 );
                 let chan_in_ppm = feeppm_effective(
                     chan_from_peer.fee_per_millionth,
                     chan_from_peer.base_fee_millisatoshi,
-                    job.amount,
+                    job.amount_msat,
                 );
                 if match job.sat_direction {
                     SatDirection::Pull => {
                         to_us_msat
                             > max(
-                                job.amount + 10_000_000,
+                                job.amount_msat + 10_000_000,
                                 min(
                                     (depleteuptopercent * total_msat as f64) as u64,
                                     depleteuptoamount,
@@ -1031,7 +1031,7 @@ fn build_candidatelist(
                     SatDirection::Push => {
                         total_msat - to_us_msat
                             > max(
-                                job.amount + 10_000_000,
+                                job.amount_msat + 10_000_000,
                                 min(
                                     (depleteuptopercent * total_msat as f64) as u64,
                                     depleteuptoamount,

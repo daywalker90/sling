@@ -491,20 +491,6 @@ impl FailureReb {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ChannelPartnerStats {
-    pub scid: String,
-    pub alias: String,
-    pub sats: u64,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct PeerPartnerStats {
-    pub peer_id: String,
-    pub alias: String,
-    pub count: u64,
-}
-
 #[derive(Debug, Tabled)]
 pub struct StatSummary {
     pub alias: String,

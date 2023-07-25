@@ -84,7 +84,7 @@ pub async fn slingjob(
             };
 
             //also convert to msat
-            let amount = match ar.get("amount") {
+            let amount_msat = match ar.get("amount") {
                 Some(amt) => {
                     amt.as_u64()
                         .ok_or(anyhow!("amount must be a positive integer"))?
@@ -92,7 +92,7 @@ pub async fn slingjob(
                 }
                 None => return Err(anyhow!("Missing amount")),
             };
-            if amount == 0 {
+            if amount_msat == 0 {
                 return Err(anyhow!("amount must be greater than 0"));
             }
 
@@ -187,7 +187,7 @@ pub async fn slingjob(
             let peer_channels = p.state().peer_channels.lock().await.clone();
             let job = Job {
                 sat_direction,
-                amount,
+                amount_msat,
                 outppm,
                 maxppm,
                 candidatelist,
@@ -219,7 +219,7 @@ pub async fn slingjobsettings(
 ) -> Result<serde_json::Value, Error> {
     let sling_dir = Path::new(&p.configuration().lightning_dir).join(PLUGIN_NAME);
     let jobs = read_jobs(&sling_dir, &p).await?;
-    let mut json_jobs: Vec<serde_json::Value> = vec![];
+    let mut json_jobs: BTreeMap<String, Job> = BTreeMap::new();
     match args {
         serde_json::Value::Array(a) => {
             if a.len() > 1 {
@@ -228,7 +228,7 @@ pub async fn slingjobsettings(
                 ));
             } else if a.is_empty() {
                 for (id, job) in jobs {
-                    json_jobs.push(json!({id:job.to_json()}));
+                    json_jobs.insert(id, job);
                 }
             } else {
                 let scid = a
@@ -237,7 +237,7 @@ pub async fn slingjobsettings(
                     .as_str()
                     .ok_or(anyhow!("invalid input, not a string"))?;
                 let job = jobs.get(scid).ok_or(anyhow!("channel not found"))?;
-                json_jobs.push(json!({scid:job.to_json()}));
+                json_jobs.insert(scid.to_string(), job.clone());
             }
         }
         _ => {
@@ -403,7 +403,7 @@ async fn write_job(
             depleteuptopercent: {:?}, depleteuptoamount: {:?}, paralleljobs: {:?}",
             job_change,
             &chan_id,
-            &my_job.amount,
+            &my_job.amount_msat,
             &my_job.maxppm,
             &my_job.outppm,
             &my_job.target,

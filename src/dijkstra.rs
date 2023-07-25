@@ -61,7 +61,7 @@ pub fn dijkstra(
                 other_pubkey: &node,
             },
             exclude_graph,
-            &job.amount,
+            &job.amount_msat,
             candidatelist,
             tempbans,
         ) {
@@ -77,7 +77,7 @@ pub fn dijkstra(
             let next_score = if edge.channel.source == *my_pubkey {
                 0
             } else {
-                node_score + edge_cost(&edge.channel, job.amount)
+                node_score + edge_cost(&edge.channel, job.amount_msat)
             };
             // debug!(
             //     "{}: next: {} node_score:{} next_score:{}",
@@ -174,7 +174,7 @@ fn build_route(
             sendpay_route.insert(
                 0,
                 SendpayRoute {
-                    amount_msat: Amount::from_msat(job.amount),
+                    amount_msat: Amount::from_msat(job.amount_msat),
                     id: dijkstra_path.get(0).unwrap().destination,
                     delay,
                     channel: dijkstra_path.get(0).unwrap().channel.short_channel_id,

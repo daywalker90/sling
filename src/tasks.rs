@@ -112,7 +112,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
             )
             .await?;
 
-            let amounts = jobs.values().map(|job| job.amount);
+            let amounts = jobs.values().map(|job| job.amount_msat);
             // * 2 because we set our liquidity beliefs to / 2 anyways
             let min_amount = amounts.clone().min().unwrap_or(1_000) * 2;
             let max_amount = amounts.max().unwrap_or(10_000_000_000);
