@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt, str::FromStr};
 
 use anyhow::*;
 use cln_rpc::{
-    model::ListpeerchannelsChannels,
+    model::responses::ListpeerchannelsChannels,
     primitives::{Amount, ShortChannelId},
 };
 use log::debug;

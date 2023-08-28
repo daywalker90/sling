@@ -2,7 +2,9 @@ use anyhow::{anyhow, Error};
 
 use cln_plugin::Plugin;
 
-use cln_rpc::{model::*, primitives::*};
+use cln_rpc::model::requests::SendpayRoute;
+use cln_rpc::model::responses::{ListpeerchannelsChannels, ListpeerchannelsChannelsState};
+use cln_rpc::primitives::*;
 
 use log::{debug, info, warn};
 

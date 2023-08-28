@@ -1,7 +1,8 @@
 use crate::model::{DijkstraNode, ExcludeGraph, LnGraph, PublicKeyPair};
 use crate::util::{edge_cost, fee_total_msat_precise};
 use anyhow::Error;
-use cln_rpc::{model::*, primitives::*};
+use cln_rpc::model::requests::SendpayRoute;
+use cln_rpc::primitives::*;
 use sling::{Job, SatDirection};
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::BinaryHeap;

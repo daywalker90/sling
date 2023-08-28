@@ -1,8 +1,8 @@
 use bitcoin::hashes::Hash;
 use bitcoin::hashes::HashEngine;
-use cln_rpc::model::ListchannelsChannels;
-use cln_rpc::model::ListpeerchannelsChannels;
-use cln_rpc::model::ListpeerchannelsChannelsState;
+use cln_rpc::model::responses::ListchannelsChannels;
+use cln_rpc::model::responses::ListpeerchannelsChannels;
+use cln_rpc::model::responses::ListpeerchannelsChannelsState;
 use cln_rpc::primitives::PublicKey;
 use cln_rpc::primitives::Sha256;
 use parking_lot::Mutex;

@@ -8,7 +8,7 @@ use chrono::Local;
 use chrono::TimeZone;
 use cln_plugin::Plugin;
 
-use cln_rpc::model::ListpeerchannelsChannels;
+use cln_rpc::model::responses::ListpeerchannelsChannels;
 use cln_rpc::primitives::{PublicKey, ShortChannelId};
 use log::{debug, info};
 use num_format::{Locale, ToFormattedString};

@@ -6,7 +6,7 @@ use std::{
 use anyhow::{anyhow, Error};
 use cln_plugin::ConfiguredPlugin;
 use cln_rpc::{
-    model::*,
+    model::{requests::*, responses::*, *},
     primitives::{PublicKey, Secret, ShortChannelId},
     ClnRpc,
 };
@@ -38,6 +38,7 @@ pub async fn set_channel(
             htlcmin,
             htlcmax,
             enforcedelay,
+            ignorefeelimits: None,
         }))
         .await
         .map_err(|e| anyhow!("Error calling set_channel: {:?}", e))?;

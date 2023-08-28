@@ -8,7 +8,9 @@ use std::{
 use anyhow::{anyhow, Error};
 use cln_plugin::Plugin;
 use cln_rpc::{
-    model::{ListchannelsChannels, ListpeerchannelsChannels, ListpeerchannelsChannelsState},
+    model::responses::{
+        ListchannelsChannels, ListpeerchannelsChannels, ListpeerchannelsChannelsState,
+    },
     primitives::{Amount, PublicKey, ShortChannelId},
 };
 
