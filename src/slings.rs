@@ -20,11 +20,12 @@ use std::{path::PathBuf, str::FromStr};
 use tokio::time::Instant;
 
 use crate::dijkstra::dijkstra;
+use crate::errors::WaitsendpayErrorData;
 use crate::model::{
     Config, DijkstraNode, ExcludeGraph, FailureReb, JobMessage, LnGraph, PluginState,
     PublicKeyPair, SuccessReb, Task, PLUGIN_NAME,
 };
-use crate::rpc::{slingsend, waitsendpay};
+use crate::rpc::{slingsend, waitsendpay2};
 use crate::util::{
     channel_jobstate_update, feeppm_effective, feeppm_effective_from_amts,
     get_normal_channel_from_listpeerchannels, get_preimage_paymend_hash_pair, get_total_htlc_count,
@@ -328,14 +329,8 @@ pub async fn sling<'a>(
             now.elapsed().as_millis().to_string()
         );
 
-        let mut err_chan = None;
-        match waitsendpay(
-            &networkdir,
-            &config.lightning_cli.1,
-            send_response.payment_hash,
-            config.timeoutpay.1,
-        )
-        .await
+        let err_chan = match waitsendpay2(rpc_path, send_response.payment_hash, config.timeoutpay.1)
+            .await
         {
             Ok(o) => {
                 info!(
@@ -363,6 +358,7 @@ pub async fn sling<'a>(
                 .write_to_file(*task.chan_id, &sling_dir)
                 .await?;
                 success_route = Some(route);
+                None
             }
             Err(err) => {
                 success_route = None;
@@ -372,39 +368,235 @@ pub async fn sling<'a>(
                     .write()
                     .remove(&send_response.payment_hash.to_string());
                 let mut special_stop = false;
-                if let Some(c) = err.code {
-                    if c == 200 {
-                        warn!(
-                            "{}/{}: Rebalance WAITSENDPAY_TIMEOUT failure after {}s: {}",
-                            task.chan_id.to_string(),
-                            task.task_id,
-                            now.elapsed().as_secs().to_string(),
-                            err.message,
-                        );
-                        let temp_ban_route = &route[..route.len() - 1];
-                        let mut source = temp_ban_route.first().unwrap().id;
-                        for hop in temp_ban_route {
-                            if hop.channel.to_string()
-                                == temp_ban_route.first().unwrap().channel.to_string()
-                            {
-                                source = hop.id;
+                match &err.downcast() {
+                    Ok(RpcError {
+                        code,
+                        message,
+                        data,
+                    }) => {
+                        let ws_code = if let Some(c) = code {
+                            c
+                        } else {
+                            channel_jobstate_update(
+                                plugin.state().job_state.clone(),
+                                task,
+                                &JobMessage::Error,
+                                None,
+                                Some(false),
+                            );
+                            warn!(
+                                "{}/{}: No WaitsendpayErrorCode, instead: {}",
+                                task.chan_id.to_string(),
+                                task.task_id,
+                                message
+                            );
+                            break 'outer;
+                        };
+
+                        if *ws_code == 200 {
+                            warn!(
+                                "{}/{}: Rebalance WAITSENDPAY_TIMEOUT failure after {}s: {}",
+                                task.chan_id.to_string(),
+                                task.task_id,
+                                now.elapsed().as_secs().to_string(),
+                                message,
+                            );
+                            let temp_ban_route = &route[..route.len() - 1];
+                            let mut source = temp_ban_route.first().unwrap().id;
+                            for hop in temp_ban_route {
+                                if hop.channel.to_string()
+                                    == temp_ban_route.first().unwrap().channel.to_string()
+                                {
+                                    source = hop.id;
+                                } else {
+                                    plugin
+                                        .state()
+                                        .graph
+                                        .lock()
+                                        .await
+                                        .graph
+                                        .get_mut(&source)
+                                        .unwrap()
+                                        .iter_mut()
+                                        .find_map(|x| {
+                                            if x.channel.short_channel_id.to_string()
+                                                == hop.channel.to_string()
+                                                && x.channel.destination != mypubkey
+                                                && x.channel.source != mypubkey
+                                            {
+                                                x.liquidity = 0;
+                                                x.timestamp = SystemTime::now()
+                                                    .duration_since(UNIX_EPOCH)
+                                                    .unwrap()
+                                                    .as_secs();
+                                                Some(x)
+                                            } else {
+                                                None
+                                            }
+                                        });
+                                }
+                            }
+                            FailureReb {
+                                amount_msat: job.amount_msat,
+                                failure_reason: "WAITSENDPAY_TIMEOUT".to_string(),
+                                failure_node: mypubkey,
+                                channel_partner: match job.sat_direction {
+                                    SatDirection::Pull => route.first().unwrap().channel,
+                                    SatDirection::Push => route.last().unwrap().channel,
+                                },
+                                hops: (route.len() - 1) as u8,
+                                created_at: SystemTime::now()
+                                    .duration_since(UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_secs(),
+                            }
+                            .write_to_file(*task.chan_id, &sling_dir)
+                            .await?;
+                            None
+                        } else if let Some(d) = data {
+                            let ws_error =
+                                serde_json::from_value::<WaitsendpayErrorData>(d.clone())?;
+
+                            info!(
+                                "{}/{}: Rebalance failure after {}s: {} at node:{} chan:{}",
+                                task.chan_id.to_string(),
+                                task.task_id,
+                                now.elapsed().as_secs().to_string(),
+                                message,
+                                ws_error.erring_node,
+                                ws_error.erring_channel.to_string(),
+                            );
+
+                            match &ws_error.failcodename {
+                                err if err.eq("WIRE_INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS")
+                                    && ws_error.erring_node == mypubkey =>
+                                {
+                                    warn!(
+                                        "{}/{}: PAYMENT DETAILS ERROR:{:?} {:?}",
+                                        task.chan_id.to_string(),
+                                        task.task_id,
+                                        err,
+                                        route
+                                    );
+                                    special_stop = true;
+                                }
+                                _ => (),
+                            }
+
+                            FailureReb {
+                                amount_msat: ws_error.amount_msat.unwrap().msat(),
+                                failure_reason: ws_error.failcodename.clone(),
+                                failure_node: ws_error.erring_node,
+                                channel_partner: match job.sat_direction {
+                                    SatDirection::Pull => route.first().unwrap().channel,
+                                    SatDirection::Push => route.last().unwrap().channel,
+                                },
+                                hops: (route.len() - 1) as u8,
+                                created_at: ws_error.created_at,
+                            }
+                            .write_to_file(*task.chan_id, &sling_dir)
+                            .await?;
+                            if special_stop {
+                                channel_jobstate_update(
+                                    plugin.state().job_state.clone(),
+                                    task,
+                                    &JobMessage::Error,
+                                    None,
+                                    Some(false),
+                                );
+                                warn!(
+                                    "{}/{}: UNEXPECTED waitsendpay failure after {}s: {}",
+                                    task.chan_id.to_string(),
+                                    task.task_id,
+                                    now.elapsed().as_secs().to_string(),
+                                    message
+                                );
+                                break 'outer;
+                            }
+
+                            if ws_error.erring_channel == route.last().unwrap().channel {
+                                warn!(
+                                    "{}/{}: Last peer has a problem or just updated their fees? {}",
+                                    task.chan_id.to_string(),
+                                    task.task_id,
+                                    ws_error.failcodename
+                                );
+                                if message.contains("Too many HTLCs") {
+                                    my_sleep(3, plugin.state().job_state.clone(), task).await;
+                                } else {
+                                    match job.sat_direction {
+                                        SatDirection::Pull => {
+                                            plugin.state().tempbans.lock().insert(
+                                                route
+                                                    .get(route.len() - 3)
+                                                    .unwrap()
+                                                    .channel
+                                                    .to_string(),
+                                                SystemTime::now()
+                                                    .duration_since(UNIX_EPOCH)
+                                                    .unwrap()
+                                                    .as_secs(),
+                                            );
+                                        }
+                                        SatDirection::Push => {
+                                            plugin.state().tempbans.lock().insert(
+                                                route.last().unwrap().channel.to_string(),
+                                                SystemTime::now()
+                                                    .duration_since(UNIX_EPOCH)
+                                                    .unwrap()
+                                                    .as_secs(),
+                                            );
+                                        }
+                                    }
+                                }
+                            } else if ws_error.erring_channel == route.first().unwrap().channel {
+                                warn!(
+                                    "{}/{}: First peer has a problem {}",
+                                    task.chan_id.to_string(),
+                                    task.task_id,
+                                    message.clone()
+                                );
+                                if message.contains("Too many HTLCs") {
+                                    my_sleep(3, plugin.state().job_state.clone(), task).await;
+                                } else {
+                                    match job.sat_direction {
+                                        SatDirection::Pull => {
+                                            plugin.state().tempbans.lock().insert(
+                                                route.first().unwrap().channel.to_string(),
+                                                SystemTime::now()
+                                                    .duration_since(UNIX_EPOCH)
+                                                    .unwrap()
+                                                    .as_secs(),
+                                            );
+                                        }
+                                        SatDirection::Push => {
+                                            my_sleep(60, plugin.state().job_state.clone(), task)
+                                                .await;
+                                        }
+                                    }
+                                }
                             } else {
+                                debug!(
+                                    "{}/{}: Adjusting liquidity for {}.",
+                                    task.chan_id.to_string(),
+                                    task.task_id,
+                                    ws_error.erring_channel.to_string()
+                                );
                                 plugin
                                     .state()
                                     .graph
                                     .lock()
                                     .await
                                     .graph
-                                    .get_mut(&source)
+                                    .get_mut(&ws_error.erring_node)
                                     .unwrap()
                                     .iter_mut()
                                     .find_map(|x| {
-                                        if x.channel.short_channel_id.to_string()
-                                            == hop.channel.to_string()
+                                        if x.channel.short_channel_id == ws_error.erring_channel
                                             && x.channel.destination != mypubkey
                                             && x.channel.source != mypubkey
                                         {
-                                            x.liquidity = 0;
+                                            x.liquidity = ws_error.amount_msat.unwrap().msat() - 1;
                                             x.timestamp = SystemTime::now()
                                                 .duration_since(UNIX_EPOCH)
                                                 .unwrap()
@@ -415,64 +607,8 @@ pub async fn sling<'a>(
                                         }
                                     });
                             }
-                        }
-                        FailureReb {
-                            amount_msat: job.amount_msat,
-                            failure_reason: "WAITSENDPAY_TIMEOUT".to_string(),
-                            failure_node: mypubkey,
-                            channel_partner: match job.sat_direction {
-                                SatDirection::Pull => route.first().unwrap().channel,
-                                SatDirection::Push => route.last().unwrap().channel,
-                            },
-                            hops: (route.len() - 1) as u8,
-                            created_at: SystemTime::now()
-                                .duration_since(UNIX_EPOCH)
-                                .unwrap()
-                                .as_secs(),
-                        }
-                        .write_to_file(*task.chan_id, &sling_dir)
-                        .await?;
-                    } else if let Some(ref data) = err.data {
-                        err_chan = Some(data.erring_channel);
-                        info!(
-                            "{}/{}: Rebalance failure after {}s: {} at node:{} chan:{}",
-                            task.chan_id.to_string(),
-                            task.task_id,
-                            now.elapsed().as_secs().to_string(),
-                            err.message,
-                            data.erring_node,
-                            data.erring_channel.to_string()
-                        );
-                        match &data.failcodename {
-                            err if err.eq("WIRE_INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS")
-                                && data.erring_node == mypubkey =>
-                            {
-                                warn!(
-                                    "{}/{}: PAYMENT DETAILS ERROR:{:?} {:?}",
-                                    task.chan_id.to_string(),
-                                    task.task_id,
-                                    err,
-                                    route
-                                );
-                                special_stop = true;
-                            }
-                            _ => (),
-                        }
-
-                        FailureReb {
-                            amount_msat: Amount::msat(&data.amount_msat.unwrap()),
-                            failure_reason: data.failcodename.clone(),
-                            failure_node: data.erring_node,
-                            channel_partner: match job.sat_direction {
-                                SatDirection::Pull => route.first().unwrap().channel,
-                                SatDirection::Push => route.last().unwrap().channel,
-                            },
-                            hops: (route.len() - 1) as u8,
-                            created_at: data.created_at,
-                        }
-                        .write_to_file(*task.chan_id, &sling_dir)
-                        .await?;
-                        if special_stop {
+                            Some(ws_error.erring_channel)
+                        } else {
                             channel_jobstate_update(
                                 plugin.state().job_state.clone(),
                                 task,
@@ -481,108 +617,16 @@ pub async fn sling<'a>(
                                 Some(false),
                             );
                             warn!(
-                                "{}/{}: UNEXPECTED waitsendpay failure after {}s: {:?}",
+                                "{}/{}: UNEXPECTED waitsendpay failure: {} after: {}",
                                 task.chan_id.to_string(),
                                 task.task_id,
-                                now.elapsed().as_secs().to_string(),
-                                err
+                                message,
+                                now.elapsed().as_millis().to_string()
                             );
                             break 'outer;
                         }
-
-                        if data.erring_channel.to_string()
-                            == route.last().unwrap().channel.to_string()
-                        {
-                            warn!(
-                                "{}/{}: Last peer has a problem or just updated their fees? {}",
-                                task.chan_id.to_string(),
-                                task.task_id,
-                                data.failcodename
-                            );
-                            if err.message.contains("Too many HTLCs") {
-                                my_sleep(3, plugin.state().job_state.clone(), task).await;
-                            } else {
-                                match job.sat_direction {
-                                    SatDirection::Pull => {
-                                        plugin.state().tempbans.lock().insert(
-                                            route.get(route.len() - 3).unwrap().channel.to_string(),
-                                            SystemTime::now()
-                                                .duration_since(UNIX_EPOCH)
-                                                .unwrap()
-                                                .as_secs(),
-                                        );
-                                    }
-                                    SatDirection::Push => {
-                                        plugin.state().tempbans.lock().insert(
-                                            route.last().unwrap().channel.to_string(),
-                                            SystemTime::now()
-                                                .duration_since(UNIX_EPOCH)
-                                                .unwrap()
-                                                .as_secs(),
-                                        );
-                                    }
-                                }
-                            }
-                        } else if data.erring_channel.to_string()
-                            == route.first().unwrap().channel.to_string()
-                        {
-                            warn!(
-                                "{}/{}: First peer has a problem {}",
-                                task.chan_id.to_string(),
-                                task.task_id,
-                                err.message.clone()
-                            );
-                            if err.message.contains("Too many HTLCs") {
-                                my_sleep(3, plugin.state().job_state.clone(), task).await;
-                            } else {
-                                match job.sat_direction {
-                                    SatDirection::Pull => {
-                                        plugin.state().tempbans.lock().insert(
-                                            route.first().unwrap().channel.to_string(),
-                                            SystemTime::now()
-                                                .duration_since(UNIX_EPOCH)
-                                                .unwrap()
-                                                .as_secs(),
-                                        );
-                                    }
-                                    SatDirection::Push => {
-                                        my_sleep(60, plugin.state().job_state.clone(), task).await;
-                                    }
-                                }
-                            }
-                        } else {
-                            debug!(
-                                "{}/{}: Adjusting liquidity for {}.",
-                                task.chan_id.to_string(),
-                                task.task_id,
-                                data.erring_channel.to_string()
-                            );
-                            plugin
-                                .state()
-                                .graph
-                                .lock()
-                                .await
-                                .graph
-                                .get_mut(&data.erring_node)
-                                .unwrap()
-                                .iter_mut()
-                                .find_map(|x| {
-                                    if x.channel.short_channel_id == data.erring_channel
-                                        && x.channel.destination != mypubkey
-                                        && x.channel.source != mypubkey
-                                    {
-                                        x.liquidity = Amount::msat(&data.amount_msat.unwrap()) - 1;
-                                        x.timestamp = SystemTime::now()
-                                            .duration_since(UNIX_EPOCH)
-                                            .unwrap()
-                                            .as_secs();
-                                        Some(x)
-                                    } else {
-                                        None
-                                    }
-                                });
-                        }
-                    } else {
+                    }
+                    Err(e) => {
                         channel_jobstate_update(
                             plugin.state().job_state.clone(),
                             task,
@@ -591,17 +635,18 @@ pub async fn sling<'a>(
                             Some(false),
                         );
                         warn!(
-                            "{}/{}: UNEXPECTED waitsendpay failure after {}s: {:?}",
+                            "{}/{}: UNEXPECTED waitsendpay error type: {} after: {}",
                             task.chan_id.to_string(),
                             task.task_id,
-                            now.elapsed().as_secs().to_string(),
-                            err
+                            e,
+                            now.elapsed().as_millis().to_string()
                         );
                         break 'outer;
                     }
                 }
             }
         };
+
         if match err_chan {
             Some(ec) => ec != route_claim_chan,
             None => true,

@@ -79,7 +79,7 @@ pub struct Config {
     pub paralleljobs: (String, u8),
     pub timeoutpay: (String, u16),
     pub max_htlc_count: (String, u64),
-    pub lightning_cli: (String, String),
+    pub lightning_conf: (String, String),
     pub stats_delete_failures_age: (String, u64),
     pub stats_delete_failures_size: (String, u64),
     pub stats_delete_successes_age: (String, u64),
@@ -108,10 +108,7 @@ impl Config {
             paralleljobs: (PLUGIN_NAME.to_string() + "-paralleljobs", 1),
             timeoutpay: (PLUGIN_NAME.to_string() + "-timeoutpay", 120),
             max_htlc_count: (PLUGIN_NAME.to_string() + "-max-htlc-count", 5),
-            lightning_cli: (
-                PLUGIN_NAME.to_string() + "-lightning-cli",
-                "lightning-cli".to_string(),
-            ),
+            lightning_conf: (PLUGIN_NAME.to_string() + "-lightning-conf", "".to_string()),
             stats_delete_failures_age: (PLUGIN_NAME.to_string() + "-stats-delete-failures-age", 30),
             stats_delete_failures_size: (
                 PLUGIN_NAME.to_string() + "-stats-delete-failures-size",

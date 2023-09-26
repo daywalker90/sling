@@ -5,12 +5,6 @@ use cln_rpc::primitives::Sha256;
 use cln_rpc::primitives::ShortChannelId;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct WaitsendpayError {
-    pub code: Option<i32>,
-    pub message: String,
-    pub data: Option<WaitsendpayErrorData>,
-}
 // status of the payment
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 pub enum WaitsendpayErrorStatus {

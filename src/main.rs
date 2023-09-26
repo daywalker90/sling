@@ -132,11 +132,11 @@ async fn main() -> Result<(), anyhow::Error> {
             ),
         ))
         .option(options::ConfigOption::new(
-            &defaultconfig.lightning_cli.0,
+            &defaultconfig.lightning_conf.0,
             options::Value::OptString,
             &format!(
-                "Path to lightning-cli for unsupported rpc methods. Default is {}",
-                defaultconfig.lightning_cli.1
+                "Path to lightning_conf for unsupported rpc methods. Default is {}",
+                defaultconfig.lightning_conf.1
             ),
         ))
         .option(options::ConfigOption::new(
@@ -230,8 +230,8 @@ async fn main() -> Result<(), anyhow::Error> {
         .await?
     {
         Some(plugin) => {
-            info!("get cli location");
-            match get_cli_location(&plugin, state.clone()) {
+            info!("get prestart config");
+            match get_prestart_configs(&plugin, state.clone()) {
                 Ok(()) => &(),
                 Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
             };
@@ -240,12 +240,8 @@ async fn main() -> Result<(), anyhow::Error> {
                 Ok(()) => &(),
                 Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
             };
-            info!("startup options");
+            info!("read startup options");
             match get_startup_options(&plugin, state.clone()) {
-                Ok(()) => &(),
-                Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
-            };
-            match check_lightning_dir(&plugin, state.clone()).await {
                 Ok(()) => &(),
                 Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
             };

@@ -1,23 +1,14 @@
-use std::{
-    path::{Path, PathBuf},
-    str::FromStr,
-};
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Error};
-use cln_plugin::ConfiguredPlugin;
 use cln_rpc::{
     model::{requests::*, responses::*, *},
     primitives::{PublicKey, Secret, ShortChannelId},
     ClnRpc,
 };
 use log::debug;
-use serde_json::Value;
-use tokio::{process::Command, time::Instant};
+use tokio::time::Instant;
 
-use crate::{
-    errors::*,
-    model::{PluginState, PLUGIN_NAME},
-};
 use cln_rpc::primitives::*;
 
 pub async fn set_channel(
@@ -157,103 +148,39 @@ pub async fn slingsend(
     }
 }
 
-pub async fn waitsendpay(
-    lightning_dir: &Path,
-    lightning_cli: &String,
+pub async fn waitsendpay2(
+    rpc_path: &PathBuf,
     payment_hash: Sha256,
     timeout: u16,
-) -> Result<WaitsendpayResponse, WaitsendpayError> {
-    // debug!("{}", lightning_dir.to_str().unwrap());
-    let waitsendpay_request = Command::new(lightning_cli)
-        .arg("--lightning-dir=".to_string() + lightning_dir.to_str().unwrap())
-        .arg("waitsendpay")
-        .arg((payment_hash).to_string())
-        .arg(timeout.to_string())
-        .output()
-        .await;
-    match waitsendpay_request {
-        Ok(output) => match serde_json::from_str(&String::from_utf8_lossy(&output.stdout)) {
-            Ok(o) => Ok(o),
-            Err(_) => match serde_json::from_str::<WaitsendpayError>(&String::from_utf8_lossy(
-                &output.stdout,
-            )) {
-                Ok(err) => Err(err),
-                Err(e) => Err(WaitsendpayError {
-                    code: None,
-                    message: format!("{} {:?}", e, output),
-                    data: None,
-                }),
-            },
-        },
-        Err(e) => Err(WaitsendpayError {
-            code: None,
-            message: e.to_string(),
-            data: None,
-        }),
+) -> Result<WaitsendpayResponse, Error> {
+    let mut rpc = ClnRpc::new(&rpc_path).await?;
+    let sendpay_request = rpc
+        .call(Request::WaitSendPay(WaitsendpayRequest {
+            payment_hash,
+            timeout: Some(timeout as u32),
+            partid: None,
+            groupid: None,
+        }))
+        .await?;
+    match sendpay_request {
+        Response::WaitSendPay(info) => Ok(info),
+        e => Err(anyhow!("Unexpected result in waitsendpay2: {:?}", e)),
     }
 }
 
-pub async fn get_config_path(
-    network_dir: &str,
-    lightning_cli: String,
-) -> Result<Option<String>, Error> {
-    let network_dir = PathBuf::from_str(network_dir).unwrap();
-    let mut lightning_dir = network_dir.clone();
-    lightning_dir.pop();
-    debug!("{}  |  {}", lightning_dir.to_str().unwrap(), lightning_cli);
-    let listconfigs_request = Command::new(lightning_cli)
-        .arg("--lightning-dir=".to_string() + lightning_dir.to_str().unwrap())
-        .arg("listconfigs")
-        .output()
-        .await;
-    match listconfigs_request {
-        Ok(output) => match serde_json::from_str::<Value>(&String::from_utf8_lossy(&output.stdout))
-        {
-            Ok(o) => match o.get("conf") {
-                Some(c) => Ok(Some(c.as_str().unwrap().to_string())),
-                None => Ok(None),
-            },
-            Err(e) => Err(anyhow!(
-                "Could not read listconfigs response: {}",
-                e.to_string()
-            )),
-        },
-        Err(e) => Err(anyhow!(
-            "Unexpected result in listconfigs: {}",
-            e.to_string()
-        )),
-    }
-}
-
-pub async fn check_lightning_dir(
-    plugin: &ConfiguredPlugin<PluginState, tokio::io::Stdin, tokio::io::Stdout>,
-    state: PluginState,
-) -> Result<(), Error> {
-    let network_dir = PathBuf::from_str(&plugin.configuration().lightning_dir).unwrap();
-    let mut lightning_dir = network_dir.clone();
-    lightning_dir.pop();
-    let config = state.config.lock().clone();
-    let getinfo_request = Command::new(config.lightning_cli.1)
-        .arg("--lightning-dir=".to_string() + lightning_dir.to_str().unwrap())
-        .arg("getinfo")
-        .output()
-        .await;
-    match getinfo_request {
-        Ok(output) => {
-            match serde_json::from_str::<GetinfoResponse>(&String::from_utf8_lossy(&output.stdout))
-            {
-                Ok(_o) => Ok(()),
-                Err(e) => Err(anyhow!(
-                    "Unexpected error in parsing GetinfoResponse: {} {:?}",
-                    e,
-                    output
-                )),
-            }
-        }
-        Err(e) => Err(anyhow!(
-            "Your {}-lightning-cli is probably wrong!: {}",
-            PLUGIN_NAME.to_string(),
-            e
-        )),
-    }
+pub async fn get_config_path(lightning_dir: String) -> Result<Vec<String>, Error> {
+    let lightning_dir_network = Path::new(&lightning_dir);
+    let lightning_dir_general = Path::new(&lightning_dir).parent().unwrap();
+    Ok(vec![
+        lightning_dir_general
+            .join("config")
+            .to_str()
+            .unwrap()
+            .to_string(),
+        lightning_dir_network
+            .join("config")
+            .to_str()
+            .unwrap()
+            .to_string(),
+    ])
 }

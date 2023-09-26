@@ -1,11 +1,14 @@
 use anyhow::{anyhow, Error};
 use cln_plugin::{options, ConfiguredPlugin};
-use log::warn;
+use log::info;
 use std::path::Path;
 
 use tokio::fs;
 
-use crate::{model::PluginState, rpc::get_config_path};
+use crate::{
+    model::PluginState,
+    rpc::{get_config_path, get_info},
+};
 
 pub async fn read_config(
     plugin: &ConfiguredPlugin<PluginState, tokio::io::Stdin, tokio::io::Stdout>,
@@ -13,22 +16,27 @@ pub async fn read_config(
 ) -> Result<(), Error> {
     let mut config_file_content = String::new();
     let dir = plugin.configuration().lightning_dir;
+    let rpc_path = Path::new(&dir).join(plugin.configuration().rpc_file);
+    let getinfo = get_info(&rpc_path).await?;
     let config = state.config.lock().clone();
-    let config_file_path = get_config_path(&dir, config.lightning_cli.1.clone()).await?;
-    match config_file_path {
-        Some(p) => match fs::read_to_string(Path::new(&p)).await {
-            Ok(f) => config_file_content = f,
-            Err(e) => return Err(anyhow!("Could not read config file! {}", e.to_string())),
-        },
-        None => match fs::read_to_string(Path::new(&dir).join("config")).await {
-            Ok(file) => config_file_content = file,
-            Err(_) => {
-                match fs::read_to_string(Path::new(&dir).parent().unwrap().join("config")).await {
-                    Ok(file2) => config_file_content = file2,
-                    Err(_) => warn!("No config file found!"),
-                }
+    let config_file_path = if config.lightning_conf.1.is_empty() {
+        get_config_path(getinfo.lightning_dir).await?
+    } else {
+        vec![config.lightning_conf.1]
+    };
+
+    for confs in config_file_path {
+        match fs::read_to_string(Path::new(&confs)).await {
+            Ok(f) => {
+                info!("Found config file: {}", confs);
+                config_file_content += &(f + "\n")
             }
-        },
+            Err(e) => info!("Not a config file {}! {}", confs, e.to_string()),
+        }
+    }
+
+    if config_file_content.is_empty() {
+        return Err(anyhow!("No config file found!"));
     }
 
     let mut config = state.config.lock();
@@ -330,15 +338,15 @@ pub async fn read_config(
     Ok(())
 }
 
-pub fn get_cli_location(
+pub fn get_prestart_configs(
     plugin: &ConfiguredPlugin<PluginState, tokio::io::Stdin, tokio::io::Stdout>,
     state: PluginState,
 ) -> Result<(), Error> {
     let mut config = state.config.lock();
-    config.lightning_cli.1 = match plugin.option(&config.lightning_cli.0) {
+    config.lightning_conf.1 = match plugin.option(&config.lightning_conf.0) {
         Some(options::Value::String(i)) => i,
-        Some(_) => config.lightning_cli.1.clone(),
-        None => config.lightning_cli.1.clone(),
+        Some(_) => config.lightning_conf.1.clone(),
+        None => config.lightning_conf.1.clone(),
     };
 
     Ok(())

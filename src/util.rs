@@ -398,8 +398,8 @@ async fn write_job(
     } else {
         my_job = job.unwrap();
         info!(
-            "{} job for {} with amount: {}msat, maxppm: {}, outppm: {:?}, target: {:?},\n
-            maxhops: {:?}, candidatelist: {:?},\n
+            "{} job for {} with amount: {}msat, maxppm: {}, outppm: {:?}, target: {:?},\
+            maxhops: {:?}, candidatelist: {:?},\
             depleteuptopercent: {:?}, depleteuptoamount: {:?}, paralleljobs: {:?}",
             job_change,
             &chan_id,
