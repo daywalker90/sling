@@ -206,6 +206,17 @@ pub async fn read_config(
                             ))
                         }
                     },
+                    opt if opt.eq(&config.candidates_min_age.0) => match value.parse::<u32>() {
+                        Ok(n) => config.candidates_min_age.1 = n,
+                        Err(e) => {
+                            return Err(anyhow!(
+                                "Error: Could not parse a positive number from `{}` for {}: {}",
+                                value,
+                                config.candidates_min_age.0,
+                                e
+                            ))
+                        }
+                    },
                     opt if opt.eq(&config.paralleljobs.0) => match value.parse::<u8>() {
                         Ok(n) => {
                             if n > 0 {
@@ -465,6 +476,11 @@ pub fn get_startup_options(
         }
         Some(_) => config.maxhops.1,
         None => config.maxhops.1,
+    };
+    config.candidates_min_age.1 = match plugin.option(&config.candidates_min_age.0) {
+        Some(options::Value::Integer(i)) => i as u32,
+        Some(_) => config.candidates_min_age.1,
+        None => config.candidates_min_age.1,
     };
     config.paralleljobs.1 = match plugin.option(&config.paralleljobs.0) {
         Some(options::Value::Integer(i)) => {

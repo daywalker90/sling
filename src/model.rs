@@ -40,6 +40,7 @@ pub struct PluginState {
     pub excepts_peers: Arc<Mutex<Vec<PublicKey>>>,
     pub tempbans: Arc<Mutex<HashMap<String, u64>>>,
     pub job_state: Arc<Mutex<HashMap<String, Vec<JobState>>>>,
+    pub blockheight: Arc<Mutex<u32>>,
 }
 impl PluginState {
     pub fn new() -> PluginState {
@@ -55,6 +56,7 @@ impl PluginState {
             excepts_peers: Arc::new(Mutex::new(Vec::new())),
             tempbans: Arc::new(Mutex::new(HashMap::new())),
             job_state: Arc::new(Mutex::new(HashMap::new())),
+            blockheight: Arc::new(Mutex::new(0)),
         }
     }
 }
@@ -76,6 +78,7 @@ pub struct Config {
     pub depleteuptopercent: (String, f64),
     pub depleteuptoamount: (String, u64),
     pub maxhops: (String, u8),
+    pub candidates_min_age: (String, u32),
     pub paralleljobs: (String, u8),
     pub timeoutpay: (String, u16),
     pub max_htlc_count: (String, u64),
@@ -105,6 +108,7 @@ impl Config {
                 2_000_000_000,
             ),
             maxhops: (PLUGIN_NAME.to_string() + "-maxhops", 8),
+            candidates_min_age: (PLUGIN_NAME.to_string() + "-candidates-min-age", 0),
             paralleljobs: (PLUGIN_NAME.to_string() + "-paralleljobs", 1),
             timeoutpay: (PLUGIN_NAME.to_string() + "-timeoutpay", 120),
             max_htlc_count: (PLUGIN_NAME.to_string() + "-max-htlc-count", 5),

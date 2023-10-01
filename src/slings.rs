@@ -688,19 +688,43 @@ async fn next_route<'a>(
 ) -> Result<Vec<SendpayRoute>, Error> {
     let graph = plugin.state().graph.lock().await;
     let config = plugin.state().config.lock().clone();
+    #[allow(clippy::clone_on_copy)]
+    let blockheight = plugin.state().blockheight.lock().clone();
     let candidatelist;
     match job.candidatelist {
         Some(ref c) => {
             if !c.is_empty() {
-                candidatelist =
-                    build_candidatelist(peer_channels, job, &graph, tempbans, &config, Some(c))
+                candidatelist = build_candidatelist(
+                    peer_channels,
+                    job,
+                    &graph,
+                    tempbans,
+                    &config,
+                    Some(c),
+                    blockheight,
+                )
             } else {
-                candidatelist =
-                    build_candidatelist(peer_channels, job, &graph, tempbans, &config, None)
+                candidatelist = build_candidatelist(
+                    peer_channels,
+                    job,
+                    &graph,
+                    tempbans,
+                    &config,
+                    None,
+                    blockheight,
+                )
             }
         }
         None => {
-            candidatelist = build_candidatelist(peer_channels, job, &graph, tempbans, &config, None)
+            candidatelist = build_candidatelist(
+                peer_channels,
+                job,
+                &graph,
+                tempbans,
+                &config,
+                None,
+                blockheight,
+            )
         }
     }
     debug!(
@@ -1026,6 +1050,7 @@ fn build_candidatelist(
     tempbans: &HashMap<String, u64>,
     config: &Config,
     custom_candidates: Option<&Vec<ShortChannelId>>,
+    blockheight: u32,
 ) -> Vec<ShortChannelId> {
     let mut candidatelist = Vec::<ShortChannelId>::new();
 
@@ -1048,6 +1073,7 @@ fn build_candidatelist(
                     Some(c) => c.iter().any(|c| *c == scid),
                     None => true,
                 }
+                && scid.block() <= blockheight - config.candidates_min_age.1
             {
                 let chan_from_peer = match graph.get_channel(&channel.peer_id.unwrap(), &scid) {
                     Ok(chan) => chan.channel,

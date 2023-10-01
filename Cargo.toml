@@ -18,13 +18,13 @@ tokio = { version = "1", features = ["fs","sync","rt-multi-thread","process"] }
 
 # env_logger = "0.10"
 
-# cln-rpc = "0.1.4"
+# cln-rpc = "0.1.6"
 cln-rpc = { path="cln-rpc/", version = "^0.1" }
-cln-plugin = "0.1.5"
+cln-plugin = "0.1.6"
 # cln-plugin = {path= "../lightning/plugins"}
 # cln-rpc = {path= "../lightning/cln-rpc"}
 
-tabled = "0.12"
+tabled = "0.14"
 num-format = "0.4"
 struct-field-names-as-array = "0.2"
 chrono = "0.4"

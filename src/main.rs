@@ -3,6 +3,7 @@ use cln_plugin::{options, Builder};
 use cln_rpc::primitives::PublicKey;
 use cln_rpc::primitives::ShortChannelId;
 use config::*;
+use htlc::block_added;
 use htlc::htlc_handler;
 use jobs::*;
 use log::{debug, info, warn};
@@ -43,6 +44,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let confplugin;
     match Builder::new(tokio::io::stdin(), tokio::io::stdout())
         .hook("htlc_accepted", htlc_handler)
+        .subscribe("block_added", block_added)
         .option(options::ConfigOption::new(
             &defaultconfig.utf8.0,
             options::Value::OptBoolean,
@@ -105,6 +107,14 @@ async fn main() -> Result<(), anyhow::Error> {
             &format!(
                 "Maximum number of hops in a route. Default is {}",
                 defaultconfig.maxhops.1
+            ),
+        ))
+        .option(options::ConfigOption::new(
+            &defaultconfig.candidates_min_age.0,
+            options::Value::OptInteger,
+            &format!(
+                "Minium age of a candidate to rebalance with in days. Default is {}",
+                defaultconfig.candidates_min_age.1
             ),
         ))
         .option(options::ConfigOption::new(
@@ -251,9 +261,10 @@ async fn main() -> Result<(), anyhow::Error> {
     };
     if let Ok(plugin) = confplugin.start(state).await {
         debug!("{:?}", plugin.configuration());
-        let mypubkey = get_info(&make_rpc_path(&plugin)).await?.id;
+        let getinfo = get_info(&make_rpc_path(&plugin)).await?;
         {
-            plugin.state().config.lock().pubkey = Some(mypubkey);
+            plugin.state().config.lock().pubkey = Some(getinfo.id);
+            *plugin.state().blockheight.lock() = getinfo.blockheight;
         }
         let peersclone = plugin.clone();
         tokio::spawn(async move {
