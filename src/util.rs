@@ -46,7 +46,7 @@ pub async fn slingjob(
     v: serde_json::Value,
 ) -> Result<serde_json::Value, Error> {
     let sling_dir = Path::new(&p.configuration().lightning_dir).join(PLUGIN_NAME);
-    let valid_keys = vec![
+    let valid_keys = [
         "scid",
         "direction",
         "amount",
