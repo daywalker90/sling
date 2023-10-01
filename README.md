@@ -15,6 +15,15 @@ A core lightning plugin to automatically rebalance multiple channels.
 ## Installation
 For general plugin installation instructions see the plugins repo [README.md](https://github.com/lightningd/plugins/blob/master/README.md#Installation)
 
+Release binaries for
+* x86_64-linux
+* armv7-linux (Raspberry Pi 32bit)
+* aarch64-linux (Raspberry Pi 64bit)
+
+can be found on the [release](https://github.com/daywalker90/summars/releases) page. If you are unsure about your architecture you can run ``uname -m``.
+
+They require ``glibc>=2.31``, which you can check with ``ldd --version``.
+
 :warning:Make sure to change the option ``sling-lightning-conf`` if you use a config file outside the default ``$HOME/.lightning/config`` or ``$HOME/.lightning/testnet/config``, see [Options](#options) for more info
 
 ## Building
