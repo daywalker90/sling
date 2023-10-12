@@ -211,7 +211,7 @@ pub async fn sling<'a>(
             let alias_map = plugin.state().alias_peer_map.lock();
             for r in &route {
                 debug!(
-                    "{}/{}: route: {} {:3} {:17} {}",
+                    "{}/{}: route: {} {:4} {:17} {}",
                     task.chan_id.to_string(),
                     task.task_id,
                     Amount::msat(&r.amount_msat),
