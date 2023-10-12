@@ -88,7 +88,6 @@ pub struct Config {
     pub stats_delete_successes_age: (String, u64),
     pub stats_delete_successes_size: (String, u64),
     pub cltv_delta: (String, Option<u16>),
-    pub channel_health: (String, bool),
 }
 impl Config {
     pub fn new() -> Config {
@@ -127,7 +126,6 @@ impl Config {
                 10_000,
             ),
             cltv_delta: ("cltv-delta".to_string(), None),
-            channel_health: (PLUGIN_NAME.to_string() + "-channel-health", false),
         }
     }
 }

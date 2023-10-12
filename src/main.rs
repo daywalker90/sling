@@ -181,14 +181,6 @@ async fn main() -> Result<(), anyhow::Error> {
                 defaultconfig.stats_delete_successes_size.1
             ),
         ))
-        .option(options::ConfigOption::new(
-            &defaultconfig.channel_health.0,
-            options::Value::OptBoolean,
-            &format!(
-                "Switch on/off experimental channel health task. Default is {}",
-                defaultconfig.channel_health.1
-            ),
-        ))
         .rpcmethod(
             &(PLUGIN_NAME.to_string() + "-job"),
             "add sling job",
@@ -323,15 +315,6 @@ async fn main() -> Result<(), anyhow::Error> {
                 Err(e) => warn!("Error in clear_stats thread: {:?}", e),
             };
         });
-        let channelhealthclone = plugin.clone();
-        if channelhealthclone.state().config.lock().channel_health.1 {
-            tokio::spawn(async move {
-                match tasks::channel_health(channelhealthclone).await {
-                    Ok(()) => (),
-                    Err(e) => warn!("Error in channel_health thread: {:?}", e),
-                };
-            });
-        }
 
         plugin.join().await?;
         std::process::exit(0);

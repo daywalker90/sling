@@ -329,17 +329,6 @@ pub async fn read_config(
                             }
                         }
                     }
-                    opt if opt.eq(&config.channel_health.0) => match value.parse::<bool>() {
-                        Ok(b) => config.channel_health.1 = b,
-                        Err(e) => {
-                            return Err(anyhow!(
-                                "Error: Could not parse bool from `{}` for {}: {}",
-                                value,
-                                config.channel_health.0,
-                                e
-                            ))
-                        }
-                    },
                     _ => (),
                 }
             }
@@ -550,11 +539,6 @@ pub fn get_startup_options(
             Some(_) => config.stats_delete_successes_size.1,
             None => config.stats_delete_successes_size.1,
         };
-    config.channel_health.1 = match plugin.option(&config.channel_health.0) {
-        Some(options::Value::Boolean(b)) => b,
-        Some(_) => config.channel_health.1,
-        None => config.channel_health.1,
-    };
 
     Ok(())
 }

@@ -11,49 +11,6 @@ use tokio::time::Instant;
 
 use cln_rpc::primitives::*;
 
-pub async fn set_channel(
-    rpc_path: &Path,
-    id: String,
-    feebase: Option<Amount>,
-    feeppm: Option<u32>,
-    htlcmin: Option<Amount>,
-    htlcmax: Option<Amount>,
-    enforcedelay: Option<u32>,
-) -> Result<SetchannelResponse, Error> {
-    let mut rpc = ClnRpc::new(&rpc_path).await?;
-    let set_channel_request = rpc
-        .call(Request::SetChannel(SetchannelRequest {
-            id,
-            feebase,
-            feeppm,
-            htlcmin,
-            htlcmax,
-            enforcedelay,
-            ignorefeelimits: None,
-        }))
-        .await
-        .map_err(|e| anyhow!("Error calling set_channel: {:?}", e))?;
-    match set_channel_request {
-        Response::SetChannel(info) => Ok(info),
-        e => Err(anyhow!("Unexpected result in set_channel: {:?}", e)),
-    }
-}
-
-pub async fn disconnect(rpc_path: &PathBuf, id: PublicKey) -> Result<DisconnectResponse, Error> {
-    let mut rpc = ClnRpc::new(&rpc_path).await?;
-    let disconnect_request = rpc
-        .call(Request::Disconnect(DisconnectRequest {
-            id,
-            force: Some(true),
-        }))
-        .await
-        .map_err(|e| anyhow!("Error calling disconnect: {:?}", e))?;
-    match disconnect_request {
-        Response::Disconnect(info) => Ok(info),
-        e => Err(anyhow!("Unexpected result in disconnect: {:?}", e)),
-    }
-}
-
 pub async fn list_peer_channels(rpc_path: &PathBuf) -> Result<ListpeerchannelsResponse, Error> {
     let mut rpc = ClnRpc::new(&rpc_path).await?;
     let list_peer_channels = rpc
