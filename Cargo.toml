@@ -26,7 +26,6 @@ cln-plugin = "0.1.6"
 
 tabled = "0.14"
 num-format = "0.4"
-struct-field-names-as-array = "0.2"
 chrono = "0.4"
 rand = "0.8"
 parking_lot = "0.12"

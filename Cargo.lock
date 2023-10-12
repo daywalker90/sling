@@ -826,7 +826,6 @@ dependencies = [
  "rand",
  "serde",
  "serde_json",
- "struct-field-names-as-array",
  "tabled",
  "tokio",
 ]
@@ -845,17 +844,6 @@ checksum = "4031e820eb552adee9295814c0ced9e5cf38ddf1e8b7d566d6de8e2538ea989e"
 dependencies = [
  "libc",
  "windows-sys",
-]
-
-[[package]]
-name = "struct-field-names-as-array"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e14f2d334b35cee06f2a5c3a9a649b6a51a098dde075241509af29eea89a8627"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
