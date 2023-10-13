@@ -117,6 +117,8 @@ Formula is ``min(depleteuptopercent * channel_capacity, depleteuptoamount)``. If
 
 :warning:Warning: If you use the cln config file to set ``sling`` options make sure you include ``plugin=/path/to/sling`` (or have the plugin in the folder where cln automatically starts plugins from at startup) otherwise cln will not start next time!
 
+:warning:Only config files in your lightning-dir or the network dir will be read if you start the plugin dynamically after cln is already running!
+
 You can mix these methods but if you set the same option with multiple of these methods the priority is 1. -> 2.
 
 ## Options
