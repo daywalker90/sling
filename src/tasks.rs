@@ -145,7 +145,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     })
                     .fold(BTreeMap::new(), |mut map, chan| {
                         map.entry(chan.source)
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .push(DirectedChannel::new(chan));
                         map
                     }),
