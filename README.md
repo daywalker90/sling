@@ -57,8 +57,8 @@ You can completely leave out optional (those in ``()``) arguments, with one exce
 * ``target``: floating point between ``0`` and ``1``. E.g.: if atleast ``0.7`` * channel_capacity is on **our** side, the job stops rebalancing and goes into idle. Default is ``0.5``
 * ``maxhops``: maximum number of hops allowed in a route. A hop is a node that is not us. Default is ``8``
 * ``candidates``: a list of our scid's to use for rebalancing this channel. E.g.: ``'["704776x2087x5","702776x1087x2"]'`` You can still combine this with ``outppm``
-* ``depleteuptopercent``: how much % to leave the candidates with on *their* side of the channel as a floating point between 0 and <1. Default is ``0.2``. Also see [Depleteformula](#depleteformula). You can set this globally, see [Options](#options).
-* ``depleteuptoamount``: how many sats to leave the candidates with on *their* side of the channel. Default is ``2000000``sats. Also see [Depleteformula](#depleteformula). You can set this globally, see [Options](#options).
+* ``depleteuptopercent``: how much % to leave the candidates with on the local side of the channel as a floating point between 0 and <1. Default is ``0.2``. Also see [Depleteformula](#depleteformula). You can set this globally, see [Options](#options).
+* ``depleteuptoamount``: how many sats to leave the candidates with on the local side of the channel. Default is ``2000000``sats. Also see [Depleteformula](#depleteformula). You can set this globally, see [Options](#options).
 * ``paralleljobs``: How many routes to take in parallel for this job. Default is ``1``. You can set this globally, see [Options](#options).
 
 Easy example: "Pull sats to our side on ``704776x2087x3`` in amounts of 100000 sats while paying max 300ppm and only using candidates where we charge 0ppm, use defaults (see [Options](#options)) for the rest of the parameters":
@@ -85,8 +85,8 @@ You can completely leave out optional (those in ``()``) arguments, with one exce
 * ``target``: floating point between ``0`` and ``1``. E.g.: if atleast ``0.7`` * channel_capacity is on **their** side, the job stops rebalancing and goes into idle. Default is ``0.5``
 * ``maxhops``: maximum number of hops allowed in a route. A hop is a node that is not us. Default is ``8``
 * ``candidates``: a list of our scid's to use for rebalancing this channel. E.g.: ``'["704776x2087x5","702776x1087x2"]'`` You can still combine this with ``outppm``
-* ``depleteuptopercent``: how much % to leave the candidates with on *our* side of the channel as a floating point between 0 and <1. Default is ``0.2``. Also see [Depleteformula](#depleteformula). You can set this globally, see [Options](#options).
-* ``depleteuptoamount``: how many sats to leave the candidates with on *our* side of the channel. Default is ``2000000``sats. Also see [Depleteformula](#depleteformula). You can set this globally, see [Options](#options).
+* ``depleteuptopercent``: how much % to leave the candidates with on the remote side of the channel as a floating point between 0 and <1. Default is ``0.2``. Also see [Depleteformula](#depleteformula). You can set this globally, see [Options](#options).
+* ``depleteuptoamount``: how many sats to leave the candidates with on the remote side of the channel. Default is ``2000000``sats. Also see [Depleteformula](#depleteformula). You can set this globally, see [Options](#options).
 * ``paralleljobs``: How many routes to take in parallel for this job. Default is ``1``.  You can set this globally, see [Options](#options).
 
 Easy example: "Push sats to their side on ``704776x2087x3`` in amounts of 100000 sats while paying max 300ppm and only using candidates where we charge >=600ppm, use defaults (see [Options](#options)) for the rest of the parameters":
