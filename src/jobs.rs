@@ -43,7 +43,10 @@ pub async fn slinggo(
                 ))
             }
             Ordering::Equal => match a.first().unwrap() {
-                serde_json::Value::String(start_id) => jobs.retain(|chanid, _j| chanid == start_id),
+                serde_json::Value::String(start_id) => {
+                    let scid = ShortChannelId::from_str(start_id)?;
+                    jobs.retain(|chanid, _j| chanid == &scid)
+                }
                 _ => return Err(anyhow!("invalid short_channel_id")),
             },
             Ordering::Less => (),
@@ -63,9 +66,9 @@ pub async fn slinggo(
         for i in 1..=parallel_jobs {
             {
                 let mut job_states = p.state().job_state.lock();
-                if !job_states.contains_key(&chan_id.to_string())
+                if !job_states.contains_key(&chan_id)
                     || match job_states
-                        .get(&chan_id.to_string())
+                        .get(&chan_id)
                         .unwrap()
                         .iter()
                         .find(|jt| jt.id() == i)
@@ -75,20 +78,17 @@ pub async fn slinggo(
                     }
                 {
                     let plugin = p.clone();
-                    let id_clone = chan_id.clone();
                     let job_clone = job.clone();
                     spawn_count += 1;
-                    debug!("{}/{}: Spawning job.", chan_id.to_string(), i);
-                    match job_states.get_mut(&chan_id.to_string()) {
+                    debug!("{}/{}: Spawning job.", chan_id, i);
+                    match job_states.get_mut(&chan_id) {
                         Some(jts) => match jts.iter_mut().find(|jt| jt.id() == i) {
                             Some(jobstate) => *jobstate = JobState::new(JobMessage::Starting, i),
                             None => jts.push(JobState::new(JobMessage::Starting, i)),
                         },
                         None => {
-                            job_states.insert(
-                                id_clone.clone(),
-                                vec![JobState::new(JobMessage::Starting, i)],
-                            );
+                            job_states
+                                .insert(chan_id, vec![JobState::new(JobMessage::Starting, i)]);
                         }
                     }
                     tokio::spawn(async move {
@@ -96,18 +96,18 @@ pub async fn slinggo(
                             &make_rpc_path(&plugin),
                             &job_clone,
                             &Task {
-                                chan_id: &ShortChannelId::from_str(&id_clone).unwrap(),
+                                chan_id,
                                 task_id: i,
                             },
                             &plugin,
                         )
                         .await
                         {
-                            Ok(()) => info!("{}/{}: Spawned job exited.", id_clone.to_string(), i),
+                            Ok(()) => info!("{}/{}: Spawned job exited.", chan_id, i),
                             Err(e) => {
-                                warn!("{}/{}: Error in job: {}", id_clone, e.to_string(), i);
+                                warn!("{}/{}: Error in job: {}", chan_id, e.to_string(), i);
                                 let mut jobstates = plugin.state().job_state.lock();
-                                let jobstate = jobstates.get_mut(&id_clone).unwrap();
+                                let jobstate = jobstates.get_mut(&chan_id).unwrap();
                                 let job_task = jobstate.iter_mut().find(|item| item.id() == i);
 
                                 match job_task {
@@ -115,11 +115,7 @@ pub async fn slinggo(
                                         jt.statechange(JobMessage::Error);
                                         jt.set_active(false);
                                     }
-                                    None => warn!(
-                                        "{}/{}: Job not found after error",
-                                        id_clone.to_string(),
-                                        i
-                                    ),
+                                    None => warn!("{}/{}: Job not found after error", chan_id, i),
                                 }
                             }
                         };
@@ -148,26 +144,27 @@ pub async fn slingstop(
                 }
                 Ordering::Equal => match a.first().unwrap() {
                     serde_json::Value::String(stop_id) => {
+                        let scid = ShortChannelId::from_str(stop_id)?;
                         {
                             let mut job_states = p.state().job_state.lock();
-                            if job_states.contains_key(stop_id) {
-                                let jobstate = job_states.get_mut(stop_id).unwrap();
+                            if job_states.contains_key(&scid) {
+                                let jobstate = job_states.get_mut(&scid).unwrap();
                                 stopped_count = jobstate.len();
                                 for jt in jobstate {
                                     jt.stop();
                                     jt.statechange(JobMessage::Stopping);
-                                    debug!("{}/{}: Stopping job...", stop_id.to_string(), jt.id());
+                                    debug!("{}/{}: Stopping job...", scid, jt.id());
                                 }
                             } else {
-                                return Err(anyhow!("{}: No job running", stop_id));
+                                return Err(anyhow!("{}: No job running", scid));
                             }
                         }
                         loop {
                             {
                                 let job_states = p.state().job_state.lock();
-                                if job_states.get(stop_id).is_none()
+                                if job_states.get(&scid).is_none()
                                     || job_states
-                                        .get(stop_id)
+                                        .get(&scid)
                                         .unwrap()
                                         .iter()
                                         .all(|j| !j.is_active())
@@ -186,11 +183,11 @@ pub async fn slingstop(
                         let mut job_states = p.state().job_state.lock();
                         stopped_count = job_states.iter().fold(0, |acc, (_, vec)| acc + vec.len());
                         for (chan_id, jobstate) in job_states.iter_mut() {
-                            stopped_ids.push(chan_id.clone());
+                            stopped_ids.push(*chan_id);
                             for jt in jobstate {
                                 jt.stop();
                                 jt.statechange(JobMessage::Stopping);
-                                debug!("{}/{}: Stopping job...", chan_id.to_string(), jt.id());
+                                debug!("{}/{}: Stopping job...", chan_id, jt.id());
                             }
                         }
                     }

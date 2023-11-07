@@ -32,10 +32,10 @@ use crate::util::{
     is_channel_normal, my_sleep,
 };
 
-pub async fn sling<'a>(
+pub async fn sling(
     rpc_path: &PathBuf,
     job: &Job,
-    task: &Task<'a>,
+    task: &Task,
     plugin: &Plugin<PluginState>,
 ) -> Result<(), Error> {
     let config = plugin.state().config.lock().clone();
@@ -52,8 +52,7 @@ pub async fn sling<'a>(
             if graph.graph.is_empty() {
                 info!(
                     "{}/{}: graph is still empty. Sleeping...",
-                    task.chan_id.to_string(),
-                    task.task_id
+                    task.chan_id, task.task_id
                 );
                 channel_jobstate_update(
                     plugin.state().job_state.clone(),
@@ -73,7 +72,7 @@ pub async fn sling<'a>(
         let peer_channels = plugin.state().peer_channels.lock().await;
 
         other_peer = peer_channels
-            .get(&task.chan_id.to_string())
+            .get(&task.chan_id)
             .ok_or(anyhow!("other_peer: channel not found"))?
             .peer_id
             .ok_or(anyhow!("other_peer: peer id gone"))?;
@@ -86,18 +85,14 @@ pub async fn sling<'a>(
             .state()
             .job_state
             .lock()
-            .get(&task.chan_id.to_string())
+            .get(&task.chan_id)
             .unwrap()
             .iter()
             .find(|jt| jt.id() == task.task_id)
             .unwrap()
             .should_stop();
         if should_stop {
-            info!(
-                "{}/{}: Stopped job!",
-                task.chan_id.to_string(),
-                task.task_id
-            );
+            info!("{}/{}: Stopped job!", task.chan_id, task.task_id);
             channel_jobstate_update(
                 plugin.state().job_state.clone(),
                 task,
@@ -143,8 +138,8 @@ pub async fn sling<'a>(
             &tempbans,
             task,
             &PublicKeyPair {
-                my_pubkey: &mypubkey,
-                other_pubkey: &other_peer,
+                my_pubkey: mypubkey,
+                other_pubkey: other_peer,
             },
             &mut success_route,
         )
@@ -161,8 +156,7 @@ pub async fn sling<'a>(
         if route.is_empty() {
             info!(
                 "{}/{}: could not find a route. Sleeping...",
-                task.chan_id.to_string(),
-                task.task_id
+                task.chan_id, task.task_id
             );
             channel_jobstate_update(
                 plugin.state().job_state.clone(),
@@ -182,7 +176,7 @@ pub async fn sling<'a>(
         );
         info!(
             "{}/{}: Found {}ppm route with {} hops. Total: {}ms",
-            task.chan_id.to_string(),
+            task.chan_id,
             task.task_id,
             fee_ppm_effective,
             route.len() - 1,
@@ -192,8 +186,7 @@ pub async fn sling<'a>(
         if fee_ppm_effective > job.maxppm {
             info!(
                 "{}/{}: route not cheap enough! Sleeping...",
-                task.chan_id.to_string(),
-                task.task_id
+                task.chan_id, task.task_id
             );
             channel_jobstate_update(
                 plugin.state().job_state.clone(),
@@ -212,11 +205,11 @@ pub async fn sling<'a>(
             for r in &route {
                 debug!(
                     "{}/{}: route: {} {:4} {:17} {}",
-                    task.chan_id.to_string(),
+                    task.chan_id,
                     task.task_id,
                     Amount::msat(&r.amount_msat),
                     r.delay,
-                    r.channel.to_string(),
+                    r.channel,
                     alias_map.get(&r.id).unwrap_or(&r.id.to_string()),
                 );
             }
@@ -226,9 +219,7 @@ pub async fn sling<'a>(
         let route_claim_peer = route[(route.len() / 2) - 1].id;
         debug!(
             "{}/{}: setting liquidity on {} to 0 to not get same route for parallel tasks.",
-            task.chan_id.to_string(),
-            task.task_id,
-            route_claim_chan.to_string()
+            task.chan_id, task.task_id, route_claim_chan
         );
         let route_claim_liq = match plugin
             .state()
@@ -276,11 +267,10 @@ pub async fn sling<'a>(
                 if e.to_string().contains("First peer not ready") {
                     info!(
                         "{}/{}: First peer not ready, banning it for now...",
-                        task.chan_id.to_string(),
-                        task.task_id
+                        task.chan_id, task.task_id
                     );
                     plugin.state().tempbans.lock().insert(
-                        route.first().unwrap().channel.to_string(),
+                        route.first().unwrap().channel,
                         SystemTime::now()
                             .duration_since(UNIX_EPOCH)
                             .unwrap()
@@ -301,7 +291,7 @@ pub async fn sling<'a>(
                             .unwrap()
                             .as_secs(),
                     }
-                    .write_to_file(*task.chan_id, &sling_dir)
+                    .write_to_file(task.chan_id, &sling_dir)
                     .await?;
                     continue;
                 } else {
@@ -314,7 +304,7 @@ pub async fn sling<'a>(
                     );
                     warn!(
                         "{}/{}: Unexpected sendpay error: {}",
-                        task.chan_id.to_string(),
+                        task.chan_id,
                         task.task_id,
                         e.to_string()
                     );
@@ -324,7 +314,7 @@ pub async fn sling<'a>(
         };
         info!(
             "{}/{}: Sent on route. Total: {}ms",
-            task.chan_id.to_string(),
+            task.chan_id,
             task.task_id,
             now.elapsed().as_millis().to_string()
         );
@@ -335,7 +325,7 @@ pub async fn sling<'a>(
             Ok(o) => {
                 info!(
                     "{}/{}: Rebalance SUCCESSFULL after {}s. Sent {}sats plus {}msats fee",
-                    task.chan_id.to_string(),
+                    task.chan_id,
                     task.task_id,
                     now.elapsed().as_secs().to_string(),
                     Amount::msat(&o.amount_msat.unwrap()) / 1_000,
@@ -355,7 +345,7 @@ pub async fn sling<'a>(
                     hops: (route.len() - 1) as u8,
                     completed_at: o.completed_at.unwrap() as u64,
                 }
-                .write_to_file(*task.chan_id, &sling_dir)
+                .write_to_file(task.chan_id, &sling_dir)
                 .await?;
                 success_route = Some(route);
                 None
@@ -386,9 +376,7 @@ pub async fn sling<'a>(
                             );
                             warn!(
                                 "{}/{}: No WaitsendpayErrorCode, instead: {}",
-                                task.chan_id.to_string(),
-                                task.task_id,
-                                message
+                                task.chan_id, task.task_id, message
                             );
                             break 'outer;
                         };
@@ -396,7 +384,7 @@ pub async fn sling<'a>(
                         if *ws_code == 200 {
                             warn!(
                                 "{}/{}: Rebalance WAITSENDPAY_TIMEOUT failure after {}s: {}",
-                                task.chan_id.to_string(),
+                                task.chan_id,
                                 task.task_id,
                                 now.elapsed().as_secs().to_string(),
                                 message,
@@ -404,9 +392,7 @@ pub async fn sling<'a>(
                             let temp_ban_route = &route[..route.len() - 1];
                             let mut source = temp_ban_route.first().unwrap().id;
                             for hop in temp_ban_route {
-                                if hop.channel.to_string()
-                                    == temp_ban_route.first().unwrap().channel.to_string()
-                                {
+                                if hop.channel == temp_ban_route.first().unwrap().channel {
                                     source = hop.id;
                                 } else {
                                     plugin
@@ -419,8 +405,7 @@ pub async fn sling<'a>(
                                         .unwrap()
                                         .iter_mut()
                                         .find_map(|x| {
-                                            if x.channel.short_channel_id.to_string()
-                                                == hop.channel.to_string()
+                                            if x.channel.short_channel_id == hop.channel
                                                 && x.channel.destination != mypubkey
                                                 && x.channel.source != mypubkey
                                             {
@@ -450,7 +435,7 @@ pub async fn sling<'a>(
                                     .unwrap()
                                     .as_secs(),
                             }
-                            .write_to_file(*task.chan_id, &sling_dir)
+                            .write_to_file(task.chan_id, &sling_dir)
                             .await?;
                             None
                         } else if let Some(d) = data {
@@ -459,12 +444,12 @@ pub async fn sling<'a>(
 
                             info!(
                                 "{}/{}: Rebalance failure after {}s: {} at node:{} chan:{}",
-                                task.chan_id.to_string(),
+                                task.chan_id,
                                 task.task_id,
                                 now.elapsed().as_secs().to_string(),
                                 message,
                                 ws_error.erring_node,
-                                ws_error.erring_channel.to_string(),
+                                ws_error.erring_channel,
                             );
 
                             match &ws_error.failcodename {
@@ -473,10 +458,7 @@ pub async fn sling<'a>(
                                 {
                                     warn!(
                                         "{}/{}: PAYMENT DETAILS ERROR:{:?} {:?}",
-                                        task.chan_id.to_string(),
-                                        task.task_id,
-                                        err,
-                                        route
+                                        task.chan_id, task.task_id, err, route
                                     );
                                     special_stop = true;
                                 }
@@ -494,7 +476,7 @@ pub async fn sling<'a>(
                                 hops: (route.len() - 1) as u8,
                                 created_at: ws_error.created_at,
                             }
-                            .write_to_file(*task.chan_id, &sling_dir)
+                            .write_to_file(task.chan_id, &sling_dir)
                             .await?;
                             if special_stop {
                                 channel_jobstate_update(
@@ -506,7 +488,7 @@ pub async fn sling<'a>(
                                 );
                                 warn!(
                                     "{}/{}: UNEXPECTED waitsendpay failure after {}s: {}",
-                                    task.chan_id.to_string(),
+                                    task.chan_id,
                                     task.task_id,
                                     now.elapsed().as_secs().to_string(),
                                     message
@@ -517,9 +499,7 @@ pub async fn sling<'a>(
                             if ws_error.erring_channel == route.last().unwrap().channel {
                                 warn!(
                                     "{}/{}: Last peer has a problem or just updated their fees? {}",
-                                    task.chan_id.to_string(),
-                                    task.task_id,
-                                    ws_error.failcodename
+                                    task.chan_id, task.task_id, ws_error.failcodename
                                 );
                                 if message.contains("Too many HTLCs") {
                                     my_sleep(3, plugin.state().job_state.clone(), task).await;
@@ -527,11 +507,7 @@ pub async fn sling<'a>(
                                     match job.sat_direction {
                                         SatDirection::Pull => {
                                             plugin.state().tempbans.lock().insert(
-                                                route
-                                                    .get(route.len() - 3)
-                                                    .unwrap()
-                                                    .channel
-                                                    .to_string(),
+                                                route.get(route.len() - 3).unwrap().channel,
                                                 SystemTime::now()
                                                     .duration_since(UNIX_EPOCH)
                                                     .unwrap()
@@ -540,7 +516,7 @@ pub async fn sling<'a>(
                                         }
                                         SatDirection::Push => {
                                             plugin.state().tempbans.lock().insert(
-                                                route.last().unwrap().channel.to_string(),
+                                                route.last().unwrap().channel,
                                                 SystemTime::now()
                                                     .duration_since(UNIX_EPOCH)
                                                     .unwrap()
@@ -552,7 +528,7 @@ pub async fn sling<'a>(
                             } else if ws_error.erring_channel == route.first().unwrap().channel {
                                 warn!(
                                     "{}/{}: First peer has a problem {}",
-                                    task.chan_id.to_string(),
+                                    task.chan_id,
                                     task.task_id,
                                     message.clone()
                                 );
@@ -562,7 +538,7 @@ pub async fn sling<'a>(
                                     match job.sat_direction {
                                         SatDirection::Pull => {
                                             plugin.state().tempbans.lock().insert(
-                                                route.first().unwrap().channel.to_string(),
+                                                route.first().unwrap().channel,
                                                 SystemTime::now()
                                                     .duration_since(UNIX_EPOCH)
                                                     .unwrap()
@@ -578,9 +554,7 @@ pub async fn sling<'a>(
                             } else {
                                 debug!(
                                     "{}/{}: Adjusting liquidity for {}.",
-                                    task.chan_id.to_string(),
-                                    task.task_id,
-                                    ws_error.erring_channel.to_string()
+                                    task.chan_id, task.task_id, ws_error.erring_channel
                                 );
                                 plugin
                                     .state()
@@ -618,7 +592,7 @@ pub async fn sling<'a>(
                             );
                             warn!(
                                 "{}/{}: UNEXPECTED waitsendpay failure: {} after: {}",
-                                task.chan_id.to_string(),
+                                task.chan_id,
                                 task.task_id,
                                 message,
                                 now.elapsed().as_millis().to_string()
@@ -636,7 +610,7 @@ pub async fn sling<'a>(
                         );
                         warn!(
                             "{}/{}: UNEXPECTED waitsendpay error type: {} after: {}",
-                            task.chan_id.to_string(),
+                            task.chan_id,
                             task.task_id,
                             e,
                             now.elapsed().as_millis().to_string()
@@ -677,13 +651,13 @@ pub async fn sling<'a>(
     Ok(())
 }
 
-async fn next_route<'a>(
+async fn next_route(
     plugin: &Plugin<PluginState>,
-    peer_channels: &BTreeMap<String, ListpeerchannelsChannels>,
+    peer_channels: &BTreeMap<ShortChannelId, ListpeerchannelsChannels>,
     job: &Job,
-    tempbans: &HashMap<String, u64>,
-    task: &Task<'a>,
-    keypair: &PublicKeyPair<'a>,
+    tempbans: &HashMap<ShortChannelId, u64>,
+    task: &Task,
+    keypair: &PublicKeyPair,
     success_route: &mut Option<Vec<SendpayRoute>>,
 ) -> Result<Vec<SendpayRoute>, Error> {
     let graph = plugin.state().graph.lock().await;
@@ -729,7 +703,7 @@ async fn next_route<'a>(
     }
     debug!(
         "{}/{}: Candidates: {}",
-        task.chan_id.to_string(),
+        task.chan_id,
         task.task_id,
         candidatelist
             .iter()
@@ -740,7 +714,7 @@ async fn next_route<'a>(
     if !tempbans.is_empty() {
         debug!(
             "{}/{}: Tempbans: {}",
-            task.chan_id.to_string(),
+            task.chan_id,
             task.task_id,
             plugin
                 .state()
@@ -748,7 +722,7 @@ async fn next_route<'a>(
                 .lock()
                 .clone()
                 .keys()
-                .map(|y| y.to_owned())
+                .map(|y| y.to_string())
                 .collect::<Vec<String>>()
                 .join(", ")
         );
@@ -756,8 +730,7 @@ async fn next_route<'a>(
     if candidatelist.is_empty() {
         info!(
             "{}/{}: No candidates found. Adjust out_ppm or wait for liquidity. Sleeping...",
-            task.chan_id.to_string(),
-            task.task_id
+            task.chan_id, task.task_id
         );
         channel_jobstate_update(
             plugin.state().job_state.clone(),
@@ -775,10 +748,10 @@ async fn next_route<'a>(
             if match job.sat_direction {
                 SatDirection::Pull => candidatelist
                     .iter()
-                    .any(|c| c.to_string() == prev_route.first().unwrap().channel.to_string()),
+                    .any(|c| c == &prev_route.first().unwrap().channel),
                 SatDirection::Push => candidatelist
                     .iter()
-                    .any(|c| c.to_string() == prev_route.last().unwrap().channel.to_string()),
+                    .any(|c| c == &prev_route.last().unwrap().channel),
             } {
                 route = prev_route.clone();
             } else {
@@ -790,13 +763,12 @@ async fn next_route<'a>(
     match success_route {
         Some(_) => (),
         None => {
-            let slingchan_inc = match graph.get_channel(keypair.other_pubkey, task.chan_id) {
+            let slingchan_inc = match graph.get_channel(&keypair.other_pubkey, &task.chan_id) {
                 Ok(in_chan) => in_chan,
                 Err(_) => {
                     warn!(
                         "{}/{}: channel not found in graph!",
-                        task.chan_id.to_string(),
-                        task.task_id
+                        task.chan_id, task.task_id
                     );
                     channel_jobstate_update(
                         plugin.state().job_state.clone(),
@@ -808,13 +780,12 @@ async fn next_route<'a>(
                     return Err(anyhow!("channel not found in graph"));
                 }
             };
-            let slingchan_out = match graph.get_channel(keypair.my_pubkey, task.chan_id) {
+            let slingchan_out = match graph.get_channel(&keypair.my_pubkey, &task.chan_id) {
                 Ok(out_chan) => out_chan,
                 Err(_) => {
                     warn!(
                         "{}/{}: channel not found in graph!",
-                        task.chan_id.to_string(),
-                        task.task_id
+                        task.chan_id, task.task_id
                     );
                     channel_jobstate_update(
                         plugin.state().job_state.clone(),
@@ -832,8 +803,8 @@ async fn next_route<'a>(
             let excepts = plugin.state().excepts_chans.lock().clone();
             let excepts_peers = plugin.state().excepts_peers.lock().clone();
             for except in &excepts {
-                pull_jobs.insert(except.to_string());
-                push_jobs.insert(except.to_string());
+                pull_jobs.insert(*except);
+                push_jobs.insert(*except);
             }
             let last_delay = match config.cltv_delta.1 {
                 Some(c) => max(144, c),
@@ -846,13 +817,13 @@ async fn next_route<'a>(
             match job.sat_direction {
                 SatDirection::Pull => {
                     route = dijkstra(
-                        keypair.my_pubkey,
+                        &keypair.my_pubkey,
                         &graph,
-                        keypair.my_pubkey,
-                        keypair.other_pubkey,
+                        &keypair.my_pubkey,
+                        &keypair.other_pubkey,
                         &DijkstraNode {
                             score: 0,
-                            destination: *keypair.my_pubkey,
+                            destination: keypair.my_pubkey,
                             channel: slingchan_inc.channel,
                             hops: 0,
                         },
@@ -860,8 +831,8 @@ async fn next_route<'a>(
                         &candidatelist,
                         max_hops,
                         &ExcludeGraph {
-                            exclude_chans: &pull_jobs,
-                            exclude_peers: &excepts_peers,
+                            exclude_chans: pull_jobs,
+                            exclude_peers: excepts_peers,
                         },
                         last_delay,
                         tempbans,
@@ -869,13 +840,13 @@ async fn next_route<'a>(
                 }
                 SatDirection::Push => {
                     route = dijkstra(
-                        keypair.my_pubkey,
+                        &keypair.my_pubkey,
                         &graph,
-                        keypair.other_pubkey,
-                        keypair.my_pubkey,
+                        &keypair.other_pubkey,
+                        &keypair.my_pubkey,
                         &DijkstraNode {
                             score: 0,
-                            destination: *keypair.other_pubkey,
+                            destination: keypair.other_pubkey,
                             channel: slingchan_out.channel,
                             hops: 0,
                         },
@@ -883,8 +854,8 @@ async fn next_route<'a>(
                         &candidatelist,
                         max_hops,
                         &ExcludeGraph {
-                            exclude_chans: &push_jobs,
-                            exclude_peers: &excepts_peers,
+                            exclude_chans: push_jobs,
+                            exclude_peers: excepts_peers,
                         },
                         last_delay,
                         tempbans,
@@ -896,21 +867,21 @@ async fn next_route<'a>(
     Ok(route)
 }
 
-async fn health_check<'a>(
+async fn health_check(
     plugin: Plugin<PluginState>,
-    peer_channels: &BTreeMap<String, ListpeerchannelsChannels>,
-    task: &Task<'a>,
+    peer_channels: &BTreeMap<ShortChannelId, ListpeerchannelsChannels>,
+    task: &Task,
     job: &Job,
     other_peer: PublicKey,
-    tempbans: &HashMap<String, u64>,
+    tempbans: &HashMap<ShortChannelId, u64>,
 ) -> Option<bool> {
     let config = plugin.state().config.lock().clone();
     let job_states = plugin.state().job_state.clone();
     let our_listpeers_channel =
-        get_normal_channel_from_listpeerchannels(peer_channels, &task.chan_id.to_string());
+        get_normal_channel_from_listpeerchannels(peer_channels, &task.chan_id);
     if let Some(channel) = our_listpeers_channel {
         if is_channel_normal(&channel) {
-            if job.is_balanced(&channel, task.chan_id)
+            if job.is_balanced(&channel, &task.chan_id)
                 || match job.sat_direction {
                     SatDirection::Pull => {
                         Amount::msat(&channel.receivable_msat.unwrap()) < job.amount_msat
@@ -922,8 +893,7 @@ async fn health_check<'a>(
             {
                 info!(
                     "{}/{}: already balanced. Taking a break...",
-                    task.chan_id.to_string(),
-                    task.task_id
+                    task.chan_id, task.task_id
                 );
                 channel_jobstate_update(
                     job_states.clone(),
@@ -937,9 +907,7 @@ async fn health_check<'a>(
             } else if get_total_htlc_count(&channel) > config.max_htlc_count.1 {
                 info!(
                     "{}/{}: already more than {} pending htlcs. Taking a break...",
-                    task.chan_id.to_string(),
-                    task.task_id,
-                    config.max_htlc_count.1
+                    task.chan_id, task.task_id, config.max_htlc_count.1
                 );
                 channel_jobstate_update(
                     job_states.clone(),
@@ -959,8 +927,7 @@ async fn health_check<'a>(
                         if !p.peer_connected.unwrap() {
                             info!(
                                 "{}/{}: not connected. Taking a break...",
-                                task.chan_id.to_string(),
-                                task.task_id
+                                task.chan_id, task.task_id
                             );
                             channel_jobstate_update(
                                 job_states.clone(),
@@ -974,12 +941,11 @@ async fn health_check<'a>(
                         } else if match job.sat_direction {
                             SatDirection::Pull => false,
                             SatDirection::Push => true,
-                        } && tempbans.contains_key(&task.chan_id.to_string())
+                        } && tempbans.contains_key(&task.chan_id)
                         {
                             info!(
                                 "{}/{}: First peer not ready. Taking a break...",
-                                task.chan_id.to_string(),
-                                task.task_id
+                                task.chan_id, task.task_id
                             );
                             channel_jobstate_update(
                                 job_states.clone(),
@@ -1004,8 +970,7 @@ async fn health_check<'a>(
                         );
                         warn!(
                             "{}/{}: peer not found. Stopping job.",
-                            task.chan_id.to_string(),
-                            task.task_id
+                            task.chan_id, task.task_id
                         );
                         Some(false)
                     }
@@ -1014,8 +979,7 @@ async fn health_check<'a>(
         } else {
             warn!(
                 "{}/{}: not in CHANNELD_NORMAL state. Stopping Job.",
-                task.chan_id.to_string(),
-                task.task_id
+                task.chan_id, task.task_id
             );
             channel_jobstate_update(
                 job_states.clone(),
@@ -1029,8 +993,7 @@ async fn health_check<'a>(
     } else {
         warn!(
             "{}/{}: not found. Stopping Job.",
-            task.chan_id.to_string(),
-            task.task_id
+            task.chan_id, task.task_id
         );
         channel_jobstate_update(
             job_states.clone(),
@@ -1044,10 +1007,10 @@ async fn health_check<'a>(
 }
 
 fn build_candidatelist(
-    peer_channels: &BTreeMap<String, ListpeerchannelsChannels>,
+    peer_channels: &BTreeMap<ShortChannelId, ListpeerchannelsChannels>,
     job: &Job,
     graph: &LnGraph,
-    tempbans: &HashMap<String, u64>,
+    tempbans: &HashMap<ShortChannelId, u64>,
     config: &Config,
     custom_candidates: Option<&Vec<ShortChannelId>>,
     blockheight: u32,
@@ -1122,7 +1085,7 @@ fn build_candidatelist(
                             }
                             && job.maxppm as u64 >= chan_in_ppm
                     }
-                } && !tempbans.contains_key(&scid.to_string())
+                } && !tempbans.contains_key(&scid)
                     && get_total_htlc_count(channel) <= config.max_htlc_count.1
                 {
                     candidatelist.push(scid);

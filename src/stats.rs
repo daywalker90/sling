@@ -46,17 +46,17 @@ pub async fn slingstats(
                 refresh_joblists(plugin.clone()).await?;
                 let pull_jobs = plugin.state().pull_jobs.lock().clone();
                 let push_jobs = plugin.state().push_jobs.lock().clone();
-                let mut all_jobs: Vec<String> =
+                let mut all_jobs: Vec<ShortChannelId> =
                     pull_jobs.into_iter().chain(push_jobs.into_iter()).collect();
 
                 let scid_peer_map = get_all_normal_channels_from_listpeerchannels(&peer_channels);
 
-                let mut normal_channels_alias: HashMap<String, String> = HashMap::new();
+                let mut normal_channels_alias: HashMap<ShortChannelId, String> = HashMap::new();
                 {
                     let alias_map = plugin.state().alias_peer_map.lock();
                     for (scid, peer) in &scid_peer_map {
                         normal_channels_alias.insert(
-                            scid.clone(),
+                            *scid,
                             alias_map
                                 .get(peer)
                                 .unwrap_or(&"ALIAS_NOT_FOUND".to_string())
@@ -66,24 +66,14 @@ pub async fn slingstats(
                 }
                 all_jobs.retain(|c| normal_channels_alias.contains_key(c));
                 for scid in &all_jobs {
-                    match SuccessReb::read_from_file(
-                        &sling_dir,
-                        ShortChannelId::from_str(&scid.clone())?,
-                    )
-                    .await
-                    {
+                    match SuccessReb::read_from_file(&sling_dir, scid).await {
                         Ok(o) => {
                             successes.insert(scid, o);
                         }
                         Err(e) => debug!("probably no success stats yet: {:?}", e),
                     };
 
-                    match FailureReb::read_from_file(
-                        &sling_dir,
-                        ShortChannelId::from_str(&scid.clone())?,
-                    )
-                    .await
-                    {
+                    match FailureReb::read_from_file(&sling_dir, scid).await {
                         Ok(o) => {
                             failures.insert(scid, o);
                         }
@@ -160,8 +150,8 @@ pub async fn slingstats(
                             .get(&job.clone())
                             .unwrap_or(&NO_ALIAS_SET.to_string())
                             .clone(),
-                        scid: job.clone(),
-                        pubkey: scid_peer_map.get(&job.clone()).unwrap().to_string(),
+                        scid: *job,
+                        pubkey: *scid_peer_map.get(&job.clone()).unwrap(),
                         status: jobstate.join("\n"),
                         rebamount: (total_amount_msat / 1_000).to_formatted_string(&Locale::en),
                         w_feeppm: weighted_fee_ppm,
@@ -182,14 +172,14 @@ pub async fn slingstats(
                 match a.first().unwrap() {
                     serde_json::Value::String(i) => {
                         let scid = ShortChannelId::from_str(i)?;
-                        let successes = match SuccessReb::read_from_file(&sling_dir, scid).await {
+                        let successes = match SuccessReb::read_from_file(&sling_dir, &scid).await {
                             Ok(o) => o,
                             Err(e) => {
                                 info!("Could not get any successes: {}", e);
                                 Vec::new()
                             }
                         };
-                        let failures = match FailureReb::read_from_file(&sling_dir, scid).await {
+                        let failures = match FailureReb::read_from_file(&sling_dir, &scid).await {
                             Ok(o) => o,
                             Err(e) => {
                                 info!("Could not get any failures: {}", e);
@@ -227,7 +217,7 @@ fn success_stats(
     successes: Vec<SuccessReb>,
     time_window: u64,
     alias_map: &HashMap<PublicKey, String>,
-    peer_channels: &BTreeMap<String, ListpeerchannelsChannels>,
+    peer_channels: &BTreeMap<ShortChannelId, ListpeerchannelsChannels>,
 ) -> Option<SuccessesInTimeWindow> {
     if successes.is_empty() {
         return None;
@@ -249,7 +239,7 @@ fn success_stats(
             total_amount_msat += success_reb.amount_msat;
             weighted_fee_ppm += success_reb.fee_ppm as u64 * success_reb.amount_msat;
             *channel_partner_counts
-                .entry(success_reb.channel_partner.to_string())
+                .entry(success_reb.channel_partner)
                 .or_insert(0) += success_reb.amount_msat / 1_000;
             *hop_counts.entry(success_reb.hops).or_insert(0) += 1;
             most_recent_completed_at =
@@ -295,7 +285,7 @@ fn success_stats(
         top_5_channel_partners: top_5_channel_partners
             .iter()
             .map(|(partner, count)| ChannelPartnerStats {
-                scid: partner.clone(),
+                scid: *partner,
                 alias: get_stats_alias(peer_channels, partner, alias_map),
                 sats: *count,
             })
@@ -311,7 +301,7 @@ fn failure_stats(
     failures: Vec<FailureReb>,
     time_window: u64,
     alias_map: &HashMap<PublicKey, String>,
-    peer_channels: &BTreeMap<String, ListpeerchannelsChannels>,
+    peer_channels: &BTreeMap<ShortChannelId, ListpeerchannelsChannels>,
 ) -> Option<FailuresInTimeWindow> {
     if failures.is_empty() {
         return None;
@@ -332,14 +322,14 @@ fn failure_stats(
         if fail_reb.created_at >= now - time_window * 24 * 60 * 60 {
             total_amount_msat += fail_reb.amount_msat;
             *channel_partner_counts
-                .entry(fail_reb.channel_partner.to_string())
+                .entry(fail_reb.channel_partner)
                 .or_insert(0) += fail_reb.amount_msat / 1_000;
             *hop_counts.entry(fail_reb.hops).or_insert(0) += 1;
             *reason_counts
                 .entry(fail_reb.failure_reason)
                 .or_insert(0_u32) += 1;
             *fail_node_counts
-                .entry(fail_reb.failure_node.to_string())
+                .entry(fail_reb.failure_node)
                 .or_insert(0_u32) += 1;
             most_recent_created_at = std::cmp::max(most_recent_created_at, fail_reb.created_at);
             total_transactions += 1_u64;
@@ -394,21 +384,18 @@ fn failure_stats(
         top_5_fail_nodes: top_5_fail_nodes
             .iter()
             .map(|(node, count)| PeerPartnerStats {
-                peer_id: node.clone(),
-                alias: match PublicKey::from_str(node) {
-                    Ok(pk) => alias_map
-                        .get(&pk)
-                        .unwrap_or(&"NOT_FOUND".to_string())
-                        .clone(),
-                    Err(_e) => "INVALID_PUBKEY".to_string(),
-                },
+                peer_id: *node,
+                alias: alias_map
+                    .get(node)
+                    .unwrap_or(&"NOT_FOUND".to_string())
+                    .clone(),
                 count: *count,
             })
             .collect::<Vec<_>>(),
         top_5_channel_partners: top_5_channel_partners
             .iter()
             .map(|(partner, count)| ChannelPartnerStats {
-                scid: partner.clone(),
+                scid: *partner,
                 alias: get_stats_alias(peer_channels, partner, alias_map),
                 sats: *count,
             })
@@ -422,8 +409,8 @@ fn failure_stats(
 }
 
 fn get_stats_alias(
-    peer_channels: &BTreeMap<String, ListpeerchannelsChannels>,
-    partner: &String,
+    peer_channels: &BTreeMap<ShortChannelId, ListpeerchannelsChannels>,
+    partner: &ShortChannelId,
     alias_map: &HashMap<PublicKey, String>,
 ) -> String {
     if let Some(chan) = &peer_channels.get(partner) {

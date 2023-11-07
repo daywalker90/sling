@@ -1,7 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap},
     path::Path,
-    str::FromStr,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -72,7 +71,7 @@ pub async fn refresh_listpeerchannels(plugin: &Plugin<PluginState>) -> Result<()
         .channels
         .ok_or(anyhow!("refresh_listpeerchannels: no channels found!"))?
         .into_iter()
-        .filter_map(|channel| channel.short_channel_id.map(|id| (id.to_string(), channel)))
+        .filter_map(|channel| channel.short_channel_id.map(|id| (id, channel)))
         .collect();
     debug!(
         "Peerchannels refreshed in {}ms",
@@ -212,7 +211,7 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
             refresh_joblists(plugin.clone()).await?;
             let pull_jobs = plugin.state().pull_jobs.lock().clone();
             let push_jobs = plugin.state().push_jobs.lock().clone();
-            let mut all_jobs: Vec<String> =
+            let mut all_jobs: Vec<ShortChannelId> =
                 pull_jobs.into_iter().chain(push_jobs.into_iter()).collect();
 
             let scid_peer_map;
@@ -223,24 +222,14 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
 
             all_jobs.retain(|c| scid_peer_map.contains_key(c));
             for scid in &all_jobs {
-                match SuccessReb::read_from_file(
-                    &sling_dir,
-                    ShortChannelId::from_str(&scid.clone())?,
-                )
-                .await
-                {
+                match SuccessReb::read_from_file(&sling_dir, scid).await {
                     Ok(o) => {
                         successes.insert(scid, o);
                     }
                     Err(e) => debug!("{}: probably no success stats yet: {:?}", scid, e),
                 };
 
-                match FailureReb::read_from_file(
-                    &sling_dir,
-                    ShortChannelId::from_str(&scid.clone())?,
-                )
-                .await
-                {
+                match FailureReb::read_from_file(&sling_dir, scid).await {
                     Ok(o) => {
                         failures.insert(scid, o);
                     }

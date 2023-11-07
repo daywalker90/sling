@@ -30,16 +30,16 @@ pub const EXCEPTS_PEERS_FILE_NAME: &str = "excepts_peers.json";
 #[derive(Clone)]
 pub struct PluginState {
     pub config: Arc<Mutex<Config>>,
-    pub peer_channels: Arc<tokio::sync::Mutex<BTreeMap<String, ListpeerchannelsChannels>>>,
+    pub peer_channels: Arc<tokio::sync::Mutex<BTreeMap<ShortChannelId, ListpeerchannelsChannels>>>,
     pub graph: Arc<tokio::sync::Mutex<LnGraph>>,
     pub pays: Arc<RwLock<HashMap<String, String>>>,
     pub alias_peer_map: Arc<Mutex<HashMap<PublicKey, String>>>,
-    pub pull_jobs: Arc<Mutex<HashSet<String>>>,
-    pub push_jobs: Arc<Mutex<HashSet<String>>>,
-    pub excepts_chans: Arc<Mutex<Vec<ShortChannelId>>>,
-    pub excepts_peers: Arc<Mutex<Vec<PublicKey>>>,
-    pub tempbans: Arc<Mutex<HashMap<String, u64>>>,
-    pub job_state: Arc<Mutex<HashMap<String, Vec<JobState>>>>,
+    pub pull_jobs: Arc<Mutex<HashSet<ShortChannelId>>>,
+    pub push_jobs: Arc<Mutex<HashSet<ShortChannelId>>>,
+    pub excepts_chans: Arc<Mutex<HashSet<ShortChannelId>>>,
+    pub excepts_peers: Arc<Mutex<HashSet<PublicKey>>>,
+    pub tempbans: Arc<Mutex<HashMap<ShortChannelId, u64>>>,
+    pub job_state: Arc<Mutex<HashMap<ShortChannelId, Vec<JobState>>>>,
     pub blockheight: Arc<Mutex<u32>>,
 }
 impl PluginState {
@@ -52,8 +52,8 @@ impl PluginState {
             alias_peer_map: Arc::new(Mutex::new(HashMap::new())),
             pull_jobs: Arc::new(Mutex::new(HashSet::new())),
             push_jobs: Arc::new(Mutex::new(HashSet::new())),
-            excepts_chans: Arc::new(Mutex::new(Vec::new())),
-            excepts_peers: Arc::new(Mutex::new(Vec::new())),
+            excepts_chans: Arc::new(Mutex::new(HashSet::new())),
+            excepts_peers: Arc::new(Mutex::new(HashSet::new())),
             tempbans: Arc::new(Mutex::new(HashMap::new())),
             job_state: Arc::new(Mutex::new(HashMap::new())),
             blockheight: Arc::new(Mutex::new(0)),
@@ -62,8 +62,8 @@ impl PluginState {
 }
 
 #[derive(Clone, Debug)]
-pub struct Task<'a> {
-    pub chan_id: &'a ShortChannelId,
+pub struct Task {
+    pub chan_id: ShortChannelId,
     pub task_id: u8,
 }
 
@@ -234,8 +234,7 @@ impl PartialEq for DijkstraNode {
             && self.hops == other.hops
             && self.channel.source == other.channel.source
             && self.channel.destination == other.channel.destination
-            && self.channel.short_channel_id.to_string()
-                == other.channel.short_channel_id.to_string()
+            && self.channel.short_channel_id == other.channel.short_channel_id
             && self.destination == other.destination
     }
 }
@@ -260,15 +259,15 @@ impl DirectedChannel {
 }
 
 #[derive(Clone, Debug)]
-pub struct PublicKeyPair<'a> {
-    pub my_pubkey: &'a PublicKey,
-    pub other_pubkey: &'a PublicKey,
+pub struct PublicKeyPair {
+    pub my_pubkey: PublicKey,
+    pub other_pubkey: PublicKey,
 }
 
 #[derive(Clone, Debug)]
-pub struct ExcludeGraph<'a> {
-    pub exclude_chans: &'a HashSet<String>,
-    pub exclude_peers: &'a [PublicKey],
+pub struct ExcludeGraph {
+    pub exclude_chans: HashSet<ShortChannelId>,
+    pub exclude_peers: HashSet<PublicKey>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -284,18 +283,16 @@ impl LnGraph {
     pub fn update(&mut self, new_graph: LnGraph) {
         for (new_node, new_channels) in new_graph.graph.iter() {
             let old_channels = self.graph.entry(*new_node).or_default();
-            let new_short_channel_ids: HashSet<String> = new_channels
+            let new_short_channel_ids: HashSet<ShortChannelId> = new_channels
                 .iter()
-                .map(|c| c.channel.short_channel_id.to_string())
+                .map(|c| c.channel.short_channel_id)
                 .collect();
-            old_channels.retain(|e| {
-                new_short_channel_ids.contains(&e.channel.short_channel_id.to_string())
-            });
+            old_channels.retain(|e| new_short_channel_ids.contains(&e.channel.short_channel_id));
             for new_channel in new_channels {
                 let new_short_channel_id = &new_channel.channel.short_channel_id;
-                let old_channel = old_channels.iter_mut().find(|e| {
-                    e.channel.short_channel_id.to_string() == new_short_channel_id.to_string()
-                });
+                let old_channel = old_channels
+                    .iter_mut()
+                    .find(|e| e.channel.short_channel_id == *new_short_channel_id);
                 match old_channel {
                     Some(old_channel) => {
                         if (old_channel.channel.htlc_maximum_msat.is_some()
@@ -351,20 +348,17 @@ impl LnGraph {
             Some(e) => {
                 let result = e
                     .iter()
-                    .filter(|&i| i.channel.short_channel_id.to_string() == channel.to_string())
+                    .filter(|&i| i.channel.short_channel_id == *channel)
                     .collect::<Vec<&DirectedChannel>>();
                 if result.len() != 1 {
-                    Err(anyhow!(
-                        "channel {} not found in graph",
-                        channel.to_string()
-                    ))
+                    Err(anyhow!("channel {} not found in graph", channel))
                 } else {
                     Ok(result[0].clone())
                 }
             }
             None => Err(anyhow!(
                 "could not find channel in cached graph: {}",
-                channel.to_string()
+                channel
             )),
         }
     }
@@ -375,9 +369,9 @@ impl LnGraph {
         exclude_graph: &ExcludeGraph,
         amount: &u64,
         candidatelist: &[ShortChannelId],
-        tempbans: &HashMap<String, u64>,
+        tempbans: &HashMap<ShortChannelId, u64>,
     ) -> Vec<&DirectedChannel> {
-        match self.graph.get(keypair.other_pubkey) {
+        match self.graph.get(&keypair.other_pubkey) {
             Some(e) => {
                 e.iter()
                     .filter(|&i| {
@@ -387,9 +381,10 @@ impl LnGraph {
                         //     i.liquidity,
                         //     amount
                         // );
-                        let chan_str = i.channel.short_channel_id.to_string();
-                        !exclude_graph.exclude_chans.contains(&chan_str)
-                            && !tempbans.contains_key(&chan_str)
+                        !exclude_graph
+                            .exclude_chans
+                            .contains(&i.channel.short_channel_id)
+                            && !tempbans.contains_key(&i.channel.short_channel_id)
                             && i.liquidity >= *amount
                             && Amount::msat(&i.channel.htlc_minimum_msat) <= *amount
                             && Amount::msat(
@@ -397,10 +392,12 @@ impl LnGraph {
                             ) >= *amount
                             && !exclude_graph.exclude_peers.contains(&i.channel.source)
                             && !exclude_graph.exclude_peers.contains(&i.channel.destination)
-                            && if i.channel.source == *keypair.my_pubkey
-                                || i.channel.destination == *keypair.my_pubkey
+                            && if i.channel.source == keypair.my_pubkey
+                                || i.channel.destination == keypair.my_pubkey
                             {
-                                candidatelist.iter().any(|c| c.to_string() == chan_str)
+                                candidatelist
+                                    .iter()
+                                    .any(|c| c == &i.channel.short_channel_id)
                             } else {
                                 true
                             }
@@ -439,7 +436,7 @@ impl SuccessReb {
 
     pub async fn read_from_file(
         sling_dir: &Path,
-        chan_id: ShortChannelId,
+        chan_id: &ShortChannelId,
     ) -> Result<Vec<SuccessReb>, Error> {
         let contents =
             tokio::fs::read_to_string(sling_dir.join(chan_id.to_string() + SUCCESSES_SUFFIX))
@@ -479,7 +476,7 @@ impl FailureReb {
 
     pub async fn read_from_file(
         sling_dir: &Path,
-        chan_id: ShortChannelId,
+        chan_id: &ShortChannelId,
     ) -> Result<Vec<FailureReb>, Error> {
         let contents =
             tokio::fs::read_to_string(sling_dir.join(chan_id.to_string() + FAILURES_SUFFIX))
@@ -495,8 +492,8 @@ impl FailureReb {
 #[derive(Debug, Tabled)]
 pub struct StatSummary {
     pub alias: String,
-    pub scid: String,
-    pub pubkey: String,
+    pub scid: ShortChannelId,
+    pub pubkey: PublicKey,
     pub status: String,
     pub rebamount: String,
     pub w_feeppm: u64,

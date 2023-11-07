@@ -9,6 +9,7 @@ use parking_lot::Mutex;
 use rand::Rng;
 use sling::SatDirection;
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 use std::io;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -198,14 +199,14 @@ pub async fn slingjob(
                 paralleljobs,
             };
             let our_listpeers_channel =
-                get_normal_channel_from_listpeerchannels(&peer_channels, &chan_id.to_string());
+                get_normal_channel_from_listpeerchannels(&peer_channels, &chan_id);
             if let Some(_channel) = our_listpeers_channel {
-                write_job(p.clone(), sling_dir, chan_id.to_string(), Some(job), false).await?;
+                write_job(p.clone(), sling_dir, chan_id, Some(job), false).await?;
                 Ok(json!({"result":"success"}))
             } else {
                 Err(anyhow!(
                     "Could not find channel or not in CHANNELD_NORMAL state: {}",
-                    chan_id.to_string()
+                    chan_id
                 ))
             }
         }
@@ -219,7 +220,7 @@ pub async fn slingjobsettings(
 ) -> Result<serde_json::Value, Error> {
     let sling_dir = Path::new(&p.configuration().lightning_dir).join(PLUGIN_NAME);
     let jobs = read_jobs(&sling_dir, &p).await?;
-    let mut json_jobs: BTreeMap<String, Job> = BTreeMap::new();
+    let mut json_jobs: BTreeMap<ShortChannelId, Job> = BTreeMap::new();
     match args {
         serde_json::Value::Array(a) => {
             if a.len() > 1 {
@@ -231,13 +232,14 @@ pub async fn slingjobsettings(
                     json_jobs.insert(id, job);
                 }
             } else {
-                let scid = a
+                let scid_str = a
                     .first()
                     .unwrap()
                     .as_str()
                     .ok_or(anyhow!("invalid input, not a string"))?;
-                let job = jobs.get(scid).ok_or(anyhow!("channel not found"))?;
-                json_jobs.insert(scid.to_string(), job.clone());
+                let scid = ShortChannelId::from_str(scid_str)?;
+                let job = jobs.get(&scid).ok_or(anyhow!("channel not found"))?;
+                json_jobs.insert(scid, job.clone());
             }
         }
         _ => {
@@ -270,8 +272,8 @@ pub async fn refresh_joblists(p: Plugin<PluginState>) -> Result<(), Error> {
 
     for (chan_id, job) in jobs {
         match job.sat_direction {
-            SatDirection::Pull => pull_jobs.insert(chan_id.to_string()),
-            SatDirection::Push => push_jobs.insert(chan_id.to_string()),
+            SatDirection::Pull => pull_jobs.insert(chan_id),
+            SatDirection::Push => push_jobs.insert(chan_id),
         };
     }
     debug!(
@@ -305,7 +307,8 @@ pub async fn slingdeletejob(
                             info!("Deleted all jobs");
                         }
                         _ => {
-                            write_job(p, sling_dir, i.clone(), None, true).await?;
+                            let scid = ShortChannelId::from_str(i)?;
+                            write_job(p, sling_dir, scid, None, true).await?;
                         }
                     },
                     _ => return Err(anyhow!("invalid string for deleting job(s)")),
@@ -328,11 +331,11 @@ pub async fn slingversion(
 pub async fn read_jobs(
     sling_dir: &PathBuf,
     plugin: &Plugin<PluginState>,
-) -> Result<BTreeMap<String, Job>, Error> {
+) -> Result<BTreeMap<ShortChannelId, Job>, Error> {
     let peer_channels = plugin.state().peer_channels.lock().await;
     let jobfile = sling_dir.join(JOB_FILE_NAME);
     let jobfilecontent = fs::read_to_string(jobfile.clone()).await;
-    let mut jobs: BTreeMap<String, Job>;
+    let mut jobs: BTreeMap<ShortChannelId, Job>;
 
     create_sling_dir(sling_dir).await?;
     match jobfilecontent {
@@ -348,7 +351,7 @@ pub async fn read_jobs(
         }
     };
     let channels = get_all_normal_channels_from_listpeerchannels(&peer_channels);
-    let channels = channels.keys().collect::<Vec<&String>>();
+    let channels = channels.keys().collect::<Vec<&ShortChannelId>>();
 
     jobs.retain(|c, _j| channels.contains(&c));
     Ok(jobs)
@@ -357,10 +360,10 @@ pub async fn read_jobs(
 async fn write_job(
     p: Plugin<PluginState>,
     sling_dir: PathBuf,
-    chan_id: String,
+    chan_id: ShortChannelId,
     job: Option<Job>,
     remove: bool,
-) -> Result<BTreeMap<String, Job>, Error> {
+) -> Result<BTreeMap<ShortChannelId, Job>, Error> {
     let mut jobs = read_jobs(&sling_dir, &p).await?;
     let job_change;
     let my_job;
@@ -374,7 +377,7 @@ async fn write_job(
     {
         slingstop(
             p.clone(),
-            serde_json::Value::Array(vec![serde_json::Value::String(chan_id.clone())]),
+            serde_json::Value::Array(vec![serde_json::Value::String(chan_id.to_string())]),
         )
         .await?;
     }
@@ -416,11 +419,11 @@ async fn write_job(
         jobs.insert(chan_id, my_job);
     }
     let peer_channels = p.state().peer_channels.lock().await.clone();
-    let mut jobs_to_remove = Vec::new();
+    let mut jobs_to_remove = HashSet::new();
     if !peer_channels.is_empty() {
         for chan_id in jobs.keys() {
             if get_normal_channel_from_listpeerchannels(&peer_channels, chan_id).is_none() {
-                jobs_to_remove.push(chan_id.clone());
+                jobs_to_remove.insert(*chan_id);
             }
         }
     }
@@ -455,42 +458,37 @@ pub async fn slingexceptchan(
                         let mut excepts = plugin.state().excepts_chans.lock();
                         let mut contains = false;
                         for chan_id in excepts.clone() {
-                            if chan_id.to_string() == scid.to_string() {
+                            if chan_id == scid {
                                 contains = true;
                             }
                         }
                         match i {
                             opt if opt.eq("add") => {
                                 if contains {
-                                    return Err(anyhow!(
-                                        "{} is already in excepts",
-                                        scid.to_string()
-                                    ));
+                                    return Err(anyhow!("{} is already in excepts", scid));
                                 } else {
                                     let pull_jobs = plugin.state().pull_jobs.lock().clone();
                                     let push_jobs = plugin.state().push_jobs.lock().clone();
-                                    if peer_channels.get(&scid.to_string()).is_some() {
-                                        if pull_jobs.contains(&scid.to_string())
-                                            || push_jobs.contains(&scid.to_string())
-                                        {
+                                    if peer_channels.get(&scid).is_some() {
+                                        if pull_jobs.contains(&scid) || push_jobs.contains(&scid) {
                                             return Err(anyhow!(
                                         "this channel has a job already and can't be an except too"
                                     ));
                                         } else {
-                                            excepts.push(scid);
+                                            excepts.insert(scid);
                                         }
                                     } else {
-                                        excepts.push(scid);
+                                        excepts.insert(scid);
                                     }
                                 }
                             }
                             opt if opt.eq("remove") => {
                                 if contains {
-                                    excepts.retain(|&x| x.to_string() != scid.to_string());
+                                    excepts.retain(|&x| x != scid);
                                 } else {
                                     return Err(anyhow!(
                                         "short_channel_id {} not in excepts, nothing to remove",
-                                        scid.to_string()
+                                        scid
                                     ));
                                 }
                             }
@@ -564,11 +562,11 @@ pub async fn slingexceptpeer(
             match command {
                 opt if opt.eq("add") => {
                     if contains {
-                        return Err(anyhow!("{} is already in excepts", pubkey.to_string()));
+                        return Err(anyhow!("{} is already in excepts", pubkey));
                     } else {
                         let pull_jobs = plugin.state().pull_jobs.lock().clone();
                         let push_jobs = plugin.state().push_jobs.lock().clone();
-                        let all_jobs: Vec<String> =
+                        let all_jobs: Vec<ShortChannelId> =
                             pull_jobs.into_iter().chain(push_jobs.into_iter()).collect();
                         let mut all_job_peers: Vec<PublicKey> = vec![];
                         debug!("{:?}", all_jobs);
@@ -583,7 +581,7 @@ pub async fn slingexceptpeer(
                                 "this peer has a job already and can't be an except too"
                             ));
                         } else {
-                            excepts_peers.push(pubkey);
+                            excepts_peers.insert(pubkey);
                         }
                     }
                 }
@@ -593,7 +591,7 @@ pub async fn slingexceptpeer(
                     } else {
                         return Err(anyhow!(
                             "node_id {} not in excepts, nothing to remove",
-                            pubkey.to_string()
+                            pubkey
                         ));
                     }
                 }
@@ -628,7 +626,7 @@ pub async fn slingexceptpeer(
 }
 
 async fn write_excepts<T: ToString>(
-    excepts: Vec<T>,
+    excepts: HashSet<T>,
     file: &str,
     sling_dir: &Path,
 ) -> Result<(), Error> {
@@ -646,15 +644,15 @@ async fn write_excepts<T: ToString>(
     Ok(())
 }
 
-pub async fn read_excepts<T: FromStr>(
-    excepts_arc: Arc<Mutex<Vec<T>>>,
+pub async fn read_excepts<T: FromStr + std::hash::Hash + Eq>(
+    excepts_arc: Arc<Mutex<HashSet<T>>>,
     file: &str,
     sling_dir: &PathBuf,
 ) -> Result<(), Error> {
     let exceptsfile = sling_dir.join(file);
     let exceptsfilecontent = fs::read_to_string(exceptsfile.clone()).await;
     let excepts_tostring: Vec<String>;
-    let mut excepts: Vec<T> = Vec::new();
+    let mut excepts: HashSet<T> = HashSet::new();
 
     create_sling_dir(sling_dir).await?;
     match exceptsfilecontent {
@@ -672,7 +670,9 @@ pub async fn read_excepts<T: FromStr>(
 
     for except in excepts_tostring {
         match T::from_str(&except) {
-            Ok(id) => excepts.push(id),
+            Ok(id) => {
+                excepts.insert(id);
+            }
             Err(_e) => warn!(
                 "excepts file contains invalid short_channel_id/node_id: {}",
                 except
@@ -739,7 +739,7 @@ async fn create_sling_dir(sling_dir: &PathBuf) -> Result<(), Error> {
 }
 
 pub fn channel_jobstate_update(
-    jobstates: Arc<Mutex<HashMap<String, Vec<JobState>>>>,
+    jobstates: Arc<Mutex<HashMap<ShortChannelId, Vec<JobState>>>>,
     task: &Task,
     latest_state: &JobMessage,
     active: Option<bool>,
@@ -747,7 +747,7 @@ pub fn channel_jobstate_update(
 ) {
     let mut jobstates_mut = jobstates.lock();
     let jobstate = jobstates_mut
-        .get_mut(&task.chan_id.to_string())
+        .get_mut(&task.chan_id)
         .unwrap()
         .iter_mut()
         .find(|jt| jt.id() == task.task_id)
@@ -829,8 +829,8 @@ pub fn is_channel_normal(channel: &ListpeerchannelsChannels) -> bool {
 }
 
 pub fn get_normal_channel_from_listpeerchannels(
-    peer_channels: &BTreeMap<String, ListpeerchannelsChannels>,
-    chan_id: &String,
+    peer_channels: &BTreeMap<ShortChannelId, ListpeerchannelsChannels>,
+    chan_id: &ShortChannelId,
 ) -> Option<ListpeerchannelsChannels> {
     match peer_channels.get(chan_id) {
         Some(chan) => {
@@ -848,15 +848,12 @@ pub fn get_normal_channel_from_listpeerchannels(
 }
 
 pub fn get_all_normal_channels_from_listpeerchannels(
-    peer_channels: &BTreeMap<String, ListpeerchannelsChannels>,
-) -> BTreeMap<String, PublicKey> {
+    peer_channels: &BTreeMap<ShortChannelId, ListpeerchannelsChannels>,
+) -> BTreeMap<ShortChannelId, PublicKey> {
     let mut scid_peer_map = BTreeMap::new();
     for channel in peer_channels.values() {
         if is_channel_normal(channel) {
-            scid_peer_map.insert(
-                channel.short_channel_id.unwrap().to_string(),
-                channel.peer_id.unwrap(),
-            );
+            scid_peer_map.insert(channel.short_channel_id.unwrap(), channel.peer_id.unwrap());
         }
     }
     scid_peer_map
@@ -864,15 +861,14 @@ pub fn get_all_normal_channels_from_listpeerchannels(
 
 pub async fn my_sleep<'a>(
     seconds: u64,
-    job_state: Arc<Mutex<HashMap<String, Vec<JobState>>>>,
-    task: &Task<'a>,
+    job_state: Arc<Mutex<HashMap<ShortChannelId, Vec<JobState>>>>,
+    task: &Task,
 ) {
     let timer = Instant::now();
-    let chan_id = task.chan_id.to_string();
     while timer.elapsed() < Duration::from_secs(seconds) {
         if job_state
             .lock()
-            .get(&chan_id)
+            .get(&task.chan_id)
             .unwrap()
             .iter()
             .find(|jt| jt.id() == task.task_id)

@@ -22,7 +22,7 @@ pub fn dijkstra(
     max_hops: u8,
     exclude_graph: &ExcludeGraph,
     last_delay: u16,
-    tempbans: &HashMap<String, u64>,
+    tempbans: &HashMap<ShortChannelId, u64>,
 ) -> Result<Vec<SendpayRoute>, Error> {
     let mut visited = HashSet::with_capacity(lngraph.graph.len());
     let mut scores = HashMap::new();
@@ -56,8 +56,8 @@ pub fn dijkstra(
         }
         for edge in lngraph.edges(
             &PublicKeyPair {
-                my_pubkey,
-                other_pubkey: &node,
+                my_pubkey: *my_pubkey,
+                other_pubkey: node,
             },
             exclude_graph,
             &job.amount_msat,

@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt, str::FromStr};
 use anyhow::*;
 use cln_rpc::{
     model::responses::ListpeerchannelsChannels,
-    primitives::{Amount, ShortChannelId},
+    primitives::{Amount, PublicKey, ShortChannelId},
 };
 use log::debug;
 use serde::{Deserialize, Serialize};
@@ -65,11 +65,7 @@ impl Job {
         chan_id: &ShortChannelId,
     ) -> bool {
         let target_cap = self.target_cap(channel);
-        debug!(
-            "{}: target: {}sats",
-            chan_id.to_string(),
-            target_cap / 1_000
-        );
+        debug!("{}: target: {}sats", chan_id, target_cap / 1_000);
 
         let channel_msat = Amount::msat(&channel.total_msat.unwrap());
         let to_us_msat = Amount::msat(&channel.to_us_msat.unwrap());
@@ -146,14 +142,14 @@ impl Job {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ChannelPartnerStats {
-    pub scid: String,
+    pub scid: ShortChannelId,
     pub alias: String,
     pub sats: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PeerPartnerStats {
-    pub peer_id: String,
+    pub peer_id: PublicKey,
     pub alias: String,
     pub count: u32,
 }
