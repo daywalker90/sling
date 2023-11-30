@@ -12,24 +12,23 @@ log = { version = "0.4", features = ['std'] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
-tokio = { version = "1", features = ["fs","sync","rt-multi-thread","process"] }
+tokio = { version = "1", features = ["fs","sync","rt-multi-thread"] }
 # tokio-stream = "0.1"
 # futures = "0.3"
 
 # env_logger = "0.10"
 
-# cln-rpc = "0.1.6"
-cln-rpc = { path="cln-rpc/", version = "^0.1" }
-cln-plugin = "0.1.6"
-# cln-plugin = {path= "../lightning/plugins"}
-# cln-rpc = {path= "../lightning/cln-rpc"}
+cln-rpc = "0.1.7"
+# cln-rpc = { path="../lightning/cln-rpc/", version = "^0.1" }
+cln-plugin = "0.1.7"
+# cln-plugin = { path="../lightning/plugins/", version = "^0.1" }
 
 tabled = "0.14"
 num-format = "0.4"
-chrono = "0.4"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"]}
 rand = "0.8"
 parking_lot = "0.12"
-bitcoin = "0.29"
+bitcoin = "0.30"
 
 log-panics = "2"
 
