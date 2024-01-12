@@ -1,5 +1,5 @@
-use bitcoin::hashes::Hash;
-use bitcoin::hashes::HashEngine;
+use bitcoin::secp256k1::hashes::Hash;
+use bitcoin::secp256k1::hashes::HashEngine;
 use cln_rpc::model::responses::ListchannelsChannels;
 use cln_rpc::model::responses::ListpeerchannelsChannels;
 use cln_rpc::model::responses::ListpeerchannelsChannelsState;

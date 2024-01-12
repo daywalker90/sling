@@ -23,12 +23,12 @@ cln-rpc = "0.1.7"
 cln-plugin = "0.1.7"
 # cln-plugin = { path="../lightning/plugins/", version = "^0.1" }
 
-tabled = "0.14"
+tabled = "0.15"
 num-format = "0.4"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"]}
 rand = "0.8"
 parking_lot = "0.12"
-bitcoin = "0.30"
+bitcoin = "0.31"
 
 log-panics = "2"
 
