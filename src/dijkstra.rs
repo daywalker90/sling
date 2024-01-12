@@ -174,9 +174,9 @@ fn build_route(
                 0,
                 SendpayRoute {
                     amount_msat: Amount::from_msat(job.amount_msat),
-                    id: dijkstra_path.get(0).unwrap().destination,
+                    id: dijkstra_path.first().unwrap().destination,
                     delay,
-                    channel: dijkstra_path.get(0).unwrap().channel.short_channel_id,
+                    channel: dijkstra_path.first().unwrap().channel.short_channel_id,
                 },
             );
         } else {
@@ -190,7 +190,7 @@ fn build_route(
                 },
             );
         }
-        prev_amount_msat = sendpay_route.get(0).unwrap().amount_msat;
+        prev_amount_msat = sendpay_route.first().unwrap().amount_msat;
         amount_msat = Amount::from_msat(
             Amount::msat(&prev_amount_msat)
                 + fee_total_msat_precise(

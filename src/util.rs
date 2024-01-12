@@ -449,7 +449,7 @@ pub async fn slingexceptchan(
                     "Please either provide `add`/`remove` and a short_channel_id or just `list`"
                 ))
             } else if a.len() == 2 {
-                match a.get(0).unwrap() {
+                match a.first().unwrap() {
                     serde_json::Value::String(i) => {
                         let scid = match a.get(1).unwrap() {
                             serde_json::Value::String(s) => ShortChannelId::from_str(s)?,
@@ -510,7 +510,7 @@ pub async fn slingexceptchan(
                 write_excepts(excepts, EXCEPTS_CHANS_FILE_NAME, &sling_dir).await?;
                 Ok(json!({ "result": "success" }))
             } else {
-                match a.get(0).unwrap() {
+                match a.first().unwrap() {
                     serde_json::Value::String(i) => {
                         let excepts = plugin.state().excepts_chans.lock();
                         match i {
@@ -544,7 +544,7 @@ pub async fn slingexceptpeer(
             "Either provide `add`/`remove` and a node_id or just `list`"
         ))
     } else if array.len() == 2 {
-        let command = match array.get(0).unwrap() {
+        let command = match array.first().unwrap() {
             serde_json::Value::String(c) => c,
             _ => {
                 return Err(anyhow!(
@@ -607,7 +607,7 @@ pub async fn slingexceptpeer(
         write_excepts::<PublicKey>(excepts, EXCEPTS_PEERS_FILE_NAME, &sling_dir).await?;
         Ok(json!({ "result": "success" }))
     } else {
-        let command = match array.get(0).unwrap() {
+        let command = match array.first().unwrap() {
             serde_json::Value::String(i) => i,
             _ => {
                 return Err(anyhow!(
