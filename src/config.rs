@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Error};
 use cln_plugin::{options, ConfiguredPlugin};
-use log::info;
+use log::{info, warn};
 use std::path::Path;
 
 use tokio::fs;
@@ -25,7 +25,7 @@ pub async fn read_config(
         vec![config.lightning_conf.1]
     };
 
-    for confs in config_file_path {
+    for confs in &config_file_path {
         match fs::read_to_string(Path::new(&confs)).await {
             Ok(f) => {
                 info!("Found config file: {}", confs);
@@ -36,7 +36,10 @@ pub async fn read_config(
     }
 
     if config_file_content.is_empty() {
-        return Err(anyhow!("No config file found!"));
+        warn!(
+            "No config file found! Searched here: {}",
+            config_file_path.join(", ")
+        );
     }
 
     let mut config = state.config.lock();
