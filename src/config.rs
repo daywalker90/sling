@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Error};
+use chrono::Utc;
 use cln_plugin::{options, ConfiguredPlugin};
 use log::{info, warn};
 use std::path::Path;
@@ -9,6 +10,79 @@ use crate::{
     model::PluginState,
     rpc::{get_config_path, get_info},
 };
+
+fn validate_u64_input(
+    value: u64,
+    var_name: &String,
+    gteq: u64,
+    time_factor_to_secs: Option<u64>,
+) -> Result<u64, Error> {
+    if value < gteq {
+        return Err(anyhow!(
+            "{} must be greater than or equal to {}",
+            var_name,
+            gteq
+        ));
+    }
+
+    if let Some(factor) = time_factor_to_secs {
+        if !is_valid_hour_timestamp(value.saturating_mul(factor)) {
+            return Err(anyhow!(
+                "{} needs to be a positive number and smaller than {}, \
+            not `{}`.",
+                var_name,
+                (Utc::now().timestamp() as u64),
+                value
+            ));
+        }
+    }
+
+    Ok(value)
+}
+
+fn is_valid_hour_timestamp(val: u64) -> bool {
+    Utc::now().timestamp() as u64 > val
+}
+
+fn options_value_to_u64(
+    config_var: &(String, u64),
+    value: Option<options::Value>,
+    gteq: u64,
+    time_factor_to_secs: Option<u64>,
+) -> Result<u64, Error> {
+    match value {
+        Some(options::Value::Integer(i)) => {
+            if i >= 0 {
+                validate_u64_input(i as u64, &config_var.0, gteq, time_factor_to_secs)
+            } else {
+                Err(anyhow!(
+                    "{} needs to be a positive number and not `{}`.",
+                    config_var.0,
+                    i
+                ))
+            }
+        }
+        Some(_) => Ok(config_var.1),
+        None => Ok(config_var.1),
+    }
+}
+
+fn str_to_u64(
+    var_name: &String,
+    value: &str,
+    gteq: u64,
+    time_factor_to_secs: Option<u64>,
+) -> Result<u64, Error> {
+    match value.parse::<u64>() {
+        Ok(n) => validate_u64_input(n, var_name, gteq, time_factor_to_secs),
+        Err(e) => Err(anyhow!(
+            "Could not parse a positive number from `{}` for {}: {}",
+            value,
+            var_name,
+            e
+        )),
+    }
+}
 
 pub async fn read_config(
     plugin: &ConfiguredPlugin<PluginState, tokio::io::Stdin, tokio::io::Stdout>,
@@ -48,21 +122,14 @@ pub async fn read_config(
         if line.contains('=') {
             let splitline = line.split('=').collect::<Vec<&str>>();
             if splitline.len() == 2 {
-                let name = splitline.clone().into_iter().next().unwrap();
-                let value = splitline.into_iter().nth(1).unwrap();
+                let name = splitline.first().unwrap();
+                let value = splitline.get(1).unwrap();
 
                 match name {
-                    opt if opt.eq(&config.cltv_delta.0) => match value.parse::<u16>() {
-                        Ok(n) => config.cltv_delta.1 = Some(n),
-                        Err(e) => {
-                            return Err(anyhow!(
-                                "Error: Could not parse a number from `{}` for {}: {}",
-                                value,
-                                config.cltv_delta.0,
-                                e
-                            ))
-                        }
-                    },
+                    opt if opt.eq(&config.cltv_delta.0) => {
+                        config.cltv_delta.1 =
+                            Some(str_to_u64(&config.cltv_delta.0, value, 0, None)? as u16)
+                    }
                     opt if opt.eq(&config.utf8.0) => match value.parse::<bool>() {
                         Ok(b) => config.utf8.1 = b,
                         Err(e) => {
@@ -74,89 +141,21 @@ pub async fn read_config(
                             ))
                         }
                     },
-                    opt if opt.eq(&config.refresh_peers_interval.0) => match value.parse::<u64>() {
-                        Ok(n) => {
-                            if n > 0 {
-                                config.refresh_peers_interval.1 = n
-                            } else {
-                                return Err(anyhow!(
-                                    "Error: Number needs to be greater than 0 for {}.",
-                                    config.refresh_peers_interval.0
-                                ));
-                            }
-                        }
-                        Err(e) => {
-                            return Err(anyhow!(
-                                "Error: Could not parse a positive number from `{}` for {}: {}",
-                                value,
-                                config.refresh_peers_interval.0,
-                                e
-                            ))
-                        }
-                    },
-                    opt if opt.eq(&config.refresh_aliasmap_interval.0) => {
-                        match value.parse::<u64>() {
-                            Ok(n) => {
-                                if n > 0 {
-                                    config.refresh_aliasmap_interval.1 = n
-                                } else {
-                                    return Err(anyhow!(
-                                        "Error: Number needs to be greater than 0 for {}.",
-                                        config.refresh_aliasmap_interval.0
-                                    ));
-                                }
-                            }
-                            Err(e) => {
-                                return Err(anyhow!(
-                                    "Error: Could not parse a positive number from `{}` for {}: {}",
-                                    value,
-                                    config.refresh_aliasmap_interval.0,
-                                    e
-                                ))
-                            }
-                        }
+                    opt if opt.eq(&config.refresh_peers_interval.0) => {
+                        config.refresh_peers_interval.1 =
+                            str_to_u64(&config.refresh_peers_interval.0, value, 1, None)?
                     }
-                    opt if opt.eq(&config.refresh_graph_interval.0) => match value.parse::<u64>() {
-                        Ok(n) => {
-                            if n > 0 {
-                                config.refresh_graph_interval.1 = n
-                            } else {
-                                return Err(anyhow!(
-                                    "Error: Number needs to be greater than 0 for {}.",
-                                    config.refresh_graph_interval.0
-                                ));
-                            }
-                        }
-                        Err(e) => {
-                            return Err(anyhow!(
-                                "Error: Could not parse a positive number from `{}` for {}: {}",
-                                value,
-                                config.refresh_graph_interval.0,
-                                e
-                            ))
-                        }
-                    },
+                    opt if opt.eq(&config.refresh_aliasmap_interval.0) => {
+                        config.refresh_aliasmap_interval.1 =
+                            str_to_u64(&config.refresh_aliasmap_interval.0, value, 1, None)?
+                    }
+                    opt if opt.eq(&config.refresh_graph_interval.0) => {
+                        config.refresh_graph_interval.1 =
+                            str_to_u64(&config.refresh_graph_interval.0, value, 1, None)?
+                    }
                     opt if opt.eq(&config.reset_liquidity_interval.0) => {
-                        match value.parse::<u64>() {
-                            Ok(n) => {
-                                if n >= 10 {
-                                    config.reset_liquidity_interval.1 = n
-                                } else {
-                                    return Err(anyhow!(
-                                        "Error: Number needs to be >= 10 for {}.",
-                                        config.reset_liquidity_interval.0
-                                    ));
-                                }
-                            }
-                            Err(e) => {
-                                return Err(anyhow!(
-                                    "Error: Could not parse a positive number from `{}` for {}: {}",
-                                    value,
-                                    config.reset_liquidity_interval.0,
-                                    e
-                                ))
-                            }
-                        }
+                        config.reset_liquidity_interval.1 =
+                            str_to_u64(&config.reset_liquidity_interval.0, value, 10, None)?
                     }
                     opt if opt.eq(&config.depleteuptopercent.0) => match value.parse::<f64>() {
                         Ok(n) => {
@@ -178,159 +177,52 @@ pub async fn read_config(
                             ))
                         }
                     },
-                    opt if opt.eq(&config.depleteuptoamount.0) => match value.parse::<u64>() {
-                        Ok(n) => config.depleteuptoamount.1 = n * 1_000,
-                        Err(e) => {
-                            return Err(anyhow!(
-                                "Error: Could not parse a positive number from `{}` for {}: {}",
-                                value,
-                                config.depleteuptoamount.0,
-                                e
-                            ))
-                        }
-                    },
-                    opt if opt.eq(&config.maxhops.0) => match value.parse::<u8>() {
-                        Ok(n) => {
-                            if n >= 2 {
-                                config.maxhops.1 = n
-                            } else {
-                                return Err(anyhow!(
-                                    "Error: Number needs to be >= 2 for {}.",
-                                    config.maxhops.0
-                                ));
-                            }
-                        }
-                        Err(e) => {
-                            return Err(anyhow!(
-                                "Error: Could not parse a positive number from `{}` for {}: {}",
-                                value,
-                                config.maxhops.0,
-                                e
-                            ))
-                        }
-                    },
-                    opt if opt.eq(&config.candidates_min_age.0) => match value.parse::<u32>() {
-                        Ok(n) => config.candidates_min_age.1 = n,
-                        Err(e) => {
-                            return Err(anyhow!(
-                                "Error: Could not parse a positive number from `{}` for {}: {}",
-                                value,
-                                config.candidates_min_age.0,
-                                e
-                            ))
-                        }
-                    },
-                    opt if opt.eq(&config.paralleljobs.0) => match value.parse::<u8>() {
-                        Ok(n) => {
-                            if n > 0 {
-                                config.paralleljobs.1 = n
-                            } else {
-                                return Err(anyhow!(
-                                    "Error: Number needs to be greater than 0 for {}.",
-                                    config.paralleljobs.0
-                                ));
-                            }
-                        }
-                        Err(e) => {
-                            return Err(anyhow!(
-                                "Error: Could not parse a positive number from `{}` for {}: {}",
-                                value,
-                                config.paralleljobs.0,
-                                e
-                            ))
-                        }
-                    },
-                    opt if opt.eq(&config.timeoutpay.0) => match value.parse::<u16>() {
-                        Ok(n) => {
-                            if n > 0 {
-                                config.timeoutpay.1 = n
-                            } else {
-                                return Err(anyhow!(
-                                    "Error: Number needs to be greater than 0 for {}.",
-                                    config.timeoutpay.0
-                                ));
-                            }
-                        }
-                        Err(e) => {
-                            return Err(anyhow!(
-                                "Error: Could not parse a positive number from `{}` for {}: {}",
-                                value,
-                                config.timeoutpay.0,
-                                e
-                            ))
-                        }
-                    },
-                    opt if opt.eq(&config.max_htlc_count.0) => match value.parse::<u64>() {
-                        Ok(n) => {
-                            if n > 0 {
-                                config.max_htlc_count.1 = n
-                            } else {
-                                return Err(anyhow!(
-                                    "Error: Number needs to be greater than 0 for {}.",
-                                    config.max_htlc_count.0
-                                ));
-                            }
-                        }
-                        Err(e) => {
-                            return Err(anyhow!(
-                                "Error: Could not parse a positive number from `{}` for {}: {}",
-                                value,
-                                config.max_htlc_count.0,
-                                e
-                            ))
-                        }
-                    },
+                    opt if opt.eq(&config.depleteuptoamount.0) => {
+                        config.depleteuptoamount.1 =
+                            str_to_u64(&config.depleteuptoamount.0, value, 0, None)? * 1000
+                    }
+                    opt if opt.eq(&config.maxhops.0) => {
+                        config.maxhops.1 = str_to_u64(&config.maxhops.0, value, 2, None)? as u8
+                    }
+                    opt if opt.eq(&config.candidates_min_age.0) => {
+                        config.candidates_min_age.1 =
+                            str_to_u64(&config.candidates_min_age.0, value, 0, None)? as u32
+                    }
+                    opt if opt.eq(&config.paralleljobs.0) => {
+                        config.paralleljobs.1 =
+                            str_to_u64(&config.paralleljobs.0, value, 1, None)? as u8
+                    }
+                    opt if opt.eq(&config.timeoutpay.0) => {
+                        config.timeoutpay.1 =
+                            str_to_u64(&config.timeoutpay.0, value, 1, None)? as u16
+                    }
+                    opt if opt.eq(&config.max_htlc_count.0) => {
+                        config.max_htlc_count.1 =
+                            str_to_u64(&config.max_htlc_count.0, value, 1, None)?
+                    }
                     opt if opt.eq(&config.stats_delete_failures_age.0) => {
-                        match value.parse::<u64>() {
-                            Ok(n) => config.stats_delete_failures_age.1 = n,
-                            Err(e) => {
-                                return Err(anyhow!(
-                                    "Error: Could not parse a number from `{}` for {}: {}",
-                                    value,
-                                    config.stats_delete_failures_age.0,
-                                    e
-                                ))
-                            }
-                        }
+                        config.stats_delete_failures_age.1 = str_to_u64(
+                            &config.stats_delete_failures_age.0,
+                            value,
+                            0,
+                            Some(24 * 60 * 60),
+                        )?
                     }
                     opt if opt.eq(&config.stats_delete_failures_size.0) => {
-                        match value.parse::<u64>() {
-                            Ok(n) => config.stats_delete_failures_size.1 = n,
-                            Err(e) => {
-                                return Err(anyhow!(
-                                    "Error: Could not parse a number from `{}` for {}: {}",
-                                    value,
-                                    config.stats_delete_failures_size.0,
-                                    e
-                                ))
-                            }
-                        }
+                        config.stats_delete_failures_size.1 =
+                            str_to_u64(&config.stats_delete_failures_size.0, value, 0, None)?
                     }
                     opt if opt.eq(&config.stats_delete_successes_age.0) => {
-                        match value.parse::<u64>() {
-                            Ok(n) => config.stats_delete_successes_age.1 = n,
-                            Err(e) => {
-                                return Err(anyhow!(
-                                    "Error: Could not parse a number from `{}` for {}: {}",
-                                    value,
-                                    config.stats_delete_successes_age.0,
-                                    e
-                                ))
-                            }
-                        }
+                        config.stats_delete_successes_age.1 = str_to_u64(
+                            &config.stats_delete_successes_age.0,
+                            value,
+                            0,
+                            Some(24 * 60 * 60),
+                        )?
                     }
                     opt if opt.eq(&config.stats_delete_successes_size.0) => {
-                        match value.parse::<u64>() {
-                            Ok(n) => config.stats_delete_successes_size.1 = n,
-                            Err(e) => {
-                                return Err(anyhow!(
-                                    "Error: Could not parse a number from `{}` for {}: {}",
-                                    value,
-                                    config.stats_delete_successes_size.0,
-                                    e
-                                ))
-                            }
-                        }
+                        config.stats_delete_successes_size.1 =
+                            str_to_u64(&config.stats_delete_successes_size.0, value, 0, None)?
                     }
                     _ => (),
                 }
@@ -365,66 +257,30 @@ pub fn get_startup_options(
         Some(_) => config.utf8.1,
         None => config.utf8.1,
     };
-    config.refresh_peers_interval.1 = match plugin.option(&config.refresh_peers_interval.0) {
-        Some(options::Value::Integer(i)) => {
-            if i > 0 {
-                i as u64
-            } else {
-                return Err(anyhow!(
-                    "Error: {} needs to be greater than 0 and not `{}`.",
-                    config.refresh_peers_interval.0,
-                    i
-                ));
-            }
-        }
-        Some(_) => config.refresh_peers_interval.1,
-        None => config.refresh_peers_interval.1,
-    };
-    config.refresh_aliasmap_interval.1 = match plugin.option(&config.refresh_aliasmap_interval.0) {
-        Some(options::Value::Integer(i)) => {
-            if i > 0 {
-                i as u64
-            } else {
-                return Err(anyhow!(
-                    "Error: {} needs to be greater than 0 and not `{}`.",
-                    config.refresh_aliasmap_interval.0,
-                    i
-                ));
-            }
-        }
-        Some(_) => config.refresh_aliasmap_interval.1,
-        None => config.refresh_aliasmap_interval.1,
-    };
-    config.refresh_graph_interval.1 = match plugin.option(&config.refresh_graph_interval.0) {
-        Some(options::Value::Integer(i)) => {
-            if i > 0 {
-                i as u64
-            } else {
-                return Err(anyhow!(
-                    "Error: {} needs to be greater than 0 and not `{}`.",
-                    config.refresh_graph_interval.0,
-                    i
-                ));
-            }
-        }
-        Some(_) => config.refresh_graph_interval.1,
-        None => config.refresh_graph_interval.1,
-    };
-    config.reset_liquidity_interval.1 = match plugin.option(&config.reset_liquidity_interval.0) {
-        Some(options::Value::Integer(i)) => {
-            if i >= 10 {
-                i as u64
-            } else {
-                return Err(anyhow!(
-                    "Error: {} needs to be greater than or equal to 10 and not `{}`.",
-                    config.reset_liquidity_interval.0,
-                    i
-                ));
-            }
-        }
-        Some(_) => config.reset_liquidity_interval.1,
-        None => config.reset_liquidity_interval.1,
-    };
+    config.refresh_peers_interval.1 = options_value_to_u64(
+        &config.refresh_peers_interval,
+        plugin.option(&config.refresh_peers_interval.0),
+        1,
+        None,
+    )?;
+    config.refresh_aliasmap_interval.1 = options_value_to_u64(
+        &config.refresh_aliasmap_interval,
+        plugin.option(&config.refresh_aliasmap_interval.0),
+        1,
+        None,
+    )?;
+    config.refresh_graph_interval.1 = options_value_to_u64(
+        &config.refresh_graph_interval,
+        plugin.option(&config.refresh_graph_interval.0),
+        1,
+        None,
+    )?;
+    config.reset_liquidity_interval.1 = options_value_to_u64(
+        &config.reset_liquidity_interval,
+        plugin.option(&config.reset_liquidity_interval.0),
+        10,
+        None,
+    )?;
     config.depleteuptopercent.1 = match plugin.option(&config.depleteuptopercent.0) {
         Some(options::Value::String(i)) => match i.parse::<f64>() {
             Ok(f) => {
@@ -449,99 +305,69 @@ pub fn get_startup_options(
         Some(_) => config.depleteuptopercent.1,
         None => config.depleteuptopercent.1,
     };
-    config.depleteuptoamount.1 = match plugin.option(&config.depleteuptoamount.0) {
-        Some(options::Value::Integer(i)) => (i * 1_000) as u64,
-        Some(_) => config.depleteuptoamount.1,
-        None => config.depleteuptoamount.1,
-    };
-    config.maxhops.1 = match plugin.option(&config.maxhops.0) {
-        Some(options::Value::Integer(i)) => {
-            if i >= 2 {
-                i as u8
-            } else {
-                return Err(anyhow!(
-                    "Error: {} needs to be >= 2 and not `{}`.",
-                    config.maxhops.0,
-                    i
-                ));
-            }
-        }
-        Some(_) => config.maxhops.1,
-        None => config.maxhops.1,
-    };
-    config.candidates_min_age.1 = match plugin.option(&config.candidates_min_age.0) {
-        Some(options::Value::Integer(i)) => i as u32,
-        Some(_) => config.candidates_min_age.1,
-        None => config.candidates_min_age.1,
-    };
-    config.paralleljobs.1 = match plugin.option(&config.paralleljobs.0) {
-        Some(options::Value::Integer(i)) => {
-            if i > 0 {
-                i as u8
-            } else {
-                return Err(anyhow!(
-                    "Error: {} needs to be greater than 0 and not `{}`.",
-                    config.paralleljobs.0,
-                    i
-                ));
-            }
-        }
-        Some(_) => config.paralleljobs.1,
-        None => config.paralleljobs.1,
-    };
-    config.timeoutpay.1 = match plugin.option(&config.timeoutpay.0) {
-        Some(options::Value::Integer(i)) => {
-            if i > 0 {
-                i as u16
-            } else {
-                return Err(anyhow!(
-                    "Error: {} needs to be greater than 0 and not `{}`.",
-                    config.timeoutpay.0,
-                    i
-                ));
-            }
-        }
-        Some(_) => config.timeoutpay.1,
-        None => config.timeoutpay.1,
-    };
-    config.max_htlc_count.1 = match plugin.option(&config.max_htlc_count.0) {
-        Some(options::Value::Integer(i)) => {
-            if i > 0 {
-                i as u64
-            } else {
-                return Err(anyhow!(
-                    "Error: {} needs to be greater than 0 and not `{}`.",
-                    config.max_htlc_count.0,
-                    i
-                ));
-            }
-        }
-        Some(_) => config.max_htlc_count.1,
-        None => config.max_htlc_count.1,
-    };
-    config.stats_delete_failures_age.1 = match plugin.option(&config.stats_delete_failures_age.0) {
-        Some(options::Value::Integer(i)) => i as u64,
-        Some(_) => config.stats_delete_failures_age.1,
-        None => config.stats_delete_failures_age.1,
-    };
-    config.stats_delete_failures_size.1 = match plugin.option(&config.stats_delete_failures_size.0)
-    {
-        Some(options::Value::Integer(i)) => i as u64,
-        Some(_) => config.stats_delete_failures_size.1,
-        None => config.stats_delete_failures_size.1,
-    };
-    config.stats_delete_successes_age.1 = match plugin.option(&config.stats_delete_successes_age.0)
-    {
-        Some(options::Value::Integer(i)) => i as u64,
-        Some(_) => config.stats_delete_successes_age.1,
-        None => config.stats_delete_successes_age.1,
-    };
-    config.stats_delete_successes_size.1 =
-        match plugin.option(&config.stats_delete_successes_size.0) {
-            Some(options::Value::Integer(i)) => i as u64,
-            Some(_) => config.stats_delete_successes_size.1,
-            None => config.stats_delete_successes_size.1,
-        };
+    config.depleteuptoamount.1 = options_value_to_u64(
+        &config.depleteuptoamount,
+        plugin.option(&config.depleteuptoamount.0),
+        0,
+        None,
+    )? * 1000;
+    config.maxhops.1 = options_value_to_u64(
+        &(config.maxhops.0.clone(), config.maxhops.1 as u64),
+        plugin.option(&config.maxhops.0),
+        2,
+        None,
+    )? as u8;
+    config.candidates_min_age.1 = options_value_to_u64(
+        &(
+            config.candidates_min_age.0.clone(),
+            config.candidates_min_age.1 as u64,
+        ),
+        plugin.option(&config.candidates_min_age.0),
+        0,
+        None,
+    )? as u32;
+    config.paralleljobs.1 = options_value_to_u64(
+        &(config.paralleljobs.0.clone(), config.paralleljobs.1 as u64),
+        plugin.option(&config.paralleljobs.0),
+        1,
+        None,
+    )? as u8;
+    config.timeoutpay.1 = options_value_to_u64(
+        &(config.timeoutpay.0.clone(), config.timeoutpay.1 as u64),
+        plugin.option(&config.timeoutpay.0),
+        1,
+        None,
+    )? as u16;
+    config.max_htlc_count.1 = options_value_to_u64(
+        &config.max_htlc_count,
+        plugin.option(&config.max_htlc_count.0),
+        1,
+        None,
+    )?;
+    config.stats_delete_failures_age.1 = options_value_to_u64(
+        &config.stats_delete_failures_age,
+        plugin.option(&config.stats_delete_failures_age.0),
+        0,
+        Some(24 * 60 * 60),
+    )?;
+    config.stats_delete_failures_size.1 = options_value_to_u64(
+        &config.stats_delete_failures_size,
+        plugin.option(&config.stats_delete_failures_size.0),
+        0,
+        None,
+    )?;
+    config.stats_delete_successes_age.1 = options_value_to_u64(
+        &config.stats_delete_successes_age,
+        plugin.option(&config.stats_delete_successes_age.0),
+        0,
+        Some(24 * 60 * 60),
+    )?;
+    config.stats_delete_successes_size.1 = options_value_to_u64(
+        &config.stats_delete_successes_size,
+        plugin.option(&config.stats_delete_successes_size.0),
+        0,
+        None,
+    )?;
 
     Ok(())
 }
