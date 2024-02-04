@@ -98,7 +98,8 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
             info!("Getting all channels in gossip...");
             let channels = list_channels(&rpc_path, None, None, None).await?.channels;
             info!(
-                "Getting all channels done in {}s!",
+                "Getting {} channels done in {}s!",
+                channels.len(),
                 now.elapsed().as_secs().to_string()
             );
             let jobs = read_jobs(
