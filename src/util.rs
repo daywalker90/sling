@@ -325,7 +325,7 @@ pub async fn slingversion(
     _p: Plugin<PluginState>,
     _args: serde_json::Value,
 ) -> Result<serde_json::Value, Error> {
-    Ok(json!({ "version": env!("CARGO_PKG_VERSION") }))
+    Ok(json!({ "version": format!("v{}",env!("CARGO_PKG_VERSION")) }))
 }
 
 pub async fn read_jobs(
