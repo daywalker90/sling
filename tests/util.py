@@ -4,53 +4,21 @@ import logging
 import os
 import pytest
 from pathlib import Path
-import requests
-import tarfile
-import platform
 
-VERSION = "v1.4.1"
 RUST_PROFILE = os.environ.get("RUST_PROFILE", "debug")
 COMPILED_PATH = Path.cwd() / "target" / RUST_PROFILE / \
     "sling"
+DOWNLOAD_PATH = Path.cwd() / "tests" / "sling"
 
 
 @pytest.fixture
 def get_plugin(directory):
-    downloaded_plugin_path = Path(
-        os.path.join(directory, "sling.tar.gz"))
-    extracted_plugin_path = Path(os.path.join(directory, "sling"))
     if COMPILED_PATH.is_file():
         return COMPILED_PATH
-    elif extracted_plugin_path.is_file():
-        return extracted_plugin_path
+    elif DOWNLOAD_PATH.is_file():
+        return DOWNLOAD_PATH
     else:
-        architecture = get_architecture()
-
-        url = (f"https://github.com/daywalker90/sling/releases/download/"
-               f"{VERSION}/sling-{VERSION}-{architecture}.tar.gz")
-        response = requests.get(url)
-        with open(downloaded_plugin_path, "wb") as file:
-            file.write(response.content)
-
-        with tarfile.open(downloaded_plugin_path, "r:gz") as tar:
-            tar.extractall(directory)
-
-        return extracted_plugin_path
-
-
-def get_architecture():
-    machine = platform.machine()
-
-    if machine == 'x86_64':
-        return 'x86_64-linux-gnu'
-    elif machine == 'armv7l':
-        return 'armv7-linux-gnueabihf'
-    elif machine == 'aarch64':
-        return 'aarch64-linux-gnu'
-    else:
-        raise RuntimeError(
-            f"No self-compiled binary found and "
-            f"unsupported release-architecture: {machine}")
+        raise ValueError("No files were found.")
 
 
 def generate_random_label():

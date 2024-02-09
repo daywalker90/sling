@@ -2,11 +2,7 @@
 
 from pyln.testing.fixtures import *
 from pyln.testing.utils import sync_blockheight, wait_for, only_one
-from pyln.client import RpcError
-import os
-import pytest
 from util import get_plugin
-from util import VERSION
 import time
 
 
@@ -20,7 +16,6 @@ def test_basic(node_factory, get_plugin):
     assert result is not None
     assert isinstance(result, dict) is True
     assert "version" in result
-    assert VERSION in result["version"]
 
 
 def test_options(node_factory, get_plugin):
