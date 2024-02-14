@@ -216,7 +216,7 @@ def test_maxhops_2(node_factory, bitcoind, get_plugin):
     l1.rpc.fundchannel(l2.info['id'],  1_000_000, mindepth=1)
     l2.rpc.fundchannel(l1.info['id'],  1_000_000, mindepth=1)
 
-    bitcoind.generate_block(1)
+    bitcoind.generate_block(6)
     sync_blockheight(bitcoind, [l1, l2])
 
     chans = l2.rpc.listpeerchannels(l1.info['id'])["channels"]
