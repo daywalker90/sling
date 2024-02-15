@@ -235,7 +235,7 @@ fn success_stats(
         .as_secs();
 
     for success_reb in successes {
-        if success_reb.completed_at >= now - time_window * 24 * 60 * 60 {
+        if time_window == 0 || success_reb.completed_at >= now - time_window * 24 * 60 * 60 {
             total_amount_msat += success_reb.amount_msat;
             weighted_fee_ppm += success_reb.fee_ppm as u64 * success_reb.amount_msat;
             *channel_partner_counts
@@ -319,7 +319,7 @@ fn failure_stats(
         .as_secs();
 
     for fail_reb in failures {
-        if fail_reb.created_at >= now - time_window * 24 * 60 * 60 {
+        if time_window == 0 || fail_reb.created_at >= now - time_window * 24 * 60 * 60 {
             total_amount_msat += fail_reb.amount_msat;
             *channel_partner_counts
                 .entry(fail_reb.channel_partner)
@@ -414,8 +414,12 @@ fn get_stats_alias(
     alias_map: &HashMap<PublicKey, String>,
 ) -> String {
     if let Some(chan) = &peer_channels.get(partner) {
-        alias_map.get(&chan.peer_id.unwrap()).unwrap().clone()
+        if let Some(alias) = alias_map.get(&chan.peer_id.unwrap()) {
+            alias.clone()
+        } else {
+            "ALIAS_NOT_FOUND".to_string()
+        }
     } else {
-        "NOT_FOUND".to_string()
+        "PEER_NOT_FOUND".to_string()
     }
 }

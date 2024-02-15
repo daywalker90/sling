@@ -295,3 +295,50 @@ def test_pull_and_push(node_factory, bitcoind, get_plugin):
     l1.daemon.wait_for_log(r"already balanced. Taking a break")
     wait_for(lambda: only_one(l1.rpc.listpeerchannels(
         l3.info['id'])['channels'])['to_us_msat'] <= 120_000_000)
+
+
+def test_stats(node_factory, bitcoind, get_plugin):
+    LOGGER = logging.getLogger(__name__)
+    l1, l2 = node_factory.get_nodes(2,
+                                    opts={
+                                        'plugin': get_plugin,
+                                        'sling-maxhops': 2,
+                                        'sling-refresh-graph-interval': 1,
+                                        'sling-stats-delete-successes-age': 0,
+                                        'sling-stats-delete-failures-age': 0
+                                    }
+                                    )
+    l1.fundwallet(10_000_000)
+    l2.fundwallet(10_000_000)
+    l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
+    l1.rpc.fundchannel(l2.info['id'],  1_000_000, mindepth=1)
+    l2.rpc.fundchannel(l1.info['id'],  1_000_000, mindepth=1)
+
+    bitcoind.generate_block(6)
+    sync_blockheight(bitcoind, [l1, l2])
+
+    chans = l2.rpc.listpeerchannels(l1.info['id'])["channels"]
+    for chan in chans:
+        if chan["opener"] == "local":
+            cl2 = chan["short_channel_id"]
+        else:
+            cl1 = chan["short_channel_id"]
+    l2.wait_channel_active(cl1)
+    l2.wait_channel_active(cl2)
+
+    # wait for plugin gossip refresh
+    time.sleep(2)
+
+    l1.rpc.call(
+        "sling-job", {"scid": cl2, "direction": "pull",
+                      "amount": 100_000, "maxppm": 1000, "outppm": 1000})
+    l1.rpc.call("sling-go", [])
+    l1.daemon.wait_for_log(r"already balanced. Taking a break")
+
+    stats_summary = l1.rpc.call("sling-stats", [])
+    LOGGER.info(stats_summary)
+    assert cl2 in stats_summary["result"]
+
+    stats_chan = l1.rpc.call("sling-stats", [cl2])
+    LOGGER.info(stats_chan)
+    assert cl1 == stats_chan["successes_in_time_window"]["top_5_channel_partners"][0]["scid"]
