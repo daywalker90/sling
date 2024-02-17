@@ -1,5 +1,8 @@
 use anyhow::anyhow;
-use cln_plugin::{options, Builder};
+use cln_plugin::options::{
+    ConfigOption, DefaultBooleanConfigOption, DefaultIntegerConfigOption, DefaultStringConfigOption,
+};
+use cln_plugin::Builder;
 use cln_rpc::primitives::PublicKey;
 use cln_rpc::primitives::ShortChannelId;
 use config::*;
@@ -31,6 +34,97 @@ mod util;
 #[cfg(test)]
 mod tests;
 
+const OPT_UTF8: DefaultBooleanConfigOption = ConfigOption::new_bool_with_default(
+    "sling-utf8",
+    true,
+    "Switch on/off special characters in node alias. Default is `true`",
+);
+const OPT_REFRESH_PEERS_INTERVAL: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
+    "sling-refresh-peers-interval",
+    1,
+    "Refresh interval for listpeers task. Default is `1`",
+);
+const OPT_REFRESH_ALIASMAP_INTERVAL: DefaultIntegerConfigOption =
+    ConfigOption::new_i64_with_default(
+        "sling-refresh-aliasmap-interval",
+        3600,
+        "Refresh interval for aliasmap task. Default is `3600`",
+    );
+const OPT_REFRESH_GRAPH_INTERVAL: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
+    "sling-refresh-graph-interval",
+    600,
+    "Refresh interval for graph task. Default is `600`",
+);
+const OPT_RESET_LIQUIDITY_INTERVAL: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
+    "sling-reset-liquidity-interval",
+    360,
+    "Refresh interval for liquidity reset task. Default is `360`",
+);
+const OPT_DEPLETEUPTOPERCENT: DefaultStringConfigOption = ConfigOption::new_str_with_default(
+    "sling-depleteuptopercent",
+    "0.2",
+    "Deplete up to percent for candidate search. Default is `0.2`",
+);
+const OPT_DEPLETEUPTOAMOUNT: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
+    "sling-depleteuptoamount",
+    2_000_000_000,
+    "Deplete up to amount for candidate search. Default is `2000000000`",
+);
+const OPT_MAXHOPS: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
+    "sling-maxhops",
+    8,
+    "Maximum number of hops in a route. Default is `8`",
+);
+const OPT_CANDIDATES_MIN_AGE: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
+    "sling-candidates-min-age",
+    0,
+    "Minium age of a candidate to rebalance with in days. Default is `0`",
+);
+const OPT_PARALLELJOBS: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
+    "sling-paralleljobs",
+    1,
+    "Number of parallel tasks for a job. Default is `1`",
+);
+const OPT_TIMEOUTPAY: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
+    "sling-timeoutpay",
+    120,
+    "Timeout for rebalances until we give up and continue. Default is `120`",
+);
+const OPT_MAX_HTLC_COUNT: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
+    "sling-max-htlc-count",
+    5,
+    "Max number of htlc allowed pending in job and candidate. Default is `5`",
+);
+const OPT_LIGHTNING_CONF: DefaultStringConfigOption = ConfigOption::new_str_with_default(
+    "sling-lightning-conf",
+    "",
+    "Path to lightning_conf for unsupported rpc methods. Default is ``",
+);
+const OPT_STATS_DELETE_FAILURES_AGE: DefaultIntegerConfigOption =
+    ConfigOption::new_i64_with_default(
+        "sling-stats-delete-failures-age",
+        30,
+        "Max age of failure stats in days. Default is `30`",
+    );
+const OPT_STATS_DELETE_FAILURES_SIZE: DefaultIntegerConfigOption =
+    ConfigOption::new_i64_with_default(
+        "sling-stats-delete-failures-size",
+        10_000,
+        "Max number of failure stats per channel. Default is `10000`",
+    );
+const OPT_STATS_DELETE_SUCCESSES_AGE: DefaultIntegerConfigOption =
+    ConfigOption::new_i64_with_default(
+        "sling-stats-delete-successes-age",
+        30,
+        "Max age of success stats in days. Default is `30`",
+    );
+const OPT_STATS_DELETE_SUCCESSES_SIZE: DefaultIntegerConfigOption =
+    ConfigOption::new_i64_with_default(
+        "sling-stats-delete-successes-size",
+        10_000,
+        "Max number of success stats per channel. Default is `10000`",
+    );
+
 #[cfg(all(not(windows), not(target_env = "musl")))]
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
@@ -40,147 +134,27 @@ async fn main() -> Result<(), anyhow::Error> {
     std::env::set_var("CLN_PLUGIN_LOG", "cln_plugin=info,cln_rpc=info,debug");
     log_panics::init();
     let state = PluginState::new();
-    let defaultconfig = Config::new();
     let confplugin;
     match Builder::new(tokio::io::stdin(), tokio::io::stdout())
         .hook("htlc_accepted", htlc_handler)
         .subscribe("block_added", block_added)
-        .option(options::ConfigOption::new(
-            &defaultconfig.utf8.0,
-            options::Value::OptBoolean,
-            &format!(
-                "Switch on/off special characters in node alias. Default is {}",
-                defaultconfig.utf8.1
-            ),
-        ))
-        .option(options::ConfigOption::new(
-            &defaultconfig.refresh_peers_interval.0,
-            options::Value::OptInteger,
-            &format!(
-                "Refresh interval for listpeers task. Default is {}",
-                defaultconfig.refresh_peers_interval.1
-            ),
-        ))
-        .option(options::ConfigOption::new(
-            &defaultconfig.refresh_aliasmap_interval.0,
-            options::Value::OptInteger,
-            &format!(
-                "Refresh interval for aliasmap task. Default is {}",
-                defaultconfig.refresh_aliasmap_interval.1
-            ),
-        ))
-        .option(options::ConfigOption::new(
-            &defaultconfig.refresh_graph_interval.0,
-            options::Value::OptInteger,
-            &format!(
-                "Refresh interval for graph task. Default is {}",
-                defaultconfig.refresh_graph_interval.1
-            ),
-        ))
-        .option(options::ConfigOption::new(
-            &defaultconfig.reset_liquidity_interval.0,
-            options::Value::OptInteger,
-            &format!(
-                "Refresh interval for liquidity reset task. Default is {}",
-                defaultconfig.reset_liquidity_interval.1
-            ),
-        ))
-        .option(options::ConfigOption::new(
-            &defaultconfig.depleteuptopercent.0,
-            options::Value::OptString,
-            &format!(
-                "Deplete up to percent for candidate search. Default is {}",
-                defaultconfig.depleteuptopercent.1
-            ),
-        ))
-        .option(options::ConfigOption::new(
-            &defaultconfig.depleteuptoamount.0,
-            options::Value::OptInteger,
-            &format!(
-                "Deplete up to amount for candidate search. Default is {}",
-                defaultconfig.depleteuptoamount.1
-            ),
-        ))
-        .option(options::ConfigOption::new(
-            &defaultconfig.maxhops.0,
-            options::Value::OptInteger,
-            &format!(
-                "Maximum number of hops in a route. Default is {}",
-                defaultconfig.maxhops.1
-            ),
-        ))
-        .option(options::ConfigOption::new(
-            &defaultconfig.candidates_min_age.0,
-            options::Value::OptInteger,
-            &format!(
-                "Minium age of a candidate to rebalance with in days. Default is {}",
-                defaultconfig.candidates_min_age.1
-            ),
-        ))
-        .option(options::ConfigOption::new(
-            &defaultconfig.paralleljobs.0,
-            options::Value::OptInteger,
-            &format!(
-                "Number of parallel tasks for a job. Default is {}",
-                defaultconfig.paralleljobs.1
-            ),
-        ))
-        .option(options::ConfigOption::new(
-            &defaultconfig.timeoutpay.0,
-            options::Value::OptInteger,
-            &format!(
-                "Timeout for rebalances until we give up and continue. Default is {}",
-                defaultconfig.timeoutpay.1
-            ),
-        ))
-        .option(options::ConfigOption::new(
-            &defaultconfig.max_htlc_count.0,
-            options::Value::OptInteger,
-            &format!(
-                "Max number of htlc allowed pending in job and candidate. Default is {}",
-                defaultconfig.max_htlc_count.1
-            ),
-        ))
-        .option(options::ConfigOption::new(
-            &defaultconfig.lightning_conf.0,
-            options::Value::OptString,
-            &format!(
-                "Path to lightning_conf for unsupported rpc methods. Default is {}",
-                defaultconfig.lightning_conf.1
-            ),
-        ))
-        .option(options::ConfigOption::new(
-            &defaultconfig.stats_delete_failures_age.0,
-            options::Value::OptInteger,
-            &format!(
-                "Max age of failure stats in days. Default is {}",
-                defaultconfig.stats_delete_failures_age.1
-            ),
-        ))
-        .option(options::ConfigOption::new(
-            &defaultconfig.stats_delete_failures_size.0,
-            options::Value::OptInteger,
-            &format!(
-                "Max number of failure stats per channel. Default is {}",
-                defaultconfig.stats_delete_failures_size.1
-            ),
-        ))
-        .option(options::ConfigOption::new(
-            &defaultconfig.stats_delete_successes_age.0,
-            options::Value::OptInteger,
-            &format!(
-                "Max age of success stats in days. Default is {}",
-                defaultconfig.stats_delete_successes_age.1
-            ),
-        ))
-        .option(options::ConfigOption::new(
-            &defaultconfig.stats_delete_successes_size.0,
-            options::Value::OptInteger,
-            &format!(
-                "Max number of success stats per channel. Default is {}",
-                defaultconfig.stats_delete_successes_size.1
-            ),
-        ))
+        .option(OPT_UTF8)
+        .option(OPT_REFRESH_PEERS_INTERVAL)
+        .option(OPT_REFRESH_ALIASMAP_INTERVAL)
+        .option(OPT_REFRESH_GRAPH_INTERVAL)
+        .option(OPT_RESET_LIQUIDITY_INTERVAL)
+        .option(OPT_DEPLETEUPTOPERCENT)
+        .option(OPT_DEPLETEUPTOAMOUNT)
+        .option(OPT_MAXHOPS)
+        .option(OPT_CANDIDATES_MIN_AGE)
+        .option(OPT_PARALLELJOBS)
+        .option(OPT_TIMEOUTPAY)
+        .option(OPT_MAX_HTLC_COUNT)
+        .option(OPT_LIGHTNING_CONF)
+        .option(OPT_STATS_DELETE_FAILURES_AGE)
+        .option(OPT_STATS_DELETE_FAILURES_SIZE)
+        .option(OPT_STATS_DELETE_SUCCESSES_AGE)
+        .option(OPT_STATS_DELETE_SUCCESSES_SIZE)
         .rpcmethod(
             &(PLUGIN_NAME.to_string() + "-job"),
             "add sling job",

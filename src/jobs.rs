@@ -61,7 +61,7 @@ pub async fn slinggo(
     for (chan_id, job) in jobs {
         let parallel_jobs = match job.paralleljobs {
             Some(pj) => pj,
-            None => config.paralleljobs.1,
+            None => config.paralleljobs.value,
         };
         for i in 1..=parallel_jobs {
             {

@@ -319,8 +319,12 @@ pub async fn sling(
             now.elapsed().as_millis().to_string()
         );
 
-        let err_chan = match waitsendpay2(rpc_path, send_response.payment_hash, config.timeoutpay.1)
-            .await
+        let err_chan = match waitsendpay2(
+            rpc_path,
+            send_response.payment_hash,
+            config.timeoutpay.value,
+        )
+        .await
         {
             Ok(o) => {
                 info!(
@@ -806,13 +810,13 @@ async fn next_route(
                 pull_jobs.insert(*except);
                 push_jobs.insert(*except);
             }
-            let last_delay = match config.cltv_delta.1 {
+            let last_delay = match config.cltv_delta.value {
                 Some(c) => max(144, c),
                 None => 144,
             };
             let max_hops = match job.maxhops {
                 Some(h) => h + 1,
-                None => config.maxhops.1 + 1,
+                None => config.maxhops.value + 1,
             };
             match job.sat_direction {
                 SatDirection::Pull => {
@@ -904,10 +908,10 @@ async fn health_check(
                 );
                 my_sleep(600, job_states.clone(), task).await;
                 Some(true)
-            } else if get_total_htlc_count(&channel) > config.max_htlc_count.1 {
+            } else if get_total_htlc_count(&channel) > config.max_htlc_count.value {
                 info!(
                     "{}/{}: already more than {} pending htlcs. Taking a break...",
-                    task.chan_id, task.task_id, config.max_htlc_count.1
+                    task.chan_id, task.task_id, config.max_htlc_count.value
                 );
                 channel_jobstate_update(
                     job_states.clone(),
@@ -1019,11 +1023,11 @@ fn build_candidatelist(
 
     let depleteuptopercent = match job.depleteuptopercent {
         Some(dp) => dp,
-        None => config.depleteuptopercent.1,
+        None => config.depleteuptopercent.value,
     };
     let depleteuptoamount = match job.depleteuptoamount {
         Some(dp) => dp,
-        None => config.depleteuptoamount.1,
+        None => config.depleteuptoamount.value,
     };
 
     for channel in peer_channels.values() {
@@ -1036,7 +1040,7 @@ fn build_candidatelist(
                     Some(c) => c.iter().any(|c| *c == scid),
                     None => true,
                 }
-                && scid.block() <= blockheight - config.candidates_min_age.1
+                && scid.block() <= blockheight - config.candidates_min_age.value
             {
                 let chan_from_peer = match graph.get_channel(&channel.peer_id.unwrap(), &scid) {
                     Ok(chan) => chan.channel,
@@ -1086,7 +1090,7 @@ fn build_candidatelist(
                             && job.maxppm as u64 >= chan_in_ppm
                     }
                 } && !tempbans.contains_key(&scid)
-                    && get_total_htlc_count(channel) <= config.max_htlc_count.1
+                    && get_total_htlc_count(channel) <= config.max_htlc_count.value
                 {
                     candidatelist.push(scid);
                 }

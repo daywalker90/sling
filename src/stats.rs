@@ -31,10 +31,14 @@ pub async fn slingstats(
 
     match args {
         serde_json::Value::Array(a) => {
-            let stats_delete_successes_age =
-                plugin.state().config.lock().stats_delete_successes_age.1;
+            let stats_delete_successes_age = plugin
+                .state()
+                .config
+                .lock()
+                .stats_delete_successes_age
+                .value;
             let stats_delete_failures_age =
-                plugin.state().config.lock().stats_delete_failures_age.1;
+                plugin.state().config.lock().stats_delete_failures_age.value;
             let peer_channels = plugin.state().peer_channels.lock().await.clone();
             if a.len() > 1 {
                 Err(anyhow!(

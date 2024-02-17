@@ -17,6 +17,14 @@ use serde::{Deserialize, Serialize};
 use tabled::Tabled;
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 
+use crate::{
+    OPT_CANDIDATES_MIN_AGE, OPT_DEPLETEUPTOAMOUNT, OPT_DEPLETEUPTOPERCENT, OPT_LIGHTNING_CONF,
+    OPT_MAXHOPS, OPT_MAX_HTLC_COUNT, OPT_PARALLELJOBS, OPT_REFRESH_ALIASMAP_INTERVAL,
+    OPT_REFRESH_GRAPH_INTERVAL, OPT_REFRESH_PEERS_INTERVAL, OPT_RESET_LIQUIDITY_INTERVAL,
+    OPT_STATS_DELETE_FAILURES_AGE, OPT_STATS_DELETE_FAILURES_SIZE, OPT_STATS_DELETE_SUCCESSES_AGE,
+    OPT_STATS_DELETE_SUCCESSES_SIZE, OPT_TIMEOUTPAY, OPT_UTF8,
+};
+
 pub const SUCCESSES_SUFFIX: &str = "_successes.json";
 pub const FAILURES_SUFFIX: &str = "_failures.json";
 pub const NO_ALIAS_SET: &str = "NO_ALIAS_SET";
@@ -70,64 +78,109 @@ pub struct Task {
 #[derive(Clone, Debug)]
 pub struct Config {
     pub pubkey: Option<PublicKey>,
-    pub utf8: (String, bool),
-    pub refresh_peers_interval: (String, u64),
-    pub refresh_aliasmap_interval: (String, u64),
-    pub refresh_graph_interval: (String, u64),
-    pub reset_liquidity_interval: (String, u64),
-    pub depleteuptopercent: (String, f64),
-    pub depleteuptoamount: (String, u64),
-    pub maxhops: (String, u8),
-    pub candidates_min_age: (String, u32),
-    pub paralleljobs: (String, u8),
-    pub timeoutpay: (String, u16),
-    pub max_htlc_count: (String, u64),
-    pub lightning_conf: (String, String),
-    pub stats_delete_failures_age: (String, u64),
-    pub stats_delete_failures_size: (String, u64),
-    pub stats_delete_successes_age: (String, u64),
-    pub stats_delete_successes_size: (String, u64),
-    pub cltv_delta: (String, Option<u16>),
+    pub utf8: DynamicConfigOption<bool>,
+    pub refresh_peers_interval: DynamicConfigOption<u64>,
+    pub refresh_aliasmap_interval: DynamicConfigOption<u64>,
+    pub refresh_graph_interval: DynamicConfigOption<u64>,
+    pub reset_liquidity_interval: DynamicConfigOption<u64>,
+    pub depleteuptopercent: DynamicConfigOption<f64>,
+    pub depleteuptoamount: DynamicConfigOption<u64>,
+    pub maxhops: DynamicConfigOption<u8>,
+    pub candidates_min_age: DynamicConfigOption<u32>,
+    pub paralleljobs: DynamicConfigOption<u8>,
+    pub timeoutpay: DynamicConfigOption<u16>,
+    pub max_htlc_count: DynamicConfigOption<u64>,
+    pub lightning_conf: DynamicConfigOption<String>,
+    pub stats_delete_failures_age: DynamicConfigOption<u64>,
+    pub stats_delete_failures_size: DynamicConfigOption<u64>,
+    pub stats_delete_successes_age: DynamicConfigOption<u64>,
+    pub stats_delete_successes_size: DynamicConfigOption<u64>,
+    pub cltv_delta: DynamicConfigOption<Option<u16>>,
 }
 impl Config {
     pub fn new() -> Config {
         Config {
             pubkey: None,
-            utf8: (PLUGIN_NAME.to_string() + "-utf8", true),
-            refresh_peers_interval: (PLUGIN_NAME.to_string() + "-refresh-peers-interval", 1),
-            refresh_aliasmap_interval: (
-                PLUGIN_NAME.to_string() + "-refresh-aliasmap-interval",
-                3600,
-            ),
-            refresh_graph_interval: (PLUGIN_NAME.to_string() + "-refresh-graph-interval", 600),
-            reset_liquidity_interval: (PLUGIN_NAME.to_string() + "-reset-liquidity-interval", 360),
-            depleteuptopercent: (PLUGIN_NAME.to_string() + "-depleteuptopercent", 0.2),
-            depleteuptoamount: (
-                PLUGIN_NAME.to_string() + "-depleteuptoamount",
-                2_000_000_000,
-            ),
-            maxhops: (PLUGIN_NAME.to_string() + "-maxhops", 8),
-            candidates_min_age: (PLUGIN_NAME.to_string() + "-candidates-min-age", 0),
-            paralleljobs: (PLUGIN_NAME.to_string() + "-paralleljobs", 1),
-            timeoutpay: (PLUGIN_NAME.to_string() + "-timeoutpay", 120),
-            max_htlc_count: (PLUGIN_NAME.to_string() + "-max-htlc-count", 5),
-            lightning_conf: (PLUGIN_NAME.to_string() + "-lightning-conf", "".to_string()),
-            stats_delete_failures_age: (PLUGIN_NAME.to_string() + "-stats-delete-failures-age", 30),
-            stats_delete_failures_size: (
-                PLUGIN_NAME.to_string() + "-stats-delete-failures-size",
-                10_000,
-            ),
-            stats_delete_successes_age: (
-                PLUGIN_NAME.to_string() + "-stats-delete-successes-age",
-                30,
-            ),
-            stats_delete_successes_size: (
-                PLUGIN_NAME.to_string() + "-stats-delete-successes-size",
-                10_000,
-            ),
-            cltv_delta: ("cltv-delta".to_string(), None),
+            utf8: DynamicConfigOption {
+                name: OPT_UTF8.name,
+                value: OPT_UTF8.default,
+            },
+            refresh_peers_interval: DynamicConfigOption {
+                name: OPT_REFRESH_PEERS_INTERVAL.name,
+                value: OPT_REFRESH_PEERS_INTERVAL.default as u64,
+            },
+            refresh_aliasmap_interval: DynamicConfigOption {
+                name: OPT_REFRESH_ALIASMAP_INTERVAL.name,
+                value: OPT_REFRESH_ALIASMAP_INTERVAL.default as u64,
+            },
+            refresh_graph_interval: DynamicConfigOption {
+                name: OPT_REFRESH_GRAPH_INTERVAL.name,
+                value: OPT_REFRESH_GRAPH_INTERVAL.default as u64,
+            },
+            reset_liquidity_interval: DynamicConfigOption {
+                name: OPT_RESET_LIQUIDITY_INTERVAL.name,
+                value: OPT_RESET_LIQUIDITY_INTERVAL.default as u64,
+            },
+            depleteuptopercent: DynamicConfigOption {
+                name: OPT_DEPLETEUPTOPERCENT.name,
+                value: OPT_DEPLETEUPTOPERCENT.default.parse::<f64>().unwrap(),
+            },
+            depleteuptoamount: DynamicConfigOption {
+                name: OPT_DEPLETEUPTOAMOUNT.name,
+                value: OPT_DEPLETEUPTOAMOUNT.default as u64,
+            },
+            maxhops: DynamicConfigOption {
+                name: OPT_MAXHOPS.name,
+                value: OPT_MAXHOPS.default as u8,
+            },
+            candidates_min_age: DynamicConfigOption {
+                name: OPT_CANDIDATES_MIN_AGE.name,
+                value: OPT_CANDIDATES_MIN_AGE.default as u32,
+            },
+            paralleljobs: DynamicConfigOption {
+                name: OPT_PARALLELJOBS.name,
+                value: OPT_PARALLELJOBS.default as u8,
+            },
+            timeoutpay: DynamicConfigOption {
+                name: OPT_TIMEOUTPAY.name,
+                value: OPT_TIMEOUTPAY.default as u16,
+            },
+            max_htlc_count: DynamicConfigOption {
+                name: OPT_MAX_HTLC_COUNT.name,
+                value: OPT_MAX_HTLC_COUNT.default as u64,
+            },
+            lightning_conf: DynamicConfigOption {
+                name: OPT_LIGHTNING_CONF.name,
+                value: OPT_LIGHTNING_CONF.default.to_string(),
+            },
+            stats_delete_failures_age: DynamicConfigOption {
+                name: OPT_STATS_DELETE_FAILURES_AGE.name,
+                value: OPT_STATS_DELETE_FAILURES_AGE.default as u64,
+            },
+            stats_delete_failures_size: DynamicConfigOption {
+                name: OPT_STATS_DELETE_FAILURES_SIZE.name,
+                value: OPT_STATS_DELETE_FAILURES_SIZE.default as u64,
+            },
+            stats_delete_successes_age: DynamicConfigOption {
+                name: OPT_STATS_DELETE_SUCCESSES_AGE.name,
+                value: OPT_STATS_DELETE_SUCCESSES_AGE.default as u64,
+            },
+            stats_delete_successes_size: DynamicConfigOption {
+                name: OPT_STATS_DELETE_SUCCESSES_SIZE.name,
+                value: OPT_STATS_DELETE_SUCCESSES_SIZE.default as u64,
+            },
+            cltv_delta: DynamicConfigOption {
+                name: "cltv-delta",
+                value: None,
+            },
         }
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct DynamicConfigOption<T> {
+    pub name: &'static str,
+    pub value: T,
 }
 
 #[derive(Debug, Clone)]

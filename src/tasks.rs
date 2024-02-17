@@ -26,7 +26,7 @@ pub async fn refresh_aliasmap(plugin: Plugin<PluginState>) -> Result<(), Error> 
         .lock()
         .clone()
         .refresh_aliasmap_interval
-        .1;
+        .value;
 
     loop {
         let now = Instant::now();
@@ -52,7 +52,7 @@ pub async fn refresh_listpeerchannels_loop(plugin: Plugin<PluginState>) -> Resul
         .lock()
         .clone()
         .refresh_peers_interval
-        .1;
+        .value;
 
     loop {
         {
@@ -90,7 +90,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
         .lock()
         .clone()
         .refresh_graph_interval
-        .1;
+        .value;
 
     loop {
         {
@@ -168,7 +168,7 @@ pub async fn refresh_liquidity(plugin: Plugin<PluginState>) -> Result<(), Error>
         .lock()
         .clone()
         .reset_liquidity_interval
-        .1;
+        .value;
     loop {
         {
             let now = Instant::now();
@@ -237,14 +237,26 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     Err(e) => debug!("{}: probably no failure stats yet: {:?}", scid, e),
                 };
             }
-            let stats_delete_successes_age =
-                plugin.state().config.lock().stats_delete_successes_age.1;
+            let stats_delete_successes_age = plugin
+                .state()
+                .config
+                .lock()
+                .stats_delete_successes_age
+                .value;
             let stats_delete_failures_age =
-                plugin.state().config.lock().stats_delete_failures_age.1;
-            let stats_delete_successes_size =
-                plugin.state().config.lock().stats_delete_successes_size.1;
-            let stats_delete_failures_size =
-                plugin.state().config.lock().stats_delete_failures_size.1;
+                plugin.state().config.lock().stats_delete_failures_age.value;
+            let stats_delete_successes_size = plugin
+                .state()
+                .config
+                .lock()
+                .stats_delete_successes_size
+                .value;
+            let stats_delete_failures_size = plugin
+                .state()
+                .config
+                .lock()
+                .stats_delete_failures_size
+                .value;
             let sys_time_now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
