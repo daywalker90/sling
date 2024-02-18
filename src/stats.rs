@@ -281,6 +281,11 @@ fn success_stats(
         .to_string();
 
     let successes_in_time_window = SuccessesInTimeWindow {
+        time_window_days: if time_window == 0 {
+            "all".to_string()
+        } else {
+            time_window.to_string()
+        },
         total_amount_sats: total_amount_msat / 1_000,
         feeppm_weighted_avg: weighted_fee_ppm,
         feeppm_min: *fee_ppms.iter().min().unwrap(),
@@ -298,6 +303,8 @@ fn success_stats(
         most_common_hop_count,
         time_of_last_rebalance,
         total_rebalances: total_transactions,
+        total_spent_sats: (weighted_fee_ppm as f64 * 0.000001 * total_amount_msat as f64) as u64
+            / 1000,
     };
     Some(successes_in_time_window)
 }
@@ -378,6 +385,11 @@ fn failure_stats(
         .to_string();
 
     let failures_in_time_window = FailuresInTimeWindow {
+        time_window_days: if time_window == 0 {
+            "all".to_string()
+        } else {
+            time_window.to_string()
+        },
         total_amount_tried_sats: total_amount_msat / 1_000,
         top_5_failure_reasons: top_5_failure_reasons
             .iter()

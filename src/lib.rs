@@ -162,6 +162,7 @@ pub struct FailureReasonCount {
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct FailuresInTimeWindow {
+    pub time_window_days: String,
     pub total_amount_tried_sats: u64,
     pub top_5_failure_reasons: Vec<FailureReasonCount>,
     pub top_5_fail_nodes: Vec<PeerPartnerStats>,
@@ -173,6 +174,7 @@ pub struct FailuresInTimeWindow {
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct SuccessesInTimeWindow {
+    pub time_window_days: String,
     pub total_amount_sats: u64,
     pub feeppm_weighted_avg: u64,
     pub feeppm_min: u32,
@@ -183,6 +185,7 @@ pub struct SuccessesInTimeWindow {
     pub most_common_hop_count: Option<u8>,
     pub time_of_last_rebalance: String,
     pub total_rebalances: u64,
+    pub total_spent_sats: u64,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
