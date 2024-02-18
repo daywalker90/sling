@@ -103,71 +103,71 @@ impl Config {
             pubkey: None,
             utf8: DynamicConfigOption {
                 name: OPT_UTF8.name,
-                value: OPT_UTF8.default,
+                value: true,
             },
             refresh_peers_interval: DynamicConfigOption {
                 name: OPT_REFRESH_PEERS_INTERVAL.name,
-                value: OPT_REFRESH_PEERS_INTERVAL.default as u64,
+                value: 1,
             },
             refresh_aliasmap_interval: DynamicConfigOption {
                 name: OPT_REFRESH_ALIASMAP_INTERVAL.name,
-                value: OPT_REFRESH_ALIASMAP_INTERVAL.default as u64,
+                value: 3600,
             },
             refresh_graph_interval: DynamicConfigOption {
                 name: OPT_REFRESH_GRAPH_INTERVAL.name,
-                value: OPT_REFRESH_GRAPH_INTERVAL.default as u64,
+                value: 600,
             },
             reset_liquidity_interval: DynamicConfigOption {
                 name: OPT_RESET_LIQUIDITY_INTERVAL.name,
-                value: OPT_RESET_LIQUIDITY_INTERVAL.default as u64,
+                value: 360,
             },
             depleteuptopercent: DynamicConfigOption {
                 name: OPT_DEPLETEUPTOPERCENT.name,
-                value: OPT_DEPLETEUPTOPERCENT.default.parse::<f64>().unwrap(),
+                value: 0.2,
             },
             depleteuptoamount: DynamicConfigOption {
                 name: OPT_DEPLETEUPTOAMOUNT.name,
-                value: OPT_DEPLETEUPTOAMOUNT.default as u64,
+                value: 2_000_000_000,
             },
             maxhops: DynamicConfigOption {
                 name: OPT_MAXHOPS.name,
-                value: OPT_MAXHOPS.default as u8,
+                value: 8,
             },
             candidates_min_age: DynamicConfigOption {
                 name: OPT_CANDIDATES_MIN_AGE.name,
-                value: OPT_CANDIDATES_MIN_AGE.default as u32,
+                value: 0,
             },
             paralleljobs: DynamicConfigOption {
                 name: OPT_PARALLELJOBS.name,
-                value: OPT_PARALLELJOBS.default as u8,
+                value: 1,
             },
             timeoutpay: DynamicConfigOption {
                 name: OPT_TIMEOUTPAY.name,
-                value: OPT_TIMEOUTPAY.default as u16,
+                value: 120,
             },
             max_htlc_count: DynamicConfigOption {
                 name: OPT_MAX_HTLC_COUNT.name,
-                value: OPT_MAX_HTLC_COUNT.default as u64,
+                value: 5,
             },
             lightning_conf: DynamicConfigOption {
                 name: OPT_LIGHTNING_CONF.name,
-                value: OPT_LIGHTNING_CONF.default.to_string(),
+                value: "".to_string(),
             },
             stats_delete_failures_age: DynamicConfigOption {
                 name: OPT_STATS_DELETE_FAILURES_AGE.name,
-                value: OPT_STATS_DELETE_FAILURES_AGE.default as u64,
+                value: 30,
             },
             stats_delete_failures_size: DynamicConfigOption {
                 name: OPT_STATS_DELETE_FAILURES_SIZE.name,
-                value: OPT_STATS_DELETE_FAILURES_SIZE.default as u64,
+                value: 10_000,
             },
             stats_delete_successes_age: DynamicConfigOption {
                 name: OPT_STATS_DELETE_SUCCESSES_AGE.name,
-                value: OPT_STATS_DELETE_SUCCESSES_AGE.default as u64,
+                value: 30,
             },
             stats_delete_successes_size: DynamicConfigOption {
                 name: OPT_STATS_DELETE_SUCCESSES_SIZE.name,
-                value: OPT_STATS_DELETE_SUCCESSES_SIZE.default as u64,
+                value: 10_000,
             },
             cltv_delta: DynamicConfigOption {
                 name: "cltv-delta",

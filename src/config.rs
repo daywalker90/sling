@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Error};
 use chrono::Utc;
 use cln_plugin::{
-    options::{config_type::DefaultInteger, ConfigOption},
+    options::{config_type::Integer, ConfigOption},
     ConfiguredPlugin,
 };
 use log::{info, warn};
@@ -53,7 +53,7 @@ fn is_valid_hour_timestamp(val: u64) -> bool {
 }
 
 fn options_value_to_u64(
-    opt: &ConfigOption<DefaultInteger>,
+    opt: &ConfigOption<Integer>,
     value: i64,
     gteq: u64,
     time_factor_to_secs: Option<u64>,
@@ -241,7 +241,9 @@ pub fn get_prestart_configs(
     state: PluginState,
 ) -> Result<(), Error> {
     let mut config = state.config.lock();
-    config.lightning_conf.value = plugin.option(&OPT_LIGHTNING_CONF)?;
+    if let Some(lconf) = plugin.option(&OPT_LIGHTNING_CONF)? {
+        config.lightning_conf.value = lconf
+    };
 
     Ok(())
 }
@@ -251,103 +253,83 @@ pub fn get_startup_options(
     state: PluginState,
 ) -> Result<(), Error> {
     let mut config = state.config.lock();
-    config.utf8.value = plugin.option(&OPT_UTF8)?;
-    config.refresh_peers_interval.value = options_value_to_u64(
-        &OPT_REFRESH_PEERS_INTERVAL,
-        plugin.option(&OPT_REFRESH_PEERS_INTERVAL)?,
-        1,
-        None,
-    )?;
-    config.refresh_aliasmap_interval.value = options_value_to_u64(
-        &OPT_REFRESH_ALIASMAP_INTERVAL,
-        plugin.option(&OPT_REFRESH_ALIASMAP_INTERVAL)?,
-        1,
-        None,
-    )?;
-    config.refresh_graph_interval.value = options_value_to_u64(
-        &OPT_REFRESH_GRAPH_INTERVAL,
-        plugin.option(&OPT_REFRESH_GRAPH_INTERVAL)?,
-        1,
-        None,
-    )?;
-    config.reset_liquidity_interval.value = options_value_to_u64(
-        &OPT_RESET_LIQUIDITY_INTERVAL,
-        plugin.option(&OPT_RESET_LIQUIDITY_INTERVAL)?,
-        10,
-        None,
-    )?;
-    config.depleteuptopercent.value = match plugin.option(&OPT_DEPLETEUPTOPERCENT)?.parse::<f64>() {
-        Ok(f) => {
-            if (0.0..1.0).contains(&f) {
-                f
-            } else {
-                return Err(anyhow!(
-                    "Error: {} needs to be greater than 0 and <1, not `{}`.",
-                    config.depleteuptopercent.name,
+    if let Some(utf8) = plugin.option(&OPT_UTF8)? {
+        config.utf8.value = utf8
+    };
+    if let Some(rpi) = plugin.option(&OPT_REFRESH_PEERS_INTERVAL)? {
+        config.refresh_peers_interval.value =
+            options_value_to_u64(&OPT_REFRESH_PEERS_INTERVAL, rpi, 1, None)?
+    };
+    if let Some(rai) = plugin.option(&OPT_REFRESH_ALIASMAP_INTERVAL)? {
+        config.refresh_aliasmap_interval.value =
+            options_value_to_u64(&OPT_REFRESH_ALIASMAP_INTERVAL, rai, 1, None)?
+    };
+    if let Some(rgi) = plugin.option(&OPT_REFRESH_GRAPH_INTERVAL)? {
+        config.refresh_graph_interval.value =
+            options_value_to_u64(&OPT_REFRESH_GRAPH_INTERVAL, rgi, 1, None)?
+    };
+    if let Some(rli) = plugin.option(&OPT_RESET_LIQUIDITY_INTERVAL)? {
+        config.reset_liquidity_interval.value =
+            options_value_to_u64(&OPT_RESET_LIQUIDITY_INTERVAL, rli, 10, None)?
+    };
+    if let Some(dup) = plugin.option(&OPT_DEPLETEUPTOPERCENT)? {
+        config.depleteuptopercent.value = match dup.parse::<f64>() {
+            Ok(f) => {
+                if (0.0..1.0).contains(&f) {
                     f
-                ));
+                } else {
+                    return Err(anyhow!(
+                        "Error: {} needs to be greater than 0 and <1, not `{}`.",
+                        config.depleteuptopercent.name,
+                        f
+                    ));
+                }
+            }
+            Err(e) => {
+                return Err(anyhow!(
+                    "Error: {} could not parse a floating point for `{}`.",
+                    e,
+                    config.depleteuptopercent.name,
+                ))
             }
         }
-        Err(e) => {
-            return Err(anyhow!(
-                "Error: {} could not parse a floating point for `{}`.",
-                e,
-                config.depleteuptopercent.name,
-            ))
-        }
     };
-    config.depleteuptoamount.value = options_value_to_u64(
-        &OPT_DEPLETEUPTOAMOUNT,
-        plugin.option(&OPT_DEPLETEUPTOAMOUNT)?,
-        0,
-        None,
-    )? * 1000;
-    config.maxhops.value =
-        options_value_to_u64(&OPT_MAXHOPS, plugin.option(&OPT_MAXHOPS)?, 2, None)? as u8;
-    config.candidates_min_age.value = options_value_to_u64(
-        &OPT_CANDIDATES_MIN_AGE,
-        plugin.option(&OPT_CANDIDATES_MIN_AGE)?,
-        0,
-        None,
-    )? as u32;
-    config.paralleljobs.value = options_value_to_u64(
-        &OPT_PARALLELJOBS,
-        plugin.option(&OPT_PARALLELJOBS)?,
-        1,
-        None,
-    )? as u8;
-    config.timeoutpay.value =
-        options_value_to_u64(&OPT_TIMEOUTPAY, plugin.option(&OPT_TIMEOUTPAY)?, 1, None)? as u16;
-    config.max_htlc_count.value = options_value_to_u64(
-        &OPT_MAX_HTLC_COUNT,
-        plugin.option(&OPT_MAX_HTLC_COUNT)?,
-        1,
-        None,
-    )?;
-    config.stats_delete_failures_age.value = options_value_to_u64(
-        &OPT_STATS_DELETE_FAILURES_AGE,
-        plugin.option(&OPT_STATS_DELETE_FAILURES_AGE)?,
-        0,
-        Some(24 * 60 * 60),
-    )?;
-    config.stats_delete_failures_size.value = options_value_to_u64(
-        &OPT_STATS_DELETE_FAILURES_SIZE,
-        plugin.option(&OPT_STATS_DELETE_FAILURES_SIZE)?,
-        0,
-        None,
-    )?;
-    config.stats_delete_successes_age.value = options_value_to_u64(
-        &OPT_STATS_DELETE_SUCCESSES_AGE,
-        plugin.option(&OPT_STATS_DELETE_SUCCESSES_AGE)?,
-        0,
-        Some(24 * 60 * 60),
-    )?;
-    config.stats_delete_successes_size.value = options_value_to_u64(
-        &OPT_STATS_DELETE_SUCCESSES_SIZE,
-        plugin.option(&OPT_STATS_DELETE_SUCCESSES_SIZE)?,
-        0,
-        None,
-    )?;
+    if let Some(dua) = plugin.option(&OPT_DEPLETEUPTOAMOUNT)? {
+        config.depleteuptoamount.value =
+            options_value_to_u64(&OPT_DEPLETEUPTOAMOUNT, dua, 0, None)? * 1000
+    };
+    if let Some(mhops) = plugin.option(&OPT_MAXHOPS)? {
+        config.maxhops.value = options_value_to_u64(&OPT_MAXHOPS, mhops, 2, None)? as u8
+    };
+    if let Some(cma) = plugin.option(&OPT_CANDIDATES_MIN_AGE)? {
+        config.candidates_min_age.value =
+            options_value_to_u64(&OPT_CANDIDATES_MIN_AGE, cma, 0, None)? as u32
+    };
+    if let Some(pj) = plugin.option(&OPT_PARALLELJOBS)? {
+        config.paralleljobs.value = options_value_to_u64(&OPT_PARALLELJOBS, pj, 1, None)? as u8
+    };
+    if let Some(tp) = plugin.option(&OPT_TIMEOUTPAY)? {
+        config.timeoutpay.value = options_value_to_u64(&OPT_TIMEOUTPAY, tp, 1, None)? as u16
+    };
+    if let Some(mhc) = plugin.option(&OPT_MAX_HTLC_COUNT)? {
+        config.max_htlc_count.value = options_value_to_u64(&OPT_MAX_HTLC_COUNT, mhc, 1, None)?
+    };
+    if let Some(sdfa) = plugin.option(&OPT_STATS_DELETE_FAILURES_AGE)? {
+        config.stats_delete_failures_age.value =
+            options_value_to_u64(&OPT_STATS_DELETE_FAILURES_AGE, sdfa, 0, Some(24 * 60 * 60))?
+    };
+    if let Some(sdfs) = plugin.option(&OPT_STATS_DELETE_FAILURES_SIZE)? {
+        config.stats_delete_failures_size.value =
+            options_value_to_u64(&OPT_STATS_DELETE_FAILURES_SIZE, sdfs, 0, None)?
+    };
+    if let Some(sdsa) = plugin.option(&OPT_STATS_DELETE_SUCCESSES_AGE)? {
+        config.stats_delete_successes_age.value =
+            options_value_to_u64(&OPT_STATS_DELETE_SUCCESSES_AGE, sdsa, 0, Some(24 * 60 * 60))?
+    };
+    if let Some(sdss) = plugin.option(&OPT_STATS_DELETE_SUCCESSES_SIZE)? {
+        config.stats_delete_successes_size.value =
+            options_value_to_u64(&OPT_STATS_DELETE_SUCCESSES_SIZE, sdss, 0, None)?
+    };
 
     Ok(())
 }

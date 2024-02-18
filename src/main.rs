@@ -1,6 +1,6 @@
 use anyhow::anyhow;
 use cln_plugin::options::{
-    ConfigOption, DefaultBooleanConfigOption, DefaultIntegerConfigOption, DefaultStringConfigOption,
+    BooleanConfigOption, ConfigOption, IntegerConfigOption, StringConfigOption,
 };
 use cln_plugin::Builder;
 use cln_rpc::primitives::PublicKey;
@@ -34,96 +34,74 @@ mod util;
 #[cfg(test)]
 mod tests;
 
-const OPT_UTF8: DefaultBooleanConfigOption = ConfigOption::new_bool_with_default(
+const OPT_UTF8: BooleanConfigOption = ConfigOption::new_bool_no_default(
     "sling-utf8",
-    true,
     "Switch on/off special characters in node alias. Default is `true`",
 );
-const OPT_REFRESH_PEERS_INTERVAL: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
+const OPT_REFRESH_PEERS_INTERVAL: IntegerConfigOption = ConfigOption::new_i64_no_default(
     "sling-refresh-peers-interval",
-    1,
     "Refresh interval for listpeers task. Default is `1`",
 );
-const OPT_REFRESH_ALIASMAP_INTERVAL: DefaultIntegerConfigOption =
-    ConfigOption::new_i64_with_default(
-        "sling-refresh-aliasmap-interval",
-        3600,
-        "Refresh interval for aliasmap task. Default is `3600`",
-    );
-const OPT_REFRESH_GRAPH_INTERVAL: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
+const OPT_REFRESH_ALIASMAP_INTERVAL: IntegerConfigOption = ConfigOption::new_i64_no_default(
+    "sling-refresh-aliasmap-interval",
+    "Refresh interval for aliasmap task. Default is `3600`",
+);
+const OPT_REFRESH_GRAPH_INTERVAL: IntegerConfigOption = ConfigOption::new_i64_no_default(
     "sling-refresh-graph-interval",
-    600,
     "Refresh interval for graph task. Default is `600`",
 );
-const OPT_RESET_LIQUIDITY_INTERVAL: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
+const OPT_RESET_LIQUIDITY_INTERVAL: IntegerConfigOption = ConfigOption::new_i64_no_default(
     "sling-reset-liquidity-interval",
-    360,
     "Refresh interval for liquidity reset task. Default is `360`",
 );
-const OPT_DEPLETEUPTOPERCENT: DefaultStringConfigOption = ConfigOption::new_str_with_default(
+const OPT_DEPLETEUPTOPERCENT: StringConfigOption = ConfigOption::new_str_no_default(
     "sling-depleteuptopercent",
-    "0.2",
     "Deplete up to percent for candidate search. Default is `0.2`",
 );
-const OPT_DEPLETEUPTOAMOUNT: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
+const OPT_DEPLETEUPTOAMOUNT: IntegerConfigOption = ConfigOption::new_i64_no_default(
     "sling-depleteuptoamount",
-    2_000_000_000,
     "Deplete up to amount for candidate search. Default is `2000000000`",
 );
-const OPT_MAXHOPS: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
+const OPT_MAXHOPS: IntegerConfigOption = ConfigOption::new_i64_no_default(
     "sling-maxhops",
-    8,
     "Maximum number of hops in a route. Default is `8`",
 );
-const OPT_CANDIDATES_MIN_AGE: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
+const OPT_CANDIDATES_MIN_AGE: IntegerConfigOption = ConfigOption::new_i64_no_default(
     "sling-candidates-min-age",
-    0,
     "Minium age of a candidate to rebalance with in days. Default is `0`",
 );
-const OPT_PARALLELJOBS: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
+const OPT_PARALLELJOBS: IntegerConfigOption = ConfigOption::new_i64_no_default(
     "sling-paralleljobs",
-    1,
     "Number of parallel tasks for a job. Default is `1`",
 );
-const OPT_TIMEOUTPAY: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
+const OPT_TIMEOUTPAY: IntegerConfigOption = ConfigOption::new_i64_no_default(
     "sling-timeoutpay",
-    120,
     "Timeout for rebalances until we give up and continue. Default is `120`",
 );
-const OPT_MAX_HTLC_COUNT: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
+const OPT_MAX_HTLC_COUNT: IntegerConfigOption = ConfigOption::new_i64_no_default(
     "sling-max-htlc-count",
-    5,
     "Max number of htlc allowed pending in job and candidate. Default is `5`",
 );
-const OPT_LIGHTNING_CONF: DefaultStringConfigOption = ConfigOption::new_str_with_default(
+const OPT_LIGHTNING_CONF: StringConfigOption = ConfigOption::new_str_no_default(
     "sling-lightning-conf",
-    "",
     "Path to lightning_conf for unsupported rpc methods. Default is ``",
 );
-const OPT_STATS_DELETE_FAILURES_AGE: DefaultIntegerConfigOption =
-    ConfigOption::new_i64_with_default(
-        "sling-stats-delete-failures-age",
-        30,
-        "Max age of failure stats in days. Default is `30`",
-    );
-const OPT_STATS_DELETE_FAILURES_SIZE: DefaultIntegerConfigOption =
-    ConfigOption::new_i64_with_default(
-        "sling-stats-delete-failures-size",
-        10_000,
-        "Max number of failure stats per channel. Default is `10000`",
-    );
-const OPT_STATS_DELETE_SUCCESSES_AGE: DefaultIntegerConfigOption =
-    ConfigOption::new_i64_with_default(
-        "sling-stats-delete-successes-age",
-        30,
-        "Max age of success stats in days. Default is `30`",
-    );
-const OPT_STATS_DELETE_SUCCESSES_SIZE: DefaultIntegerConfigOption =
-    ConfigOption::new_i64_with_default(
-        "sling-stats-delete-successes-size",
-        10_000,
-        "Max number of success stats per channel. Default is `10000`",
-    );
+const OPT_STATS_DELETE_FAILURES_AGE: IntegerConfigOption = ConfigOption::new_i64_no_default(
+    "sling-stats-delete-failures-age",
+    "Max age of failure stats in days. Default is `30`",
+);
+const OPT_STATS_DELETE_FAILURES_SIZE: IntegerConfigOption = ConfigOption::new_i64_no_default(
+    "sling-stats-delete-failures-size",
+    "Max number of failure stats per channel. Default is `10000`",
+);
+const OPT_STATS_DELETE_SUCCESSES_AGE: IntegerConfigOption = ConfigOption::new_i64_no_default(
+    "sling-stats-delete-successes-age",
+    "Max age of success stats in days. Default is `30`",
+);
+const OPT_STATS_DELETE_SUCCESSES_SIZE: IntegerConfigOption = ConfigOption::new_i64_no_default(
+    "sling-stats-delete-successes-size",
+    "Max number of success stats per channel. Default is `10000`",
+);
 
 #[cfg(all(not(windows), not(target_env = "musl")))]
 #[global_allocator]
