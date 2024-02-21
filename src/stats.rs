@@ -99,8 +99,9 @@ pub async fn slingstats(
                         .map(|jt| jt.id().to_string() + ":" + &jt.state().to_string())
                         .collect();
                     for success_reb in successes.get(&job).unwrap_or(&Vec::new()) {
-                        if success_reb.completed_at
-                            >= now - stats_delete_successes_age * 24 * 60 * 60
+                        if stats_delete_successes_age == 0
+                            || success_reb.completed_at
+                                >= now - stats_delete_successes_age * 24 * 60 * 60
                         {
                             total_amount_msat += success_reb.amount_msat;
                             weighted_fee_ppm +=
