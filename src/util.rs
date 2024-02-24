@@ -1,6 +1,5 @@
 use bitcoin::secp256k1::hashes::Hash;
 use bitcoin::secp256k1::hashes::HashEngine;
-use cln_rpc::model::responses::ListchannelsChannels;
 use cln_rpc::model::responses::ListpeerchannelsChannels;
 use cln_rpc::model::responses::ListpeerchannelsChannelsState;
 use cln_rpc::primitives::PublicKey;
@@ -26,6 +25,7 @@ use crate::model::GRAPH_FILE_NAME;
 use crate::model::JOB_FILE_NAME;
 use crate::model::PLUGIN_NAME;
 use crate::model::{JobMessage, JobState, LnGraph};
+use crate::DirectedChannel;
 use sling::Job;
 
 use crate::tasks::refresh_listpeerchannels;
@@ -782,7 +782,7 @@ pub fn get_total_htlc_count(channel: &ListpeerchannelsChannels) -> u64 {
     }
 }
 
-pub fn edge_cost(edge: &ListchannelsChannels, amount: u64) -> u64 {
+pub fn edge_cost(edge: &DirectedChannel, amount: u64) -> u64 {
     // debug!(
     //     "edge cost for {} source:{} is {}",
     //     edge.short_channel_id.to_string(),

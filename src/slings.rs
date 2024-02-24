@@ -22,8 +22,8 @@ use tokio::time::Instant;
 use crate::dijkstra::dijkstra;
 use crate::errors::WaitsendpayErrorData;
 use crate::model::{
-    Config, DijkstraNode, ExcludeGraph, FailureReb, JobMessage, LnGraph, PluginState,
-    PublicKeyPair, SuccessReb, Task, PLUGIN_NAME,
+    Config, DijkstraNode, ExcludeGraph, FailureReb, JobMessage, PluginState, PublicKeyPair,
+    SuccessReb, Task, PLUGIN_NAME,
 };
 use crate::rpc::{slingsend, waitsendpay2};
 use crate::util::{
@@ -672,37 +672,16 @@ async fn next_route(
     match job.candidatelist {
         Some(ref c) => {
             if !c.is_empty() {
-                candidatelist = build_candidatelist(
-                    peer_channels,
-                    job,
-                    &graph,
-                    tempbans,
-                    &config,
-                    Some(c),
-                    blockheight,
-                )
+                candidatelist =
+                    build_candidatelist(peer_channels, job, tempbans, &config, Some(c), blockheight)
             } else {
-                candidatelist = build_candidatelist(
-                    peer_channels,
-                    job,
-                    &graph,
-                    tempbans,
-                    &config,
-                    None,
-                    blockheight,
-                )
+                candidatelist =
+                    build_candidatelist(peer_channels, job, tempbans, &config, None, blockheight)
             }
         }
         None => {
-            candidatelist = build_candidatelist(
-                peer_channels,
-                job,
-                &graph,
-                tempbans,
-                &config,
-                None,
-                blockheight,
-            )
+            candidatelist =
+                build_candidatelist(peer_channels, job, tempbans, &config, None, blockheight)
         }
     }
     debug!(
@@ -1013,7 +992,6 @@ async fn health_check(
 fn build_candidatelist(
     peer_channels: &BTreeMap<ShortChannelId, ListpeerchannelsChannels>,
     job: &Job,
-    graph: &LnGraph,
     tempbans: &HashMap<ShortChannelId, u64>,
     config: &Config,
     custom_candidates: Option<&Vec<ShortChannelId>>,
@@ -1042,10 +1020,20 @@ fn build_candidatelist(
                 }
                 && scid.block() <= blockheight - config.candidates_min_age.value
             {
-                let chan_from_peer = match graph.get_channel(&channel.peer_id.unwrap(), &scid) {
-                    Ok(chan) => chan.channel,
-                    Err(_) => continue,
+                let chan_updates = if let Some(updates) = &channel.updates {
+                    if let Some(remote) = &updates.remote {
+                        remote
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
                 };
+                let chan_in_ppm = feeppm_effective(
+                    chan_updates.fee_proportional_millionths.unwrap(),
+                    Amount::msat(&chan_updates.fee_base_msat.unwrap()) as u32,
+                    job.amount_msat,
+                );
 
                 let to_us_msat = Amount::msat(&channel.to_us_msat.unwrap());
                 let total_msat = Amount::msat(&channel.total_msat.unwrap());
@@ -1054,11 +1042,7 @@ fn build_candidatelist(
                     Amount::msat(&channel.fee_base_msat.unwrap()) as u32,
                     job.amount_msat,
                 );
-                let chan_in_ppm = feeppm_effective(
-                    chan_from_peer.fee_per_millionth,
-                    chan_from_peer.base_fee_millisatoshi,
-                    job.amount_msat,
-                );
+
                 if match job.sat_direction {
                     SatDirection::Pull => {
                         to_us_msat

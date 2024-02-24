@@ -5,8 +5,12 @@ use std::{
 };
 
 use anyhow::{anyhow, Error};
+use bitcoin::secp256k1::PublicKey;
 use cln_plugin::Plugin;
-use cln_rpc::primitives::{Amount, ShortChannelId};
+use cln_rpc::{
+    model::responses::ListpeerchannelsChannelsState,
+    primitives::{Amount, ShortChannelId},
+};
 
 use log::{debug, info};
 
@@ -91,17 +95,12 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
         .clone()
         .refresh_graph_interval
         .value;
+    let my_pubkey = plugin.state().config.lock().pubkey.unwrap();
 
     loop {
         {
             let now = Instant::now();
-            info!("Getting all channels in gossip...");
-            let channels = list_channels(&rpc_path, None, None, None).await?.channels;
-            info!(
-                "Getting {} channels done in {}s!",
-                channels.len(),
-                now.elapsed().as_secs().to_string()
-            );
+            let mut new_graph = BTreeMap::<PublicKey, Vec<DirectedChannelState>>::new();
             let jobs = read_jobs(
                 &Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME),
                 &plugin,
@@ -124,32 +123,115 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                 .as_secs()
                 - 1_209_600) as u32;
 
-            plugin.state().graph.lock().await.update(LnGraph {
-                graph: channels
-                    .into_iter()
-                    .filter(|chan| {
-                        (feeppm_effective(
-                            chan.fee_per_millionth,
-                            chan.base_fee_millisatoshi,
-                            max_amount,
-                        ) as u32
-                            <= max_maxppm
-                            && Amount::msat(&chan.htlc_maximum_msat.unwrap_or(chan.amount_msat))
-                                >= min_amount
-                            && Amount::msat(&chan.htlc_minimum_msat) <= max_amount
-                            && chan.last_update >= two_w_ago
-                            && chan.delay <= 288
-                            && chan.active)
-                            || chan.source == mypubkey
-                            || chan.destination == mypubkey
-                    })
-                    .fold(BTreeMap::new(), |mut map, chan| {
-                        map.entry(chan.source)
-                            .or_default()
-                            .push(DirectedChannel::new(chan));
-                        map
-                    }),
-            });
+            info!("Getting all channels in gossip...");
+            let channels = list_channels(&rpc_path, None, None, None).await?.channels;
+            info!(
+                "Getting {} channels done in {}s!",
+                channels.len(),
+                now.elapsed().as_secs().to_string()
+            );
+            let local_channels = plugin.state().peer_channels.lock().await;
+            for chan in local_channels.values() {
+                let private = if let Some(pri) = chan.private {
+                    pri
+                } else {
+                    continue;
+                };
+                let state = if let Some(st) = chan.state {
+                    st
+                } else {
+                    continue;
+                };
+                let updates = if let Some(upd) = &chan.updates {
+                    upd
+                } else {
+                    continue;
+                };
+                let local_updates = if let Some(lupd) = &updates.local {
+                    lupd
+                } else {
+                    continue;
+                };
+                let remote_updates = if let Some(rupd) = &updates.remote {
+                    rupd
+                } else {
+                    continue;
+                };
+                if private
+                    && (state == ListpeerchannelsChannelsState::CHANNELD_NORMAL
+                        || state == ListpeerchannelsChannelsState::CHANNELD_AWAITING_SPLICE)
+                {
+                    new_graph.entry(my_pubkey).or_default().push(
+                        DirectedChannelState::from_directed_channel(DirectedChannel {
+                            source: my_pubkey,
+                            destination: chan.peer_id.unwrap(),
+                            short_channel_id: chan.short_channel_id.unwrap(),
+                            fee_per_millionth: local_updates.fee_proportional_millionths.unwrap(),
+                            base_fee_millisatoshi: Amount::msat(
+                                &local_updates.fee_base_msat.unwrap(),
+                            ) as u32,
+                            htlc_maximum_msat: local_updates.htlc_maximum_msat,
+                            htlc_minimum_msat: local_updates.htlc_minimum_msat.unwrap(),
+                            amount_msat: chan.total_msat.unwrap(),
+                            delay: local_updates.cltv_expiry_delta.unwrap(),
+                        }),
+                    );
+                    new_graph.entry(chan.peer_id.unwrap()).or_default().push(
+                        DirectedChannelState::from_directed_channel(DirectedChannel {
+                            source: chan.peer_id.unwrap(),
+                            destination: my_pubkey,
+                            short_channel_id: chan.short_channel_id.unwrap(),
+                            fee_per_millionth: remote_updates.fee_proportional_millionths.unwrap(),
+                            base_fee_millisatoshi: Amount::msat(
+                                &remote_updates.fee_base_msat.unwrap(),
+                            ) as u32,
+                            htlc_maximum_msat: remote_updates.htlc_maximum_msat,
+                            htlc_minimum_msat: remote_updates.htlc_minimum_msat.unwrap(),
+                            amount_msat: chan.total_msat.unwrap(),
+                            delay: remote_updates.cltv_expiry_delta.unwrap(),
+                        }),
+                    );
+                }
+            }
+
+            for chan in &channels {
+                if (feeppm_effective(
+                    chan.fee_per_millionth,
+                    chan.base_fee_millisatoshi,
+                    max_amount,
+                ) as u32
+                    <= max_maxppm
+                    && Amount::msat(&chan.htlc_maximum_msat.unwrap_or(chan.amount_msat))
+                        >= min_amount
+                    && Amount::msat(&chan.htlc_minimum_msat) <= max_amount
+                    && chan.last_update >= two_w_ago
+                    && chan.delay <= 288
+                    && chan.active)
+                    || chan.source == mypubkey
+                    || chan.destination == mypubkey
+                {
+                    new_graph.entry(chan.source).or_default().push(
+                        DirectedChannelState::from_directed_channel(DirectedChannel {
+                            source: chan.source,
+                            destination: chan.destination,
+                            short_channel_id: chan.short_channel_id,
+                            fee_per_millionth: chan.fee_per_millionth,
+                            base_fee_millisatoshi: chan.base_fee_millisatoshi,
+                            htlc_maximum_msat: chan.htlc_maximum_msat,
+                            htlc_minimum_msat: chan.htlc_minimum_msat,
+                            amount_msat: chan.amount_msat,
+                            delay: chan.delay,
+                        }),
+                    );
+                }
+            }
+
+            plugin
+                .state()
+                .graph
+                .lock()
+                .await
+                .update(LnGraph { graph: new_graph });
 
             write_graph(plugin.clone()).await?;
             info!(

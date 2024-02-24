@@ -8,7 +8,7 @@ use std::{
 
 use anyhow::{anyhow, Error};
 use cln_rpc::{
-    model::responses::{ListchannelsChannels, ListpeerchannelsChannels},
+    model::responses::ListpeerchannelsChannels,
     primitives::{Amount, PublicKey, ShortChannelId},
 };
 use log::debug;
@@ -277,7 +277,7 @@ impl Display for JobMessage {
 #[derive(Debug, Clone)]
 pub struct DijkstraNode {
     pub score: u64,
-    pub channel: ListchannelsChannels,
+    pub channel: DirectedChannel,
     pub destination: PublicKey,
     pub hops: u8,
 }
@@ -294,13 +294,26 @@ impl PartialEq for DijkstraNode {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectedChannel {
-    pub channel: ListchannelsChannels,
+    pub source: PublicKey,
+    pub destination: PublicKey,
+    pub short_channel_id: ShortChannelId,
+    pub fee_per_millionth: u32,
+    pub base_fee_millisatoshi: u32,
+    pub htlc_maximum_msat: Option<Amount>,
+    pub htlc_minimum_msat: Amount,
+    pub amount_msat: Amount,
+    pub delay: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DirectedChannelState {
+    pub channel: DirectedChannel,
     pub liquidity: u64,
     pub timestamp: u64,
 }
-impl DirectedChannel {
-    pub fn new(channel: ListchannelsChannels) -> DirectedChannel {
-        DirectedChannel {
+impl DirectedChannelState {
+    pub fn from_directed_channel(channel: DirectedChannel) -> DirectedChannelState {
+        DirectedChannelState {
             liquidity: Amount::msat(&channel.htlc_maximum_msat.unwrap_or(channel.amount_msat)) / 2,
             channel,
             timestamp: SystemTime::now()
@@ -325,7 +338,7 @@ pub struct ExcludeGraph {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LnGraph {
-    pub graph: BTreeMap<PublicKey, Vec<DirectedChannel>>,
+    pub graph: BTreeMap<PublicKey, Vec<DirectedChannelState>>,
 }
 impl LnGraph {
     pub fn new() -> Self {
@@ -396,13 +409,13 @@ impl LnGraph {
         &self,
         source: &PublicKey,
         channel: &ShortChannelId,
-    ) -> Result<DirectedChannel, Error> {
+    ) -> Result<DirectedChannelState, Error> {
         match self.graph.get(source) {
             Some(e) => {
                 let result = e
                     .iter()
                     .filter(|&i| i.channel.short_channel_id == *channel)
-                    .collect::<Vec<&DirectedChannel>>();
+                    .collect::<Vec<&DirectedChannelState>>();
                 if result.len() != 1 {
                     Err(anyhow!("channel {} not found in graph", channel))
                 } else {
@@ -423,7 +436,7 @@ impl LnGraph {
         amount: &u64,
         candidatelist: &[ShortChannelId],
         tempbans: &HashMap<ShortChannelId, u64>,
-    ) -> Vec<&DirectedChannel> {
+    ) -> Vec<&DirectedChannelState> {
         match self.graph.get(&keypair.other_pubkey) {
             Some(e) => {
                 e.iter()
@@ -455,9 +468,9 @@ impl LnGraph {
                                 true
                             }
                     })
-                    .collect::<Vec<&DirectedChannel>>()
+                    .collect::<Vec<&DirectedChannelState>>()
             }
-            None => Vec::<&DirectedChannel>::new(),
+            None => Vec::<&DirectedChannelState>::new(),
         }
     }
 }
