@@ -508,21 +508,13 @@ pub async fn sling(
                                 if message.contains("Too many HTLCs") {
                                     my_sleep(3, plugin.state().job_state.clone(), task).await;
                                 } else {
-                                    match job.sat_direction {
-                                        SatDirection::Pull => {
-                                            my_sleep(60, plugin.state().job_state.clone(), task)
-                                                .await;
-                                        }
-                                        SatDirection::Push => {
-                                            plugin.state().tempbans.lock().insert(
-                                                route.last().unwrap().channel,
-                                                SystemTime::now()
-                                                    .duration_since(UNIX_EPOCH)
-                                                    .unwrap()
-                                                    .as_secs(),
-                                            );
-                                        }
-                                    }
+                                    plugin.state().tempbans.lock().insert(
+                                        route.last().unwrap().channel,
+                                        SystemTime::now()
+                                            .duration_since(UNIX_EPOCH)
+                                            .unwrap()
+                                            .as_secs(),
+                                    );
                                 }
                             } else if ws_error.erring_channel == route.first().unwrap().channel {
                                 warn!(
@@ -534,21 +526,13 @@ pub async fn sling(
                                 if message.contains("Too many HTLCs") {
                                     my_sleep(3, plugin.state().job_state.clone(), task).await;
                                 } else {
-                                    match job.sat_direction {
-                                        SatDirection::Pull => {
-                                            plugin.state().tempbans.lock().insert(
-                                                route.first().unwrap().channel,
-                                                SystemTime::now()
-                                                    .duration_since(UNIX_EPOCH)
-                                                    .unwrap()
-                                                    .as_secs(),
-                                            );
-                                        }
-                                        SatDirection::Push => {
-                                            my_sleep(60, plugin.state().job_state.clone(), task)
-                                                .await;
-                                        }
-                                    }
+                                    plugin.state().tempbans.lock().insert(
+                                        route.first().unwrap().channel,
+                                        SystemTime::now()
+                                            .duration_since(UNIX_EPOCH)
+                                            .unwrap()
+                                            .as_secs(),
+                                    );
                                 }
                             } else {
                                 debug!(
@@ -916,13 +900,9 @@ async fn health_check(
                             );
                             my_sleep(60, job_states.clone(), task).await;
                             Some(true)
-                        } else if match job.sat_direction {
-                            SatDirection::Pull => false,
-                            SatDirection::Push => true,
-                        } && tempbans.contains_key(&task.chan_id)
-                        {
+                        } else if tempbans.contains_key(&task.chan_id) {
                             info!(
-                                "{}/{}: First peer not ready. Taking a break...",
+                                "{}/{}: Job peer not ready. Taking a break...",
                                 task.chan_id, task.task_id
                             );
                             channel_jobstate_update(
