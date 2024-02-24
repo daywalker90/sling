@@ -510,13 +510,8 @@ pub async fn sling(
                                 } else {
                                     match job.sat_direction {
                                         SatDirection::Pull => {
-                                            plugin.state().tempbans.lock().insert(
-                                                route.get(route.len() - 3).unwrap().channel,
-                                                SystemTime::now()
-                                                    .duration_since(UNIX_EPOCH)
-                                                    .unwrap()
-                                                    .as_secs(),
-                                            );
+                                            my_sleep(60, plugin.state().job_state.clone(), task)
+                                                .await;
                                         }
                                         SatDirection::Push => {
                                             plugin.state().tempbans.lock().insert(

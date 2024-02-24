@@ -864,6 +864,10 @@ pub async fn my_sleep<'a>(
     job_state: Arc<Mutex<HashMap<ShortChannelId, Vec<JobState>>>>,
     task: &Task,
 ) {
+    debug!(
+        "{}/{}: Starting sleeper for {}s",
+        task.chan_id, task.task_id, seconds
+    );
     let timer = Instant::now();
     while timer.elapsed() < Duration::from_secs(seconds) {
         if job_state
