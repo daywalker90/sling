@@ -274,14 +274,14 @@ impl Display for JobMessage {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct DijkstraNode {
+#[derive(Debug, Clone, Copy)]
+pub struct DijkstraNode<'a> {
     pub score: u64,
-    pub channel: DirectedChannel,
+    pub channel: &'a DirectedChannel,
     pub destination: PublicKey,
     pub hops: u8,
 }
-impl PartialEq for DijkstraNode {
+impl<'a> PartialEq for DijkstraNode<'a> {
     fn eq(&self, other: &Self) -> bool {
         self.score == other.score
             && self.hops == other.hops
@@ -292,7 +292,7 @@ impl PartialEq for DijkstraNode {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct DirectedChannel {
     pub source: PublicKey,
     pub destination: PublicKey,
@@ -305,7 +305,7 @@ pub struct DirectedChannel {
     pub delay: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct DirectedChannelState {
     pub channel: DirectedChannel,
     pub liquidity: u64,
@@ -336,7 +336,7 @@ pub struct ExcludeGraph {
     pub exclude_peers: HashSet<PublicKey>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct LnGraph {
     pub graph: BTreeMap<PublicKey, Vec<DirectedChannelState>>,
 }
@@ -371,10 +371,10 @@ impl LnGraph {
                             old_channel.liquidity = new_channel.liquidity;
                             old_channel.timestamp = new_channel.timestamp;
                         }
-                        old_channel.channel = new_channel.channel.clone();
+                        old_channel.channel = new_channel.channel;
                     }
                     None => {
-                        old_channels.push(new_channel.clone());
+                        old_channels.push(*new_channel);
                     }
                 }
             }
@@ -409,7 +409,7 @@ impl LnGraph {
         &self,
         source: &PublicKey,
         channel: &ShortChannelId,
-    ) -> Result<DirectedChannelState, Error> {
+    ) -> Result<&DirectedChannelState, Error> {
         match self.graph.get(source) {
             Some(e) => {
                 let result = e
@@ -419,7 +419,7 @@ impl LnGraph {
                 if result.len() != 1 {
                     Err(anyhow!("channel {} not found in graph", channel))
                 } else {
-                    Ok(result[0].clone())
+                    Ok(result[0])
                 }
             }
             None => Err(anyhow!(

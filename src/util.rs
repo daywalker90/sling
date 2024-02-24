@@ -718,7 +718,7 @@ pub async fn write_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
     let now = Instant::now();
     fs::write(
         sling_dir.join(GRAPH_FILE_NAME),
-        serde_json::to_string(&graph.clone())?,
+        serde_json::to_string(&*graph)?,
     )
     .await?;
     debug!(

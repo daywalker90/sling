@@ -30,7 +30,7 @@ pub fn dijkstra(
     let mut visit_next = BinaryHeap::new();
     let zero_score = u64::default();
 
-    scores.insert(*start, slingchan.clone());
+    scores.insert(*start, *slingchan);
     visit_next.push(MinScored(zero_score, *start));
     while let Some(MinScored(node_score, node)) = visit_next.pop() {
         if visited.contains(&node) {
@@ -87,7 +87,7 @@ pub fn dijkstra(
             // );
             let dijkstra_node = DijkstraNode {
                 score: next_score,
-                channel: edge.channel.clone(),
+                channel: &edge.channel,
                 destination: next,
                 hops: current_hops + 1,
             };
@@ -147,7 +147,7 @@ fn build_route(
         Some(node) => prev = node,
         None => return Ok(vec![]),
     };
-    dijkstra_path.push(scores.get(goal).unwrap().clone());
+    dijkstra_path.push(*scores.get(goal).unwrap());
     // debug!(
     //     "{}: found potential new route with #hops: {}",
     //     slingchan.channel.short_channel_id.to_string(),
@@ -155,13 +155,13 @@ fn build_route(
     // );
 
     while prev != start {
-        let spr = scores.get(prev).unwrap().clone();
+        let spr = scores.get(prev).unwrap();
         prev = predecessor.get(prev).unwrap();
-        dijkstra_path.push(spr);
+        dijkstra_path.push(*spr);
     }
     match job.sat_direction {
-        SatDirection::Pull => dijkstra_path.insert(0, slingchan.clone()),
-        SatDirection::Push => dijkstra_path.push(slingchan.clone()),
+        SatDirection::Pull => dijkstra_path.insert(0, *slingchan),
+        SatDirection::Push => dijkstra_path.push(*slingchan),
     }
 
     let mut sendpay_route = Vec::new();

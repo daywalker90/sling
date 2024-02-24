@@ -786,7 +786,7 @@ async fn next_route(
                         &DijkstraNode {
                             score: 0,
                             destination: keypair.my_pubkey,
-                            channel: slingchan_inc.channel,
+                            channel: &slingchan_inc.channel,
                             hops: 0,
                         },
                         job,
@@ -809,7 +809,7 @@ async fn next_route(
                         &DijkstraNode {
                             score: 0,
                             destination: keypair.other_pubkey,
-                            channel: slingchan_out.channel,
+                            channel: &slingchan_out.channel,
                             hops: 0,
                         },
                         job,
