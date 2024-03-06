@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{anyhow, Error};
 use cln_rpc::{
@@ -123,21 +123,4 @@ pub async fn waitsendpay2(
         Response::WaitSendPay(info) => Ok(info),
         e => Err(anyhow!("Unexpected result in waitsendpay2: {:?}", e)),
     }
-}
-
-pub async fn get_config_path(lightning_dir: String) -> Result<Vec<String>, Error> {
-    let lightning_dir_network = Path::new(&lightning_dir);
-    let lightning_dir_general = Path::new(&lightning_dir).parent().unwrap();
-    Ok(vec![
-        lightning_dir_general
-            .join("config")
-            .to_str()
-            .unwrap()
-            .to_string(),
-        lightning_dir_network
-            .join("config")
-            .to_str()
-            .unwrap()
-            .to_string(),
-    ])
 }

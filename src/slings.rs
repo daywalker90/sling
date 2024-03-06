@@ -25,12 +25,13 @@ use crate::model::{
     Config, DijkstraNode, ExcludeGraph, FailureReb, JobMessage, PluginState, PublicKeyPair,
     SuccessReb, Task, PLUGIN_NAME,
 };
-use crate::rpc::{slingsend, waitsendpay2};
+use crate::rpc_cln::{slingsend, waitsendpay2};
 use crate::util::{
     channel_jobstate_update, feeppm_effective, feeppm_effective_from_amts,
     get_normal_channel_from_listpeerchannels, get_preimage_paymend_hash_pair, get_total_htlc_count,
     is_channel_normal, my_sleep,
 };
+use crate::wait_for_gossip;
 
 pub async fn sling(
     rpc_path: &PathBuf,
@@ -45,38 +46,7 @@ pub async fn sling(
     let mut networkdir = PathBuf::from_str(&plugin.configuration().lightning_dir).unwrap();
     networkdir.pop();
 
-    loop {
-        {
-            let graph = plugin.state().graph.lock().await;
-
-            if graph.graph.is_empty() {
-                info!(
-                    "{}/{}: graph is still empty. Sleeping...",
-                    task.chan_id, task.task_id
-                );
-                channel_jobstate_update(
-                    plugin.state().job_state.clone(),
-                    task,
-                    &JobMessage::GraphEmpty,
-                    None,
-                    None,
-                );
-            } else {
-                break;
-            }
-        }
-        my_sleep(600, plugin.state().job_state.clone(), task).await;
-    }
-    let other_peer;
-    {
-        let peer_channels = plugin.state().peer_channels.lock().await;
-
-        other_peer = peer_channels
-            .get(&task.chan_id)
-            .ok_or(anyhow!("other_peer: channel not found"))?
-            .peer_id
-            .ok_or(anyhow!("other_peer: peer id gone"))?;
-    }
+    wait_for_gossip(plugin, task).await;
 
     let mut success_route: Option<Vec<SendpayRoute>> = None;
     'outer: loop {
@@ -105,6 +75,11 @@ pub async fn sling(
 
         let tempbans = plugin.state().tempbans.lock().clone();
         let peer_channels = plugin.state().peer_channels.lock().await.clone();
+        let other_peer = peer_channels
+            .get(&task.chan_id)
+            .ok_or(anyhow!("other_peer: channel not found"))?
+            .peer_id
+            .ok_or(anyhow!("other_peer: peer id gone"))?;
 
         if let Some(r) = health_check(
             plugin.clone(),
@@ -118,9 +93,8 @@ pub async fn sling(
         {
             if r {
                 continue 'outer;
-            } else {
-                break 'outer;
             }
+            break 'outer;
         }
 
         channel_jobstate_update(
@@ -131,44 +105,38 @@ pub async fn sling(
             None,
         );
 
-        let route = match next_route(
-            plugin,
-            &peer_channels,
-            job,
-            &tempbans,
-            task,
-            &PublicKeyPair {
-                my_pubkey: mypubkey,
-                other_pubkey: other_peer,
-            },
-            &mut success_route,
-        )
-        .await
-        {
-            Ok(r) => r,
-            Err(_e) => {
+        let route = {
+            let nr = next_route(
+                plugin,
+                &peer_channels,
+                job,
+                &tempbans,
+                task,
+                &PublicKeyPair {
+                    my_pubkey: mypubkey,
+                    other_pubkey: other_peer,
+                },
+                &mut success_route,
+            )
+            .await;
+            if nr.is_err() || nr.as_ref().unwrap().is_empty() {
+                info!(
+                    "{}/{}: could not find a route. Sleeping...",
+                    task.chan_id, task.task_id
+                );
+                channel_jobstate_update(
+                    plugin.state().job_state.clone(),
+                    task,
+                    &JobMessage::NoRoute,
+                    None,
+                    None,
+                );
                 success_route = None;
                 my_sleep(600, plugin.state().job_state.clone(), task).await;
                 continue 'outer;
             }
+            nr.unwrap()
         };
-
-        if route.is_empty() {
-            info!(
-                "{}/{}: could not find a route. Sleeping...",
-                task.chan_id, task.task_id
-            );
-            channel_jobstate_update(
-                plugin.state().job_state.clone(),
-                task,
-                &JobMessage::NoRoute,
-                None,
-                None,
-            );
-            success_route = None;
-            my_sleep(600, plugin.state().job_state.clone(), task).await;
-            continue 'outer;
-        }
 
         let fee_ppm_effective = feeppm_effective_from_amts(
             Amount::msat(&route.first().unwrap().amount_msat),
@@ -725,41 +693,6 @@ async fn next_route(
     match success_route {
         Some(_) => (),
         None => {
-            let slingchan_inc = match graph.get_channel(&keypair.other_pubkey, &task.chan_id) {
-                Ok(in_chan) => in_chan,
-                Err(_) => {
-                    warn!(
-                        "{}/{}: channel not found in graph!",
-                        task.chan_id, task.task_id
-                    );
-                    channel_jobstate_update(
-                        plugin.state().job_state.clone(),
-                        task,
-                        &JobMessage::ChanNotInGraph,
-                        None,
-                        None,
-                    );
-                    return Err(anyhow!("channel not found in graph"));
-                }
-            };
-            let slingchan_out = match graph.get_channel(&keypair.my_pubkey, &task.chan_id) {
-                Ok(out_chan) => out_chan,
-                Err(_) => {
-                    warn!(
-                        "{}/{}: channel not found in graph!",
-                        task.chan_id, task.task_id
-                    );
-                    channel_jobstate_update(
-                        plugin.state().job_state.clone(),
-                        task,
-                        &JobMessage::ChanNotInGraph,
-                        None,
-                        None,
-                    );
-                    return Err(anyhow!("channel not found in graph!"));
-                }
-            };
-
             let mut pull_jobs = plugin.state().pull_jobs.lock().clone();
             let mut push_jobs = plugin.state().push_jobs.lock().clone();
             let excepts = plugin.state().excepts_chans.lock().clone();
@@ -778,6 +711,24 @@ async fn next_route(
             };
             match job.sat_direction {
                 SatDirection::Pull => {
+                    let slingchan_inc =
+                        match graph.get_channel(&keypair.other_pubkey, &task.chan_id) {
+                            Ok(in_chan) => in_chan,
+                            Err(_) => {
+                                warn!(
+                                    "{}/{}: channel not found in graph!",
+                                    task.chan_id, task.task_id
+                                );
+                                channel_jobstate_update(
+                                    plugin.state().job_state.clone(),
+                                    task,
+                                    &JobMessage::ChanNotInGraph,
+                                    None,
+                                    None,
+                                );
+                                return Err(anyhow!("channel not found in graph"));
+                            }
+                        };
                     route = dijkstra(
                         &keypair.my_pubkey,
                         &graph,
@@ -801,6 +752,23 @@ async fn next_route(
                     )?;
                 }
                 SatDirection::Push => {
+                    let slingchan_out = match graph.get_channel(&keypair.my_pubkey, &task.chan_id) {
+                        Ok(out_chan) => out_chan,
+                        Err(_) => {
+                            warn!(
+                                "{}/{}: channel not found in graph!",
+                                task.chan_id, task.task_id
+                            );
+                            channel_jobstate_update(
+                                plugin.state().job_state.clone(),
+                                task,
+                                &JobMessage::ChanNotInGraph,
+                                None,
+                                None,
+                            );
+                            return Err(anyhow!("channel not found in graph!"));
+                        }
+                    };
                     route = dijkstra(
                         &keypair.my_pubkey,
                         &graph,
@@ -988,6 +956,7 @@ fn build_candidatelist(
             if matches!(
                 channel.state.unwrap(),
                 ListpeerchannelsChannelsState::CHANNELD_NORMAL
+                    | ListpeerchannelsChannelsState::CHANNELD_AWAITING_SPLICE
             ) && channel.peer_connected.unwrap()
                 && match custom_candidates {
                     Some(c) => c.iter().any(|c| *c == scid),

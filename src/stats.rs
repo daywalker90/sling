@@ -29,192 +29,186 @@ pub async fn slingstats(
 ) -> Result<serde_json::Value, Error> {
     let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
 
-    match args {
-        serde_json::Value::Array(a) => {
-            let stats_delete_successes_age = plugin
-                .state()
-                .config
-                .lock()
-                .stats_delete_successes_age
-                .value;
-            let stats_delete_failures_age =
-                plugin.state().config.lock().stats_delete_failures_age.value;
-            let peer_channels = plugin.state().peer_channels.lock().await.clone();
-            if a.len() > 1 {
-                Err(anyhow!(
-                    "Please provide exactly one short_channel_id or nothing for a summary"
-                ))
-            } else if a.is_empty() {
-                let mut successes = HashMap::new();
-                let mut failures = HashMap::new();
-                refresh_joblists(plugin.clone()).await?;
-                let pull_jobs = plugin.state().pull_jobs.lock().clone();
-                let push_jobs = plugin.state().push_jobs.lock().clone();
-                let mut all_jobs: Vec<ShortChannelId> =
-                    pull_jobs.into_iter().chain(push_jobs.into_iter()).collect();
+    let input_array = match args {
+        serde_json::Value::Array(a) => a,
+        _ => return Err(anyhow!("invalid arguments")),
+    };
+    if input_array.len() > 1 {
+        return Err(anyhow!(
+            "Please provide exactly one short_channel_id or nothing for a summary"
+        ));
+    }
 
-                let scid_peer_map = get_all_normal_channels_from_listpeerchannels(&peer_channels);
+    let stats_delete_successes_age = plugin
+        .state()
+        .config
+        .lock()
+        .stats_delete_successes_age
+        .value;
+    let stats_delete_failures_age = plugin.state().config.lock().stats_delete_failures_age.value;
+    let peer_channels = plugin.state().peer_channels.lock().await.clone();
 
-                let mut normal_channels_alias: HashMap<ShortChannelId, String> = HashMap::new();
-                {
-                    let alias_map = plugin.state().alias_peer_map.lock();
-                    for (scid, peer) in &scid_peer_map {
-                        normal_channels_alias.insert(
-                            *scid,
-                            alias_map
-                                .get(peer)
-                                .unwrap_or(&"ALIAS_NOT_FOUND".to_string())
-                                .clone(),
-                        );
-                    }
-                }
-                all_jobs.retain(|c| normal_channels_alias.contains_key(c));
-                for scid in &all_jobs {
-                    match SuccessReb::read_from_file(&sling_dir, scid).await {
-                        Ok(o) => {
-                            successes.insert(scid, o);
-                        }
-                        Err(e) => debug!("probably no success stats yet: {:?}", e),
-                    };
+    if input_array.is_empty() {
+        let mut successes = HashMap::new();
+        let mut failures = HashMap::new();
+        refresh_joblists(plugin.clone()).await?;
+        let pull_jobs = plugin.state().pull_jobs.lock().clone();
+        let push_jobs = plugin.state().push_jobs.lock().clone();
+        let mut all_jobs: Vec<ShortChannelId> =
+            pull_jobs.into_iter().chain(push_jobs.into_iter()).collect();
 
-                    match FailureReb::read_from_file(&sling_dir, scid).await {
-                        Ok(o) => {
-                            failures.insert(scid, o);
-                        }
-                        Err(e) => debug!("probably no failure stats yet: {:?}", e),
-                    };
-                }
+        let scid_peer_map = get_all_normal_channels_from_listpeerchannels(&peer_channels);
 
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
-                let mut table = Vec::new();
-                let jobstates = plugin.state().job_state.lock().clone();
-
-                for job in &all_jobs {
-                    let mut total_amount_msat = 0;
-                    let mut most_recent_completed_at = 0;
-                    let mut weighted_fee_ppm = 0;
-                    let jobstate: Vec<String> = jobstates
-                        .get(job)
-                        .unwrap_or(&vec![JobState::missing()])
-                        .iter()
-                        .map(|jt| jt.id().to_string() + ":" + &jt.state().to_string())
-                        .collect();
-                    for success_reb in successes.get(&job).unwrap_or(&Vec::new()) {
-                        if stats_delete_successes_age == 0
-                            || success_reb.completed_at
-                                >= now - stats_delete_successes_age * 24 * 60 * 60
-                        {
-                            total_amount_msat += success_reb.amount_msat;
-                            weighted_fee_ppm +=
-                                success_reb.fee_ppm as u64 * success_reb.amount_msat;
-                            most_recent_completed_at =
-                                std::cmp::max(most_recent_completed_at, success_reb.completed_at);
-                        }
-                    }
-                    if total_amount_msat > 0 {
-                        weighted_fee_ppm /= total_amount_msat;
-                    }
-
-                    let last_route_failure = match failures.get(&job).unwrap_or(&Vec::new()).last()
-                    {
-                        Some(o) => o.created_at,
-                        None => 0,
-                    };
-                    let last_route_success = match successes.get(&job).unwrap_or(&Vec::new()).last()
-                    {
-                        Some(o) => o.completed_at,
-                        None => 0,
-                    };
-                    let last_route_taken =
-                        if std::cmp::max(last_route_success, last_route_failure) == 0 {
-                            "Never".to_string()
-                        } else {
-                            Local
-                                .timestamp_opt(
-                                    std::cmp::max(last_route_success, last_route_failure) as i64,
-                                    0,
-                                )
-                                .unwrap()
-                                .format("%Y-%m-%d %H:%M:%S")
-                                .to_string()
-                        };
-                    let last_success_reb = if last_route_success == 0 {
-                        "Never".to_string()
-                    } else {
-                        Local
-                            .timestamp_opt(last_route_success as i64, 0)
-                            .unwrap()
-                            .format("%Y-%m-%d %H:%M:%S")
-                            .to_string()
-                    };
-                    table.push(StatSummary {
-                        alias: normal_channels_alias
-                            .get(&job.clone())
-                            .unwrap_or(&NO_ALIAS_SET.to_string())
-                            .clone(),
-                        scid: *job,
-                        pubkey: *scid_peer_map.get(&job.clone()).unwrap(),
-                        status: jobstate.join("\n"),
-                        rebamount: (total_amount_msat / 1_000).to_formatted_string(&Locale::en),
-                        w_feeppm: weighted_fee_ppm,
-                        last_route_taken,
-                        last_success_reb,
-                    })
-                }
-                table.sort_by_key(|x| {
-                    x.alias
-                        .chars()
-                        .filter(|c| c.is_ascii() && !c.is_whitespace() && c != &'@')
-                        .collect::<String>()
-                        .to_ascii_lowercase()
-                });
-                let tabled = Table::new(table);
-                Ok(json!({"format-hint":"simple","result":format!("{}", tabled,)}))
-            } else {
-                match a.first().unwrap() {
-                    serde_json::Value::String(i) => {
-                        let scid = ShortChannelId::from_str(i)?;
-                        let successes = match SuccessReb::read_from_file(&sling_dir, &scid).await {
-                            Ok(o) => o,
-                            Err(e) => {
-                                info!("Could not get any successes: {}", e);
-                                Vec::new()
-                            }
-                        };
-                        let failures = match FailureReb::read_from_file(&sling_dir, &scid).await {
-                            Ok(o) => o,
-                            Err(e) => {
-                                info!("Could not get any failures: {}", e);
-                                Vec::new()
-                            }
-                        };
-                        let alias_map = plugin.state().alias_peer_map.lock().clone();
-
-                        let sling_stats = SlingStats {
-                            successes_in_time_window: success_stats(
-                                successes,
-                                stats_delete_successes_age,
-                                &alias_map,
-                                &peer_channels,
-                            ),
-                            failures_in_time_window: failure_stats(
-                                failures,
-                                stats_delete_failures_age,
-                                &alias_map,
-                                &peer_channels,
-                            ),
-                        };
-
-                        Ok(json!(sling_stats))
-                    }
-                    _ => Err(anyhow!("invalid short_channel_id")),
-                }
+        let mut normal_channels_alias: HashMap<ShortChannelId, String> = HashMap::new();
+        {
+            let alias_map = plugin.state().alias_peer_map.lock();
+            for (scid, peer) in &scid_peer_map {
+                normal_channels_alias.insert(
+                    *scid,
+                    alias_map
+                        .get(peer)
+                        .unwrap_or(&"ALIAS_NOT_FOUND".to_string())
+                        .clone(),
+                );
             }
         }
-        _ => Err(anyhow!("invalid arguments")),
+        all_jobs.retain(|c| normal_channels_alias.contains_key(c));
+        for scid in &all_jobs {
+            match SuccessReb::read_from_file(&sling_dir, scid).await {
+                Ok(o) => {
+                    successes.insert(scid, o);
+                }
+                Err(e) => debug!("probably no success stats yet: {:?}", e),
+            };
+
+            match FailureReb::read_from_file(&sling_dir, scid).await {
+                Ok(o) => {
+                    failures.insert(scid, o);
+                }
+                Err(e) => debug!("probably no failure stats yet: {:?}", e),
+            };
+        }
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let mut table = Vec::new();
+        let jobstates = plugin.state().job_state.lock().clone();
+
+        for job in &all_jobs {
+            let mut total_amount_msat = 0;
+            let mut most_recent_completed_at = 0;
+            let mut weighted_fee_ppm = 0;
+            let jobstate: Vec<String> = jobstates
+                .get(job)
+                .unwrap_or(&vec![JobState::missing()])
+                .iter()
+                .map(|jt| jt.id().to_string() + ":" + &jt.state().to_string())
+                .collect();
+            for success_reb in successes.get(&job).unwrap_or(&Vec::new()) {
+                if stats_delete_successes_age == 0
+                    || success_reb.completed_at >= now - stats_delete_successes_age * 24 * 60 * 60
+                {
+                    total_amount_msat += success_reb.amount_msat;
+                    weighted_fee_ppm += success_reb.fee_ppm as u64 * success_reb.amount_msat;
+                    most_recent_completed_at =
+                        std::cmp::max(most_recent_completed_at, success_reb.completed_at);
+                }
+            }
+            if total_amount_msat > 0 {
+                weighted_fee_ppm /= total_amount_msat;
+            }
+
+            let last_route_failure = match failures.get(&job).unwrap_or(&Vec::new()).last() {
+                Some(o) => o.created_at,
+                None => 0,
+            };
+            let last_route_success = match successes.get(&job).unwrap_or(&Vec::new()).last() {
+                Some(o) => o.completed_at,
+                None => 0,
+            };
+            let last_route_taken = if std::cmp::max(last_route_success, last_route_failure) == 0 {
+                "Never".to_string()
+            } else {
+                Local
+                    .timestamp_opt(
+                        std::cmp::max(last_route_success, last_route_failure) as i64,
+                        0,
+                    )
+                    .unwrap()
+                    .format("%Y-%m-%d %H:%M:%S")
+                    .to_string()
+            };
+            let last_success_reb = if last_route_success == 0 {
+                "Never".to_string()
+            } else {
+                Local
+                    .timestamp_opt(last_route_success as i64, 0)
+                    .unwrap()
+                    .format("%Y-%m-%d %H:%M:%S")
+                    .to_string()
+            };
+            table.push(StatSummary {
+                alias: normal_channels_alias
+                    .get(&job.clone())
+                    .unwrap_or(&NO_ALIAS_SET.to_string())
+                    .clone(),
+                scid: *job,
+                pubkey: *scid_peer_map.get(&job.clone()).unwrap(),
+                status: jobstate.join("\n"),
+                rebamount: (total_amount_msat / 1_000).to_formatted_string(&Locale::en),
+                w_feeppm: weighted_fee_ppm,
+                last_route_taken,
+                last_success_reb,
+            })
+        }
+        table.sort_by_key(|x| {
+            x.alias
+                .chars()
+                .filter(|c| c.is_ascii() && !c.is_whitespace() && c != &'@')
+                .collect::<String>()
+                .to_ascii_lowercase()
+        });
+        let tabled = Table::new(table);
+        Ok(json!({"format-hint":"simple","result":format!("{}", tabled,)}))
+    } else {
+        let scid = match input_array.first().unwrap() {
+            serde_json::Value::String(i) => ShortChannelId::from_str(i)?,
+            _ => return Err(anyhow!("invalid short_channel_id")),
+        };
+        let successes = match SuccessReb::read_from_file(&sling_dir, &scid).await {
+            Ok(o) => o,
+            Err(e) => {
+                info!("Could not get any successes: {}", e);
+                Vec::new()
+            }
+        };
+        let failures = match FailureReb::read_from_file(&sling_dir, &scid).await {
+            Ok(o) => o,
+            Err(e) => {
+                info!("Could not get any failures: {}", e);
+                Vec::new()
+            }
+        };
+        let alias_map = plugin.state().alias_peer_map.lock().clone();
+
+        let sling_stats = SlingStats {
+            successes_in_time_window: success_stats(
+                successes,
+                stats_delete_successes_age,
+                &alias_map,
+                &peer_channels,
+            ),
+            failures_in_time_window: failure_stats(
+                failures,
+                stats_delete_failures_age,
+                &alias_map,
+                &peer_channels,
+            ),
+        };
+
+        Ok(json!(sling_stats))
     }
 }
 

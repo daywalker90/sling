@@ -20,7 +20,7 @@ use tokio::{
     time::{self, Instant},
 };
 
-use crate::{model::*, rpc::*, util::*};
+use crate::{model::*, rpc_cln::*, util::*};
 
 pub async fn refresh_aliasmap(plugin: Plugin<PluginState>) -> Result<(), Error> {
     let rpc_path = make_rpc_path(&plugin);
@@ -166,6 +166,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                             source: my_pubkey,
                             destination: chan.peer_id.unwrap(),
                             short_channel_id: chan.short_channel_id.unwrap(),
+                            scid_alias: Some(chan.alias.as_ref().unwrap().local.unwrap()),
                             fee_per_millionth: local_updates.fee_proportional_millionths.unwrap(),
                             base_fee_millisatoshi: Amount::msat(
                                 &local_updates.fee_base_msat.unwrap(),
@@ -181,6 +182,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                             source: chan.peer_id.unwrap(),
                             destination: my_pubkey,
                             short_channel_id: chan.short_channel_id.unwrap(),
+                            scid_alias: Some(chan.alias.as_ref().unwrap().remote.unwrap()),
                             fee_per_millionth: remote_updates.fee_proportional_millionths.unwrap(),
                             base_fee_millisatoshi: Amount::msat(
                                 &remote_updates.fee_base_msat.unwrap(),
@@ -215,6 +217,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                             source: chan.source,
                             destination: chan.destination,
                             short_channel_id: chan.short_channel_id,
+                            scid_alias: None,
                             fee_per_millionth: chan.fee_per_millionth,
                             base_fee_millisatoshi: chan.base_fee_millisatoshi,
                             htlc_maximum_msat: chan.htlc_maximum_msat,

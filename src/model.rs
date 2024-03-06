@@ -297,6 +297,7 @@ pub struct DirectedChannel {
     pub source: PublicKey,
     pub destination: PublicKey,
     pub short_channel_id: ShortChannelId,
+    pub scid_alias: Option<ShortChannelId>,
     pub fee_per_millionth: u32,
     pub base_fee_millisatoshi: u32,
     pub htlc_maximum_msat: Option<Amount>,

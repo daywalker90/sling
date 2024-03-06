@@ -168,25 +168,42 @@ fn build_route(
     let mut prev_amount_msat;
     let mut amount_msat = Amount::from_msat(0);
     let mut delay = last_delay;
+
+    let first_hop = if !dijkstra_path.is_empty() {
+        dijkstra_path.first().unwrap()
+    } else {
+        return Ok(sendpay_route);
+    };
+
     for hop in &dijkstra_path {
-        if hop == dijkstra_path.first().unwrap() {
+        if hop == first_hop {
+            let routing_scid = if let Some(rscid) = first_hop.channel.scid_alias {
+                rscid
+            } else {
+                first_hop.channel.short_channel_id
+            };
             sendpay_route.insert(
                 0,
                 SendpayRoute {
                     amount_msat: Amount::from_msat(job.amount_msat),
                     id: dijkstra_path.first().unwrap().destination,
                     delay,
-                    channel: dijkstra_path.first().unwrap().channel.short_channel_id,
+                    channel: routing_scid,
                 },
             );
         } else {
+            let routing_scid = if let Some(rscid) = hop.channel.scid_alias {
+                rscid
+            } else {
+                hop.channel.short_channel_id
+            };
             sendpay_route.insert(
                 0,
                 SendpayRoute {
                     amount_msat,
                     id: hop.destination,
                     delay,
-                    channel: hop.channel.short_channel_id,
+                    channel: routing_scid,
                 },
             );
         }
