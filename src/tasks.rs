@@ -23,14 +23,13 @@ use tokio::{
 use crate::{model::*, rpc_cln::*, util::*};
 
 pub async fn refresh_aliasmap(plugin: Plugin<PluginState>) -> Result<(), Error> {
-    let rpc_path = make_rpc_path(&plugin);
-    let interval = plugin
-        .state()
-        .config
-        .lock()
-        .clone()
-        .refresh_aliasmap_interval
-        .value;
+    let rpc_path;
+    let interval;
+    {
+        let config = plugin.state().config.lock();
+        rpc_path = config.rpc_path.clone();
+        interval = config.refresh_aliasmap_interval.value;
+    }
 
     loop {
         let now = Instant::now();
@@ -50,13 +49,11 @@ pub async fn refresh_aliasmap(plugin: Plugin<PluginState>) -> Result<(), Error> 
 }
 
 pub async fn refresh_listpeerchannels_loop(plugin: Plugin<PluginState>) -> Result<(), Error> {
-    let interval = plugin
-        .state()
-        .config
-        .lock()
-        .clone()
-        .refresh_peers_interval
-        .value;
+    let interval;
+    {
+        let config = plugin.state().config.lock();
+        interval = config.refresh_peers_interval.value;
+    }
 
     loop {
         {
@@ -67,7 +64,11 @@ pub async fn refresh_listpeerchannels_loop(plugin: Plugin<PluginState>) -> Resul
 }
 
 pub async fn refresh_listpeerchannels(plugin: &Plugin<PluginState>) -> Result<(), Error> {
-    let rpc_path = make_rpc_path(plugin);
+    let rpc_path;
+    {
+        let config = plugin.state().config.lock();
+        rpc_path = config.rpc_path.clone();
+    }
 
     let now = Instant::now();
     *plugin.state().peer_channels.lock().await = list_peer_channels(&rpc_path)
@@ -85,17 +86,18 @@ pub async fn refresh_listpeerchannels(plugin: &Plugin<PluginState>) -> Result<()
 }
 
 pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
-    let rpc_path = make_rpc_path(&plugin);
-    let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
+    let rpc_path;
+    let interval;
+    let my_pubkey;
+    let sling_dir;
+    {
+        let config = plugin.state().config.lock();
+        rpc_path = config.rpc_path.clone();
+        interval = config.refresh_graph_interval.value;
+        my_pubkey = config.pubkey;
+        sling_dir = config.sling_dir.clone();
+    }
     *plugin.state().graph.lock().await = read_graph(&sling_dir).await?;
-    let interval = plugin
-        .state()
-        .config
-        .lock()
-        .clone()
-        .refresh_graph_interval
-        .value;
-    let my_pubkey = plugin.state().config.lock().pubkey.unwrap();
 
     loop {
         {
@@ -114,8 +116,6 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
             let maxppms = jobs.values().map(|job| job.maxppm);
             // let min_maxppm = maxppms.min().unwrap_or(0);
             let max_maxppm = maxppms.max().unwrap_or(3_000);
-
-            let mypubkey = plugin.state().config.lock().pubkey.unwrap();
 
             let two_w_ago = (SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -209,8 +209,8 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     && chan.last_update >= two_w_ago
                     && chan.delay <= 288
                     && chan.active)
-                    || chan.source == mypubkey
-                    || chan.destination == mypubkey
+                    || chan.source == my_pubkey
+                    || chan.destination == my_pubkey
                 {
                     new_graph.entry(chan.source).or_default().push(
                         DirectedChannelState::from_directed_channel(DirectedChannel {

@@ -1,7 +1,8 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fmt::{self, Display, Formatter},
-    path::Path,
+    path::{Path, PathBuf},
+    str::FromStr,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -11,18 +12,21 @@ use cln_rpc::{
     model::responses::ListpeerchannelsChannels,
     primitives::{Amount, PublicKey, ShortChannelId},
 };
-use log::debug;
+use log::{debug, warn};
 use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use tabled::Tabled;
-use tokio::{fs::OpenOptions, io::AsyncWriteExt};
+use tokio::{
+    fs::{self, File, OpenOptions},
+    io::{self, AsyncWriteExt},
+};
 
 use crate::{
-    OPT_CANDIDATES_MIN_AGE, OPT_DEPLETEUPTOAMOUNT, OPT_DEPLETEUPTOPERCENT, OPT_LIGHTNING_CONF,
-    OPT_MAXHOPS, OPT_MAX_HTLC_COUNT, OPT_PARALLELJOBS, OPT_REFRESH_ALIASMAP_INTERVAL,
-    OPT_REFRESH_GRAPH_INTERVAL, OPT_REFRESH_PEERS_INTERVAL, OPT_RESET_LIQUIDITY_INTERVAL,
-    OPT_STATS_DELETE_FAILURES_AGE, OPT_STATS_DELETE_FAILURES_SIZE, OPT_STATS_DELETE_SUCCESSES_AGE,
-    OPT_STATS_DELETE_SUCCESSES_SIZE, OPT_TIMEOUTPAY, OPT_UTF8,
+    create_sling_dir, OPT_CANDIDATES_MIN_AGE, OPT_DEPLETEUPTOAMOUNT, OPT_DEPLETEUPTOPERCENT,
+    OPT_LIGHTNING_CONF, OPT_MAXHOPS, OPT_MAX_HTLC_COUNT, OPT_PARALLELJOBS,
+    OPT_REFRESH_ALIASMAP_INTERVAL, OPT_REFRESH_GRAPH_INTERVAL, OPT_REFRESH_PEERS_INTERVAL,
+    OPT_RESET_LIQUIDITY_INTERVAL, OPT_STATS_DELETE_FAILURES_AGE, OPT_STATS_DELETE_FAILURES_SIZE,
+    OPT_STATS_DELETE_SUCCESSES_AGE, OPT_STATS_DELETE_SUCCESSES_SIZE, OPT_TIMEOUTPAY, OPT_UTF8,
 };
 
 pub const SUCCESSES_SUFFIX: &str = "_successes.json";
@@ -51,9 +55,19 @@ pub struct PluginState {
     pub blockheight: Arc<Mutex<u32>>,
 }
 impl PluginState {
-    pub fn new() -> PluginState {
+    pub fn new(
+        pubkey: PublicKey,
+        rpc_path: PathBuf,
+        sling_dir: PathBuf,
+        network_dir: PathBuf,
+    ) -> PluginState {
         PluginState {
-            config: Arc::new(Mutex::new(Config::new())),
+            config: Arc::new(Mutex::new(Config::new(
+                pubkey,
+                rpc_path,
+                sling_dir,
+                network_dir,
+            ))),
             peer_channels: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
             graph: Arc::new(tokio::sync::Mutex::new(LnGraph::new())),
             pays: Arc::new(RwLock::new(HashMap::new())),
@@ -67,6 +81,54 @@ impl PluginState {
             blockheight: Arc::new(Mutex::new(0)),
         }
     }
+    pub async fn read_excepts(&self) -> Result<(), Error> {
+        let sling_dir = self.config.lock().sling_dir.clone();
+        let excepts_chan_file = sling_dir.join(EXCEPTS_CHANS_FILE_NAME);
+        let excepts_peers_file = sling_dir.join(EXCEPTS_PEERS_FILE_NAME);
+        let excepts_chan_file_content = fs::read_to_string(excepts_chan_file.clone()).await;
+        let excepts_peers_file_content = fs::read_to_string(excepts_peers_file.clone()).await;
+
+        create_sling_dir(&sling_dir).await?;
+
+        *self.excepts_chans.lock() =
+            PluginState::parse_excepts(excepts_chan_file_content, excepts_chan_file).await?;
+        *self.excepts_peers.lock() =
+            PluginState::parse_excepts(excepts_peers_file_content, excepts_peers_file).await?;
+        Ok(())
+    }
+    async fn parse_excepts<T: FromStr + std::hash::Hash + Eq>(
+        content: Result<String, io::Error>,
+        excepts_file: PathBuf,
+    ) -> Result<HashSet<T>, Error> {
+        let excepts_tostring: Vec<String>;
+        let mut excepts: HashSet<T> = HashSet::new();
+
+        match content {
+            Ok(file) => excepts_tostring = serde_json::from_str(&file).unwrap_or(Vec::new()),
+            Err(e) => {
+                warn!(
+                    "Could not open {}: {}. First time using sling? Creating new file.",
+                    excepts_file.to_str().unwrap(),
+                    e.to_string()
+                );
+                File::create(excepts_file.clone()).await?;
+                excepts_tostring = Vec::new();
+            }
+        };
+
+        for except in excepts_tostring {
+            match T::from_str(&except) {
+                Ok(id) => {
+                    excepts.insert(id);
+                }
+                Err(_e) => warn!(
+                    "excepts file contains invalid short_channel_id/node_id: {}",
+                    except
+                ),
+            }
+        }
+        Ok(excepts)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -77,7 +139,10 @@ pub struct Task {
 
 #[derive(Clone, Debug)]
 pub struct Config {
-    pub pubkey: Option<PublicKey>,
+    pub pubkey: PublicKey,
+    pub rpc_path: PathBuf,
+    pub sling_dir: PathBuf,
+    pub network_dir: PathBuf,
     pub utf8: DynamicConfigOption<bool>,
     pub refresh_peers_interval: DynamicConfigOption<u64>,
     pub refresh_aliasmap_interval: DynamicConfigOption<u64>,
@@ -98,9 +163,17 @@ pub struct Config {
     pub cltv_delta: DynamicConfigOption<Option<u16>>,
 }
 impl Config {
-    pub fn new() -> Config {
+    pub fn new(
+        pubkey: PublicKey,
+        rpc_path: PathBuf,
+        sling_dir: PathBuf,
+        network_dir: PathBuf,
+    ) -> Config {
         Config {
-            pubkey: None,
+            pubkey,
+            rpc_path,
+            sling_dir,
+            network_dir,
             utf8: DynamicConfigOption {
                 name: OPT_UTF8.name,
                 value: true,

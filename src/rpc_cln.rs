@@ -79,7 +79,7 @@ pub async fn get_info(rpc_path: &PathBuf) -> Result<GetinfoResponse, Error> {
 
 pub async fn slingsend(
     rpc_path: &PathBuf,
-    route: Vec<SendpayRoute>,
+    route: &[SendpayRoute],
     payment_hash: Sha256,
     payment_secret: Option<Secret>,
     label: Option<String>,
@@ -87,7 +87,7 @@ pub async fn slingsend(
     let mut rpc = ClnRpc::new(&rpc_path).await?;
     let sendpay_request = rpc
         .call(Request::SendPay(SendpayRequest {
-            route,
+            route: route.to_vec(),
             payment_hash,
             label,
             amount_msat: None,

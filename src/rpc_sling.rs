@@ -10,10 +10,9 @@ use sling::Job;
 use tokio::{fs, time};
 
 use crate::{
-    get_normal_channel_from_listpeerchannels, make_rpc_path, parse::parse_job, read_jobs,
-    refresh_joblists, slings::sling, write_excepts, write_graph, write_job, JobMessage, JobState,
-    PluginState, Task, EXCEPTS_CHANS_FILE_NAME, EXCEPTS_PEERS_FILE_NAME, JOB_FILE_NAME,
-    PLUGIN_NAME,
+    get_normal_channel_from_listpeerchannels, parse::parse_job, read_jobs, refresh_joblists,
+    slings::sling, write_excepts, write_graph, write_job, JobMessage, JobState, PluginState, Task,
+    EXCEPTS_CHANS_FILE_NAME, EXCEPTS_PEERS_FILE_NAME, JOB_FILE_NAME, PLUGIN_NAME,
 };
 
 pub async fn slingjob(
@@ -27,7 +26,7 @@ pub async fn slingjob(
     let peer_channels = p.state().peer_channels.lock().await.clone();
     let our_listpeers_channel = get_normal_channel_from_listpeerchannels(&peer_channels, &chan_id);
 
-    if let Some(_channel) = our_listpeers_channel {
+    if our_listpeers_channel.is_some() {
         write_job(p.clone(), sling_dir, chan_id, Some(job), false).await?;
         Ok(json!({"result":"success"}))
     } else {
@@ -56,7 +55,10 @@ pub async fn slinggo(
 
     let mut spawn_count = 0;
 
-    let config = p.state().config.lock().clone();
+    let default_paralleljobs;
+    {
+        default_paralleljobs = p.state().config.lock().paralleljobs.value
+    }
 
     match args {
         serde_json::Value::Array(a) => match a.len().cmp(&(1_usize)) {
@@ -84,7 +86,7 @@ pub async fn slinggo(
     for (chan_id, job) in jobs {
         let parallel_jobs = match job.paralleljobs {
             Some(pj) => pj,
-            None => config.paralleljobs.value,
+            None => default_paralleljobs,
         };
         for i in 1..=parallel_jobs {
             {
@@ -116,7 +118,6 @@ pub async fn slinggo(
                     }
                     tokio::spawn(async move {
                         match sling(
-                            &make_rpc_path(&plugin),
                             &job_clone,
                             &Task {
                                 chan_id,

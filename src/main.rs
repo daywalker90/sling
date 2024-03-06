@@ -3,8 +3,6 @@ use cln_plugin::options::{
     BooleanConfigOption, ConfigOption, IntegerConfigOption, StringConfigOption,
 };
 use cln_plugin::Builder;
-use cln_rpc::primitives::PublicKey;
-use cln_rpc::primitives::ShortChannelId;
 use config::*;
 use htlc::block_added;
 use htlc::htlc_handler;
@@ -14,7 +12,8 @@ use notifications::*;
 use rpc_cln::*;
 use rpc_sling::*;
 use stats::*;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use tokio::{self};
 use util::*;
 
@@ -25,6 +24,7 @@ mod htlc;
 mod model;
 mod notifications;
 mod parse;
+mod response;
 mod rpc_cln;
 mod rpc_sling;
 mod slings;
@@ -112,7 +112,7 @@ static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 async fn main() -> Result<(), anyhow::Error> {
     std::env::set_var("CLN_PLUGIN_LOG", "cln_plugin=info,cln_rpc=info,debug");
     log_panics::init();
-    let state = PluginState::new();
+    let state;
     let confplugin;
     match Builder::new(tokio::io::stdin(), tokio::io::stdout())
         .hook("htlc_accepted", htlc_handler)
@@ -185,6 +185,16 @@ async fn main() -> Result<(), anyhow::Error> {
         .await?
     {
         Some(plugin) => {
+            let rpc_path = Path::new(&plugin.configuration().lightning_dir)
+                .join(plugin.configuration().rpc_file);
+            let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
+            let mut networkdir = PathBuf::from_str(&plugin.configuration().lightning_dir).unwrap();
+            networkdir.pop();
+            let getinfo = get_info(&rpc_path).await?;
+            state = PluginState::new(getinfo.id, rpc_path, sling_dir, networkdir);
+            {
+                *state.blockheight.lock() = getinfo.blockheight;
+            }
             info!("get prestart config");
             match get_prestart_configs(&plugin, state.clone()) {
                 Ok(()) => &(),
@@ -206,11 +216,6 @@ async fn main() -> Result<(), anyhow::Error> {
     };
     if let Ok(plugin) = confplugin.start(state).await {
         debug!("{:?}", plugin.configuration());
-        let getinfo = get_info(&make_rpc_path(&plugin)).await?;
-        {
-            plugin.state().config.lock().pubkey = Some(getinfo.id);
-            *plugin.state().blockheight.lock() = getinfo.blockheight;
-        }
         let peersclone = plugin.clone();
         tokio::spawn(async move {
             match tasks::refresh_listpeerchannels_loop(peersclone).await {
@@ -218,19 +223,7 @@ async fn main() -> Result<(), anyhow::Error> {
                 Err(e) => warn!("Error in refresh_listpeers thread: {:?}", e),
             };
         });
-        let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
-        read_excepts::<ShortChannelId>(
-            plugin.state().excepts_chans.clone(),
-            EXCEPTS_CHANS_FILE_NAME,
-            &sling_dir,
-        )
-        .await?;
-        read_excepts::<PublicKey>(
-            plugin.state().excepts_peers.clone(),
-            EXCEPTS_PEERS_FILE_NAME,
-            &sling_dir,
-        )
-        .await?;
+        plugin.state().read_excepts().await?;
         let joblists_clone = plugin.clone();
         refresh_joblists(joblists_clone).await?;
         let channelsclone = plugin.clone();

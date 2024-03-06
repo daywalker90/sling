@@ -11,7 +11,6 @@ use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::io;
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::HashMap, path::Path};
@@ -218,45 +217,6 @@ pub async fn write_excepts<T: ToString>(
     Ok(())
 }
 
-pub async fn read_excepts<T: FromStr + std::hash::Hash + Eq>(
-    excepts_arc: Arc<Mutex<HashSet<T>>>,
-    file: &str,
-    sling_dir: &PathBuf,
-) -> Result<(), Error> {
-    let exceptsfile = sling_dir.join(file);
-    let exceptsfilecontent = fs::read_to_string(exceptsfile.clone()).await;
-    let excepts_tostring: Vec<String>;
-    let mut excepts: HashSet<T> = HashSet::new();
-
-    create_sling_dir(sling_dir).await?;
-    match exceptsfilecontent {
-        Ok(file) => excepts_tostring = serde_json::from_str(&file).unwrap_or(Vec::new()),
-        Err(e) => {
-            warn!(
-                "Could not open {}: {}. First time using sling? Creating new file.",
-                exceptsfile.to_str().unwrap(),
-                e.to_string()
-            );
-            File::create(exceptsfile.clone()).await?;
-            excepts_tostring = Vec::new();
-        }
-    };
-
-    for except in excepts_tostring {
-        match T::from_str(&except) {
-            Ok(id) => {
-                excepts.insert(id);
-            }
-            Err(_e) => warn!(
-                "excepts file contains invalid short_channel_id/node_id: {}",
-                except
-            ),
-        }
-    }
-    *excepts_arc.lock() = excepts;
-    Ok(())
-}
-
 pub async fn read_graph(sling_dir: &PathBuf) -> Result<LnGraph, Error> {
     let graphfile = sling_dir.join(GRAPH_FILE_NAME);
     let graphfilecontent = fs::read_to_string(graphfile.clone()).await;
@@ -302,7 +262,7 @@ pub async fn write_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
     Ok(())
 }
 
-async fn create_sling_dir(sling_dir: &PathBuf) -> Result<(), Error> {
+pub async fn create_sling_dir(sling_dir: &PathBuf) -> Result<(), Error> {
     match fs::create_dir(sling_dir).await {
         Ok(_) => Ok(()),
         Err(e) => match e.kind() {
@@ -388,10 +348,6 @@ pub fn feeppm_effective_from_amts(amount_msat_start: u64, amount_msat_end: u64) 
     }
     ((amount_msat_start - amount_msat_end) as f64 / amount_msat_end as f64 * 1_000_000.0).ceil()
         as u32
-}
-
-pub fn make_rpc_path(plugin: &Plugin<PluginState>) -> PathBuf {
-    Path::new(&plugin.configuration().lightning_dir).join(plugin.configuration().rpc_file)
 }
 
 pub fn is_channel_normal(channel: &ListpeerchannelsChannels) -> bool {
