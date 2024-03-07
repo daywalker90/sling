@@ -342,3 +342,36 @@ def test_stats(node_factory, bitcoind, get_plugin):
     stats_chan = l1.rpc.call("sling-stats", [cl2])
     LOGGER.info(stats_chan)
     assert cl1 == stats_chan["successes_in_time_window"]["top_5_channel_partners"][0]["scid"]
+
+
+def test_private_channel_receive(node_factory, bitcoind, get_plugin):
+    l1, l2 = node_factory.get_nodes(2, opts={
+        'plugin': get_plugin,
+        'sling-refresh-graph-interval': 1
+    })
+    l1.fundwallet(10_000_000)
+    # setup 2 nodes with 1 private and 1 public channel
+    l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
+    scid_pub, _ = l1.fundchannel(l2, 1_000_000)
+    bitcoind.generate_block(1)
+    sync_blockheight(bitcoind, [l1, l2])
+    scid_priv, _ = l1.fundchannel(
+        l2, 1_000_000, announce_channel=False, push_msat=500_000_000)
+
+    bitcoind.generate_block(6)
+    sync_blockheight(bitcoind, [l1, l2])
+
+    l1.wait_channel_active(scid_pub)
+    l1.wait_local_channel_active(scid_priv)
+    # craft route with a private channel where source peer
+    # is not the same as sendpay caller
+    l1.rpc.call(
+        "sling-job", {"scid": scid_priv, "direction": "pull",
+                      "amount": 100_000, "maxppm": 1000, "outppm": 1000,
+                      "target": 0.7})
+    l1.rpc.call("sling-go", [])
+    l1.daemon.wait_for_log(r"already balanced. Taking a break")
+    l1.daemon.is_in_log(r"Rebalance SUCCESSFULL after")
+
+    assert not l2.daemon.is_in_log(
+        r'No peer channel with scid={}'.format(scid_priv))
