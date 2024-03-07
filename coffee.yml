@@ -1,0 +1,9 @@
+plugin:
+  name: sling
+  version: 1.5.0
+  lang: rust
+  install: |
+    cargo build --release && cp target/release/sling . && cargo clean
+  main: sling
+tipping:
+  bolt12: lno1pgzhxmrfden3yzmyv9uhwctvddjhywfszcss8q80qgyl7x6xcw9r0n2q7cfarkhrawjgr2gfgkwkc9p55rjkuhvv
