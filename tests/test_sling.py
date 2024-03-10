@@ -449,6 +449,8 @@ def test_private_channel_receive(node_factory, bitcoind, get_plugin):  # noqa: F
             "target": 0.7,
         },
     )
+    l1.daemon.wait_for_log(r"Added 2 private channels")
+    l1.daemon.wait_for_log(r"Added 2 public channels")
     l1.rpc.call("sling-go", [])
     l1.daemon.wait_for_log(r"already balanced. Taking a break")
     l1.daemon.is_in_log(r"Rebalance SUCCESSFULL after")

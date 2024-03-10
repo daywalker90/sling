@@ -125,12 +125,18 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
 
             info!("Getting all channels in gossip...");
             let channels = list_channels(&rpc_path, None, None, None).await?.channels;
-            info!(
-                "Getting {} channels done in {}s!",
+            debug!(
+                "Got {} public channels after {}ms!",
                 channels.len(),
-                now.elapsed().as_secs().to_string()
+                now.elapsed().as_millis().to_string()
             );
             let local_channels = plugin.state().peer_channels.lock().await;
+            debug!(
+                "Got {} local channels after {}ms!",
+                local_channels.len(),
+                now.elapsed().as_millis().to_string()
+            );
+            let mut private_channel_added_count = 0;
             for chan in local_channels.values() {
                 let private = if let Some(pri) = chan.private {
                     pri
@@ -193,9 +199,17 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                             delay: remote_updates.cltv_expiry_delta.unwrap(),
                         }),
                     );
+                    private_channel_added_count += 2;
                 }
             }
 
+            info!(
+                "Added {} private channels to sling graph after {}ms!",
+                private_channel_added_count,
+                now.elapsed().as_millis().to_string()
+            );
+
+            let mut public_channel_added_count = 0;
             for chan in &channels {
                 if (feeppm_effective(
                     chan.fee_per_millionth,
@@ -226,8 +240,14 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                             delay: chan.delay,
                         }),
                     );
+                    public_channel_added_count += 1;
                 }
             }
+            info!(
+                "Added {} public channels to sling graph after {}ms!",
+                public_channel_added_count,
+                now.elapsed().as_millis().to_string()
+            );
 
             plugin
                 .state()
