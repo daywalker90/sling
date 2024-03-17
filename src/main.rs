@@ -195,11 +195,6 @@ async fn main() -> Result<(), anyhow::Error> {
             {
                 *state.blockheight.lock() = getinfo.blockheight;
             }
-            info!("get prestart config");
-            match get_prestart_configs(&plugin, state.clone()) {
-                Ok(()) => &(),
-                Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
-            };
             info!("read config");
             match read_config(&plugin, state.clone()).await {
                 Ok(()) => &(),

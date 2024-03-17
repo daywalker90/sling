@@ -12,7 +12,7 @@ use tokio::fs;
 
 use crate::{
     model::PluginState, Config, OPT_CANDIDATES_MIN_AGE, OPT_DEPLETEUPTOAMOUNT,
-    OPT_DEPLETEUPTOPERCENT, OPT_LIGHTNING_CONF, OPT_MAXHOPS, OPT_MAX_HTLC_COUNT, OPT_PARALLELJOBS,
+    OPT_DEPLETEUPTOPERCENT, OPT_MAXHOPS, OPT_MAX_HTLC_COUNT, OPT_PARALLELJOBS,
     OPT_REFRESH_ALIASMAP_INTERVAL, OPT_REFRESH_GRAPH_INTERVAL, OPT_REFRESH_PEERS_INTERVAL,
     OPT_RESET_LIQUIDITY_INTERVAL, OPT_STATS_DELETE_FAILURES_AGE, OPT_STATS_DELETE_FAILURES_SIZE,
     OPT_STATS_DELETE_SUCCESSES_AGE, OPT_STATS_DELETE_SUCCESSES_SIZE, OPT_TIMEOUTPAY, OPT_UTF8,
@@ -226,18 +226,6 @@ fn parse_config_file(configfile: String, config: Arc<Mutex<Config>>) -> Result<(
             }
         }
     }
-    Ok(())
-}
-
-pub fn get_prestart_configs(
-    plugin: &ConfiguredPlugin<PluginState, tokio::io::Stdin, tokio::io::Stdout>,
-    state: PluginState,
-) -> Result<(), Error> {
-    let mut config = state.config.lock();
-    if let Some(lconf) = plugin.option(&OPT_LIGHTNING_CONF)? {
-        config.lightning_conf.value = lconf
-    };
-
     Ok(())
 }
 

@@ -23,10 +23,10 @@ use tokio::{
 
 use crate::{
     create_sling_dir, OPT_CANDIDATES_MIN_AGE, OPT_DEPLETEUPTOAMOUNT, OPT_DEPLETEUPTOPERCENT,
-    OPT_LIGHTNING_CONF, OPT_MAXHOPS, OPT_MAX_HTLC_COUNT, OPT_PARALLELJOBS,
-    OPT_REFRESH_ALIASMAP_INTERVAL, OPT_REFRESH_GRAPH_INTERVAL, OPT_REFRESH_PEERS_INTERVAL,
-    OPT_RESET_LIQUIDITY_INTERVAL, OPT_STATS_DELETE_FAILURES_AGE, OPT_STATS_DELETE_FAILURES_SIZE,
-    OPT_STATS_DELETE_SUCCESSES_AGE, OPT_STATS_DELETE_SUCCESSES_SIZE, OPT_TIMEOUTPAY, OPT_UTF8,
+    OPT_MAXHOPS, OPT_MAX_HTLC_COUNT, OPT_PARALLELJOBS, OPT_REFRESH_ALIASMAP_INTERVAL,
+    OPT_REFRESH_GRAPH_INTERVAL, OPT_REFRESH_PEERS_INTERVAL, OPT_RESET_LIQUIDITY_INTERVAL,
+    OPT_STATS_DELETE_FAILURES_AGE, OPT_STATS_DELETE_FAILURES_SIZE, OPT_STATS_DELETE_SUCCESSES_AGE,
+    OPT_STATS_DELETE_SUCCESSES_SIZE, OPT_TIMEOUTPAY, OPT_UTF8,
 };
 
 pub const SUCCESSES_SUFFIX: &str = "_successes.json";
@@ -155,7 +155,6 @@ pub struct Config {
     pub paralleljobs: DynamicConfigOption<u8>,
     pub timeoutpay: DynamicConfigOption<u16>,
     pub max_htlc_count: DynamicConfigOption<u64>,
-    pub lightning_conf: DynamicConfigOption<String>,
     pub stats_delete_failures_age: DynamicConfigOption<u64>,
     pub stats_delete_failures_size: DynamicConfigOption<u64>,
     pub stats_delete_successes_age: DynamicConfigOption<u64>,
@@ -221,10 +220,6 @@ impl Config {
             max_htlc_count: DynamicConfigOption {
                 name: OPT_MAX_HTLC_COUNT.name,
                 value: 5,
-            },
-            lightning_conf: DynamicConfigOption {
-                name: OPT_LIGHTNING_CONF.name,
-                value: "".to_string(),
             },
             stats_delete_failures_age: DynamicConfigOption {
                 name: OPT_STATS_DELETE_FAILURES_AGE.name,

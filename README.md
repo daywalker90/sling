@@ -24,7 +24,6 @@ can be found on the [release](https://github.com/daywalker90/summars/releases) p
 
 They require ``glibc>=2.31``, which you can check with ``ldd --version``.
 
-:warning:Make sure to change the option ``sling-lightning-conf`` if you use a config file outside the default ``$HOME/.lightning/config`` or ``$HOME/.lightning/testnet/config``, see [Options](#options) for more info
 
 ## Building
 You can build the plugin yourself instead of using the release binaries.
@@ -122,7 +121,6 @@ Formula is ``min(depleteuptopercent * channel_capacity, depleteuptoamount)``. If
 You can mix these methods but if you set the same option with multiple of these methods the priority is 1. -> 2.
 
 ## Options
-* :warning:``sling-lightning-conf``: location of your config file. Only necessary if your config file is not in the default ``$HOME/.lightning/config`` or ``$HOME/.lightning/<network>/config``
 * ``sling-refresh-peers-interval``: ``sling`` periodically calls listpeers every ``refresh-peers-interval`` seconds
 and jobs use the data of the last call to check for balances etc. So this option could severely impact rebalancing target precision
 if it's value is too high. Default is ``1``s
