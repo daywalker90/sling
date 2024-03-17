@@ -4,18 +4,18 @@ use cln_plugin::{
     options::{config_type::Integer, ConfigOption},
     ConfiguredPlugin,
 };
-use log::{info, warn};
-use std::path::Path;
+use log::warn;
+use parking_lot::Mutex;
+use std::{path::Path, sync::Arc};
 
 use tokio::fs;
 
 use crate::{
-    get_config_path, model::PluginState, rpc_cln::get_info, OPT_CANDIDATES_MIN_AGE,
-    OPT_DEPLETEUPTOAMOUNT, OPT_DEPLETEUPTOPERCENT, OPT_LIGHTNING_CONF, OPT_MAXHOPS,
-    OPT_MAX_HTLC_COUNT, OPT_PARALLELJOBS, OPT_REFRESH_ALIASMAP_INTERVAL,
-    OPT_REFRESH_GRAPH_INTERVAL, OPT_REFRESH_PEERS_INTERVAL, OPT_RESET_LIQUIDITY_INTERVAL,
-    OPT_STATS_DELETE_FAILURES_AGE, OPT_STATS_DELETE_FAILURES_SIZE, OPT_STATS_DELETE_SUCCESSES_AGE,
-    OPT_STATS_DELETE_SUCCESSES_SIZE, OPT_TIMEOUTPAY, OPT_UTF8,
+    model::PluginState, Config, OPT_CANDIDATES_MIN_AGE, OPT_DEPLETEUPTOAMOUNT,
+    OPT_DEPLETEUPTOPERCENT, OPT_LIGHTNING_CONF, OPT_MAXHOPS, OPT_MAX_HTLC_COUNT, OPT_PARALLELJOBS,
+    OPT_REFRESH_ALIASMAP_INTERVAL, OPT_REFRESH_GRAPH_INTERVAL, OPT_REFRESH_PEERS_INTERVAL,
+    OPT_RESET_LIQUIDITY_INTERVAL, OPT_STATS_DELETE_FAILURES_AGE, OPT_STATS_DELETE_FAILURES_SIZE,
+    OPT_STATS_DELETE_SUCCESSES_AGE, OPT_STATS_DELETE_SUCCESSES_SIZE, OPT_TIMEOUTPAY, OPT_UTF8,
 };
 
 fn validate_u64_input(
@@ -89,37 +89,32 @@ pub async fn read_config(
     plugin: &ConfiguredPlugin<PluginState, tokio::io::Stdin, tokio::io::Stdout>,
     state: PluginState,
 ) -> Result<(), Error> {
-    let mut config_file_content = String::new();
     let dir = plugin.configuration().lightning_dir;
-    let rpc_path = Path::new(&dir).join(plugin.configuration().rpc_file);
-    let getinfo = get_info(&rpc_path).await?;
-    let config = state.config.lock().clone();
-    let config_file_path = if config.lightning_conf.value.is_empty() {
-        get_config_path(getinfo.lightning_dir).await?
-    } else {
-        vec![config.lightning_conf.value]
+    let general_configfile =
+        match fs::read_to_string(Path::new(&dir).parent().unwrap().join("config")).await {
+            Ok(file2) => file2,
+            Err(_) => {
+                warn!("No general config file found!");
+                String::new()
+            }
+        };
+    let network_configfile = match fs::read_to_string(Path::new(&dir).join("config")).await {
+        Ok(file) => file,
+        Err(_) => {
+            warn!("No network config file found!");
+            String::new()
+        }
     };
 
-    for confs in &config_file_path {
-        match fs::read_to_string(Path::new(&confs)).await {
-            Ok(f) => {
-                info!("Found config file: {}", confs);
-                config_file_content += &(f + "\n")
-            }
-            Err(e) => info!("Not a config file {}! {}", confs, e.to_string()),
-        }
-    }
+    parse_config_file(general_configfile, state.config.clone())?;
+    parse_config_file(network_configfile, state.config.clone())?;
+    Ok(())
+}
 
-    if config_file_content.is_empty() {
-        warn!(
-            "No config file found! Searched here: {}",
-            config_file_path.join(", ")
-        );
-    }
+fn parse_config_file(configfile: String, config: Arc<Mutex<Config>>) -> Result<(), Error> {
+    let mut config = config.lock();
 
-    let mut config = state.config.lock();
-
-    for line in config_file_content.lines() {
+    for line in configfile.lines() {
         if line.contains('=') {
             let splitline = line.split('=').collect::<Vec<&str>>();
             if splitline.len() == 2 {
@@ -231,7 +226,6 @@ pub async fn read_config(
             }
         }
     }
-
     Ok(())
 }
 

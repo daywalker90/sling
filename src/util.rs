@@ -38,23 +38,6 @@ use tokio::fs::{self, File};
 
 use tokio::time::{self, Instant};
 
-pub async fn get_config_path(lightning_dir: String) -> Result<Vec<String>, Error> {
-    let lightning_dir_network = Path::new(&lightning_dir);
-    let lightning_dir_general = Path::new(&lightning_dir).parent().unwrap();
-    Ok(vec![
-        lightning_dir_general
-            .join("config")
-            .to_str()
-            .unwrap()
-            .to_string(),
-        lightning_dir_network
-            .join("config")
-            .to_str()
-            .unwrap()
-            .to_string(),
-    ])
-}
-
 pub async fn refresh_joblists(p: Plugin<PluginState>) -> Result<(), Error> {
     let now = Instant::now();
     refresh_listpeerchannels(&p).await?;
