@@ -1,3 +1,10 @@
+#[cfg(not(target_env = "msvc"))]
+use tikv_jemallocator::Jemalloc;
+
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
+
 use anyhow::anyhow;
 use cln_plugin::options::{
     BooleanConfigOption, ConfigOption, IntegerConfigOption, StringConfigOption,
@@ -103,10 +110,6 @@ const OPT_STATS_DELETE_SUCCESSES_SIZE: IntegerConfigOption = ConfigOption::new_i
     "sling-stats-delete-successes-size",
     "Max number of success stats per channel. Default is `10000`",
 );
-
-#[cfg(all(not(windows), not(target_env = "musl")))]
-#[global_allocator]
-static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
