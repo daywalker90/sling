@@ -90,10 +90,6 @@ const OPT_MAX_HTLC_COUNT: IntegerConfigOption = ConfigOption::new_i64_no_default
     "sling-max-htlc-count",
     "Max number of htlc allowed pending in job and candidate. Default is `5`",
 );
-const OPT_LIGHTNING_CONF: StringConfigOption = ConfigOption::new_str_no_default(
-    "sling-lightning-conf",
-    "Path to lightning_conf for unsupported rpc methods. Default is ``",
-);
 const OPT_STATS_DELETE_FAILURES_AGE: IntegerConfigOption = ConfigOption::new_i64_no_default(
     "sling-stats-delete-failures-age",
     "Max age of failure stats in days. Default is `30`",
@@ -132,7 +128,6 @@ async fn main() -> Result<(), anyhow::Error> {
         .option(OPT_PARALLELJOBS)
         .option(OPT_TIMEOUTPAY)
         .option(OPT_MAX_HTLC_COUNT)
-        .option(OPT_LIGHTNING_CONF)
         .option(OPT_STATS_DELETE_FAILURES_AGE)
         .option(OPT_STATS_DELETE_FAILURES_SIZE)
         .option(OPT_STATS_DELETE_SUCCESSES_AGE)
