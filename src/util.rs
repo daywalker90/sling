@@ -269,6 +269,9 @@ pub fn channel_jobstate_update(
         .iter_mut()
         .find(|jt| jt.id() == task.task_id)
         .unwrap();
+    if jobstate.should_stop() {
+        return;
+    }
     jobstate.statechange(*latest_state);
     if let Some(a) = active {
         jobstate.set_active(a);
