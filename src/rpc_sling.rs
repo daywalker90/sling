@@ -167,7 +167,7 @@ pub async fn slingstop(
                     serde_json::Value::String(stop_id) => {
                         let scid = ShortChannelId::from_str(stop_id)?;
                         {
-                            let mut job_states = p.state().job_state.lock();
+                            let mut job_states = p.state().job_state.lock().clone();
                             if job_states.contains_key(&scid) {
                                 let jobstate = job_states.get_mut(&scid).unwrap();
                                 stopped_count = jobstate.len();
