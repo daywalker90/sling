@@ -22,16 +22,15 @@ use crate::model::{
 };
 use crate::response::{sendpay_response, waitsendpay_response};
 use crate::util::{
-    channel_jobstate_update, feeppm_effective, feeppm_effective_from_amts,
-    get_normal_channel_from_listpeerchannels, get_preimage_paymend_hash_pair, get_total_htlc_count,
-    is_channel_normal, my_sleep,
+    feeppm_effective, feeppm_effective_from_amts, get_normal_channel_from_listpeerchannels,
+    get_preimage_paymend_hash_pair, get_total_htlc_count, is_channel_normal, my_sleep,
 };
-use crate::wait_for_gossip;
+use crate::{channel_jobstate_update, wait_for_gossip};
 
 pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Result<(), Error> {
     let config = plugin.state().config.lock().clone();
 
-    wait_for_gossip(plugin, task).await;
+    wait_for_gossip(plugin, task).await?;
 
     let mut success_route: Option<Vec<SendpayRoute>> = None;
     'outer: loop {
@@ -52,9 +51,9 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
                 plugin.state().job_state.clone(),
                 task,
                 &JobMessage::Stopped,
-                Some(false),
-                None,
-            );
+                false,
+                true,
+            )?;
             break;
         }
 
@@ -75,7 +74,7 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
             other_peer,
             &tempbans,
         )
-        .await
+        .await?
         {
             if r {
                 continue 'outer;
@@ -87,9 +86,9 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
             plugin.state().job_state.clone(),
             task,
             &JobMessage::Rebalancing,
-            None,
-            None,
-        );
+            true,
+            false,
+        )?;
 
         let route = {
             let nr = next_route(
@@ -115,9 +114,9 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
                     plugin.state().job_state.clone(),
                     task,
                     &JobMessage::NoRoute,
-                    None,
-                    None,
-                );
+                    true,
+                    false,
+                )?;
                 success_route = None;
                 my_sleep(600, plugin.state().job_state.clone(), task).await;
                 continue 'outer;
@@ -147,9 +146,9 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
                 plugin.state().job_state.clone(),
                 task,
                 &JobMessage::TooExp,
-                None,
-                None,
-            );
+                true,
+                false,
+            )?;
             my_sleep(600, plugin.state().job_state.clone(), task).await;
             success_route = None;
             continue 'outer;
@@ -232,9 +231,9 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
                     plugin.state().job_state.clone(),
                     task,
                     &JobMessage::Error,
-                    None,
-                    Some(false),
-                );
+                    false,
+                    true,
+                )?;
                 warn!("{}", e);
                 break 'outer;
             }
@@ -264,9 +263,9 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
                     plugin.state().job_state.clone(),
                     task,
                     &JobMessage::Error,
-                    None,
-                    Some(false),
-                );
+                    false,
+                    true,
+                )?;
                 warn!("{}", e);
                 break 'outer;
             }
@@ -364,9 +363,9 @@ async fn next_route(
             plugin.state().job_state.clone(),
             task,
             &JobMessage::NoCandidates,
-            None,
-            None,
-        );
+            true,
+            false,
+        )?;
         return Err(anyhow!("No candidates found"));
     }
 
@@ -421,9 +420,9 @@ async fn next_route(
                                     plugin.state().job_state.clone(),
                                     task,
                                     &JobMessage::ChanNotInGraph,
-                                    None,
-                                    None,
-                                );
+                                    true,
+                                    false,
+                                )?;
                                 return Err(anyhow!("channel not found in graph"));
                             }
                         };
@@ -461,9 +460,9 @@ async fn next_route(
                                 plugin.state().job_state.clone(),
                                 task,
                                 &JobMessage::ChanNotInGraph,
-                                None,
-                                None,
-                            );
+                                true,
+                                false,
+                            )?;
                             return Err(anyhow!("channel not found in graph!"));
                         }
                     };
@@ -503,7 +502,7 @@ async fn health_check(
     job: &Job,
     other_peer: PublicKey,
     tempbans: &HashMap<ShortChannelId, u64>,
-) -> Option<bool> {
+) -> Result<Option<bool>, Error> {
     let job_states = plugin.state().job_state.clone();
     let our_listpeers_channel =
         get_normal_channel_from_listpeerchannels(peer_channels, &task.chan_id);
@@ -527,11 +526,11 @@ async fn health_check(
                     job_states.clone(),
                     task,
                     &JobMessage::Balanced,
-                    None,
-                    None,
-                );
+                    true,
+                    false,
+                )?;
                 my_sleep(600, job_states.clone(), task).await;
-                Some(true)
+                Ok(Some(true))
             } else if get_total_htlc_count(&channel) > config.max_htlc_count.value {
                 info!(
                     "{}/{}: already more than {} pending htlcs. Taking a break...",
@@ -541,11 +540,11 @@ async fn health_check(
                     job_states.clone(),
                     task,
                     &JobMessage::HTLCcapped,
-                    None,
-                    None,
-                );
+                    true,
+                    false,
+                )?;
                 my_sleep(10, job_states.clone(), task).await;
-                Some(true)
+                Ok(Some(true))
             } else {
                 match peer_channels
                     .values()
@@ -561,11 +560,11 @@ async fn health_check(
                                 job_states.clone(),
                                 task,
                                 &JobMessage::Disconnected,
-                                None,
-                                None,
-                            );
+                                true,
+                                false,
+                            )?;
                             my_sleep(60, job_states.clone(), task).await;
-                            Some(true)
+                            Ok(Some(true))
                         } else if tempbans.contains_key(&task.chan_id) {
                             info!(
                                 "{}/{}: Job peer not ready. Taking a break...",
@@ -575,13 +574,13 @@ async fn health_check(
                                 job_states.clone(),
                                 task,
                                 &JobMessage::PeerNotReady,
-                                None,
-                                None,
-                            );
+                                true,
+                                false,
+                            )?;
                             my_sleep(20, job_states.clone(), task).await;
-                            Some(true)
+                            Ok(Some(true))
                         } else {
-                            None
+                            Ok(None)
                         }
                     }
                     None => {
@@ -589,14 +588,14 @@ async fn health_check(
                             job_states.clone(),
                             task,
                             &JobMessage::PeerNotFound,
-                            Some(false),
-                            None,
-                        );
+                            false,
+                            true,
+                        )?;
                         warn!(
                             "{}/{}: peer not found. Stopping job.",
                             task.chan_id, task.task_id
                         );
-                        Some(false)
+                        Ok(Some(false))
                     }
                 }
             }
@@ -609,10 +608,10 @@ async fn health_check(
                 job_states.clone(),
                 task,
                 &JobMessage::ChanNotNormal,
-                Some(false),
-                None,
-            );
-            Some(false)
+                false,
+                true,
+            )?;
+            Ok(Some(false))
         }
     } else {
         warn!(
@@ -623,10 +622,10 @@ async fn health_check(
             job_states.clone(),
             task,
             &JobMessage::ChanNotNormal,
-            Some(false),
-            None,
-        );
-        Some(false)
+            false,
+            true,
+        )?;
+        Ok(Some(false))
     }
 }
 

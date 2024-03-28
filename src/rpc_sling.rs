@@ -10,9 +10,10 @@ use sling::Job;
 use tokio::{fs, time};
 
 use crate::{
-    get_normal_channel_from_listpeerchannels, parse::parse_job, read_jobs, refresh_joblists,
-    slings::sling, write_excepts, write_graph, write_job, JobMessage, JobState, PluginState, Task,
-    EXCEPTS_CHANS_FILE_NAME, EXCEPTS_PEERS_FILE_NAME, JOB_FILE_NAME, PLUGIN_NAME,
+    channel_jobstate_update, get_normal_channel_from_listpeerchannels, parse::parse_job, read_jobs,
+    refresh_joblists, slings::sling, write_excepts, write_graph, write_job, JobMessage, JobState,
+    PluginState, Task, EXCEPTS_CHANS_FILE_NAME, EXCEPTS_PEERS_FILE_NAME, JOB_FILE_NAME,
+    PLUGIN_NAME,
 };
 
 pub async fn slingjob(
@@ -117,30 +118,26 @@ pub async fn slinggo(
                         }
                     }
                     tokio::spawn(async move {
-                        match sling(
-                            &job_clone,
-                            &Task {
-                                chan_id,
-                                task_id: i,
-                            },
-                            &plugin,
-                        )
-                        .await
-                        {
+                        let task = Task {
+                            chan_id,
+                            task_id: i,
+                        };
+                        match sling(&job_clone, &task, &plugin).await {
                             Ok(()) => info!("{}/{}: Spawned job exited.", chan_id, i),
                             Err(e) => {
                                 warn!("{}/{}: Error in job: {}", chan_id, e.to_string(), i);
-                                let mut jobstates = plugin.state().job_state.lock();
-                                let jobstate = jobstates.get_mut(&chan_id).unwrap();
-                                let job_task = jobstate.iter_mut().find(|item| item.id() == i);
-
-                                match job_task {
-                                    Some(jt) => {
-                                        jt.statechange(JobMessage::Error);
-                                        jt.set_active(false);
+                                match channel_jobstate_update(
+                                    plugin.state().job_state.clone(),
+                                    &task,
+                                    &JobMessage::Error,
+                                    false,
+                                    true,
+                                ) {
+                                    Ok(_) => (),
+                                    Err(e) => {
+                                        warn!("{}/{}: Error updating jobstate: {}", chan_id, i, e)
                                     }
-                                    None => warn!("{}/{}: Job not found after error", chan_id, i),
-                                }
+                                };
                             }
                         };
                     });
@@ -175,8 +172,16 @@ pub async fn slingstop(
                                 let jobstate = job_states.get_mut(&scid).unwrap();
                                 stopped_count = jobstate.len();
                                 for jt in jobstate {
-                                    jt.stop();
-                                    jt.statechange(JobMessage::Stopping);
+                                    channel_jobstate_update(
+                                        p.state().job_state.clone(),
+                                        &Task {
+                                            chan_id: scid,
+                                            task_id: jt.id(),
+                                        },
+                                        &JobMessage::Stopping,
+                                        true,
+                                        true,
+                                    )?;
                                     debug!("{}/{}: Stopping job...", scid, jt.id());
                                 }
                             } else {
@@ -204,23 +209,31 @@ pub async fn slingstop(
                 Ordering::Less => {
                     let mut stopped_ids = Vec::new();
                     {
-                        let mut job_states = p.state().job_state.lock();
+                        let job_states = p.state().job_state.lock().clone();
                         stopped_count = job_states.iter().fold(0, |acc, (_, vec)| acc + vec.len());
-                        for (chan_id, jobstate) in job_states.iter_mut() {
+                        for (chan_id, jobstate) in job_states.iter() {
                             stopped_ids.push(*chan_id);
                             for jt in jobstate {
-                                jt.stop();
-                                jt.statechange(JobMessage::Stopping);
+                                channel_jobstate_update(
+                                    p.state().job_state.clone(),
+                                    &Task {
+                                        chan_id: *chan_id,
+                                        task_id: jt.id(),
+                                    },
+                                    &JobMessage::Stopping,
+                                    true,
+                                    true,
+                                )?;
                                 debug!("{}/{}: Stopping job...", chan_id, jt.id());
                             }
                         }
                     }
                     loop {
                         {
-                            let mut job_states = p.state().job_state.lock().clone();
+                            let mut job_states = p.state().job_state.lock();
                             job_states.retain(|chan, _state| stopped_ids.contains(chan));
                             let mut all_stopped = true;
-                            for (_chan_id, jobstate) in job_states.iter_mut() {
+                            for (_chan_id, jobstate) in job_states.iter() {
                                 if jobstate.iter().any(|j| j.is_active()) {
                                     all_stopped = false;
                                 }

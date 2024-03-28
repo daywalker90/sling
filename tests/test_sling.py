@@ -317,6 +317,7 @@ def test_pull_and_push(node_factory, bitcoind, get_plugin):  # noqa: F811
             "amount": 100_000,
             "maxppm": 1000,
             "outppm": 1000,
+            "target": 0.2,
         },
     )
     l1.rpc.call("sling-go", [])
@@ -325,13 +326,13 @@ def test_pull_and_push(node_factory, bitcoind, get_plugin):  # noqa: F811
         lambda: only_one(l1.rpc.listpeerchannels(l3.info["id"])["channels"])[
             "to_us_msat"
         ]
-        >= 400_000_000
+        >= 100_000_000
     )
     wait_for(
         lambda: only_one(l1.rpc.listpeerchannels(l3.info["id"])["channels"])[
             "to_us_msat"
         ]
-        <= 600_000_000
+        <= 300_000_000
     )
 
     l1.rpc.call("sling-deletejob", ["all"])

@@ -275,7 +275,8 @@ impl JobState {
             id: 0,
         }
     }
-    pub fn statechange(&mut self, latest_state: JobMessage) {
+
+    fn statechange(&mut self, latest_state: JobMessage) {
         self.latest_state = latest_state;
     }
     pub fn state(&self) -> JobMessage {
@@ -290,12 +291,46 @@ impl JobState {
     pub fn is_active(&self) -> bool {
         self.active
     }
-    pub fn set_active(&mut self, active: bool) {
+    fn set_active(&mut self, active: bool) {
         self.active = active;
     }
     pub fn id(&self) -> u8 {
         self.id
     }
+}
+
+pub fn channel_jobstate_update(
+    jobstates: Arc<Mutex<HashMap<ShortChannelId, Vec<JobState>>>>,
+    task: &Task,
+    latest_state: &JobMessage,
+    active: bool,
+    should_stop: bool,
+) -> Result<(), Error> {
+    let mut jobstates_lock = jobstates.lock();
+    let jobstates = jobstates_lock.get_mut(&task.chan_id);
+    let jobstate = if let Some(jss) = jobstates {
+        if let Some(js) = jss.iter_mut().find(|jt| jt.id() == task.task_id) {
+            js
+        } else {
+            return Err(anyhow!("channel_jobstate_update: Could not find task id"));
+        }
+    } else {
+        return Err(anyhow!("channel_jobstate_update: Could not find scid"));
+    };
+    jobstate.statechange(*latest_state);
+
+    if jobstate.should_stop() {
+        if !active {
+            jobstate.set_active(active);
+        }
+        return Ok(());
+    }
+
+    jobstate.set_active(active);
+    if should_stop {
+        jobstate.stop()
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{collections::HashMap, path::Path};
 
+use crate::channel_jobstate_update;
 use crate::model::PluginState;
 use crate::model::Task;
 use crate::model::GRAPH_FILE_NAME;
@@ -255,34 +256,6 @@ pub async fn create_sling_dir(sling_dir: &PathBuf) -> Result<(), Error> {
     }
 }
 
-pub fn channel_jobstate_update(
-    jobstates: Arc<Mutex<HashMap<ShortChannelId, Vec<JobState>>>>,
-    task: &Task,
-    latest_state: &JobMessage,
-    active: Option<bool>,
-    should_stop: Option<bool>,
-) {
-    let mut jobstates_mut = jobstates.lock();
-    let jobstate = jobstates_mut
-        .get_mut(&task.chan_id)
-        .unwrap()
-        .iter_mut()
-        .find(|jt| jt.id() == task.task_id)
-        .unwrap();
-    if jobstate.should_stop() {
-        return;
-    }
-    jobstate.statechange(*latest_state);
-    if let Some(a) = active {
-        jobstate.set_active(a);
-    }
-    if let Some(s) = should_stop {
-        if s {
-            jobstate.stop()
-        }
-    }
-}
-
 pub fn get_preimage_paymend_hash_pair() -> (String, Sha256) {
     let mut preimage = [0u8; 32];
     thread_rng().fill(&mut preimage[..]);
@@ -377,7 +350,7 @@ pub fn get_all_normal_channels_from_listpeerchannels(
     scid_peer_map
 }
 
-pub async fn my_sleep<'a>(
+pub async fn my_sleep(
     seconds: u64,
     job_state: Arc<Mutex<HashMap<ShortChannelId, Vec<JobState>>>>,
     task: &Task,
@@ -388,22 +361,34 @@ pub async fn my_sleep<'a>(
     );
     let timer = Instant::now();
     while timer.elapsed() < Duration::from_secs(seconds) {
-        if job_state
-            .lock()
-            .get(&task.chan_id)
-            .unwrap()
-            .iter()
-            .find(|jt| jt.id() == task.task_id)
-            .unwrap()
-            .should_stop()
         {
-            break;
+            let job_state_lock = job_state.lock();
+            let job_states = job_state_lock.get(&task.chan_id);
+            if let Some(js) = job_states {
+                if let Some(job_state) = js.iter().find(|jt| jt.id() == task.task_id) {
+                    if job_state.should_stop() {
+                        break;
+                    }
+                } else {
+                    warn!(
+                        "{}/{}: my_sleep: task id not found",
+                        task.chan_id, task.task_id
+                    );
+                    break;
+                }
+            } else {
+                warn!(
+                    "{}/{}: my_sleep: scid not found",
+                    task.chan_id, task.task_id
+                );
+                break;
+            }
         }
         time::sleep(Duration::from_secs(1)).await;
     }
 }
 
-pub async fn wait_for_gossip(plugin: &Plugin<PluginState>, task: &Task) {
+pub async fn wait_for_gossip(plugin: &Plugin<PluginState>, task: &Task) -> Result<(), Error> {
     loop {
         {
             let graph = plugin.state().graph.lock().await;
@@ -417,13 +402,14 @@ pub async fn wait_for_gossip(plugin: &Plugin<PluginState>, task: &Task) {
                     plugin.state().job_state.clone(),
                     task,
                     &JobMessage::GraphEmpty,
-                    None,
-                    None,
-                );
+                    true,
+                    false,
+                )?;
             } else {
                 break;
             }
         }
         my_sleep(600, plugin.state().job_state.clone(), task).await;
     }
+    Ok(())
 }
