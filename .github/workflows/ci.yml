@@ -1,0 +1,92 @@
+name: CI
+
+# Cancel duplicate jobs
+concurrency:
+    group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: true
+
+on:
+    workflow_call:
+        inputs:
+          cln-version:
+            required: true
+            type: string
+          pyln-version:
+            required: true
+            type: string
+          tagged-release:
+            required: true
+            type: boolean
+
+jobs:
+  build:
+    name: Test CLN=${{ inputs.cln-version }} PY=${{ matrix.python-version }}, BCD=${{ matrix.bitcoind-version }}, EXP=${{ matrix.experimental }}, DEP=${{ matrix.deprecated }}
+    strategy:
+        fail-fast: false
+        matrix:
+            bitcoind-version: ["26.0"]
+            experimental: [1]
+            deprecated: [0]
+            python-version: ["3.8", "3.12"]
+    
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download Bitcoin ${{ matrix.bitcoind-version }} & install binaries
+      run: |
+        export BITCOIND_VERSION=${{ matrix.bitcoind-version }}
+        wget https://bitcoincore.org/bin/bitcoin-core-${BITCOIND_VERSION}/bitcoin-${BITCOIND_VERSION}-x86_64-linux-gnu.tar.gz
+        tar -xzf bitcoin-${BITCOIND_VERSION}-x86_64-linux-gnu.tar.gz
+        sudo mv bitcoin-${BITCOIND_VERSION}/bin/* /usr/local/bin
+        rm -rf bitcoin-${BITCOIND_VERSION}-x86_64-linux-gnu.tar.gz bitcoin-${BITCOIND_VERSION}
+      
+    - name: Download Core Lightning ${{ inputs.cln-version }} & install binaries
+      run: |
+          url=$(curl -s https://api.github.com/repos/ElementsProject/lightning/releases/tags/${{ inputs.cln-version }} \
+            | jq '.assets[] | select(.name | contains("22.04")) | .browser_download_url' \
+            | tr -d '\"')
+          wget $url
+          sudo tar -xvf ${url##*/} -C /usr/local --strip-components=2
+          echo "CLN_VERSION=$(lightningd --version)" >> "$GITHUB_OUTPUT"
+        
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install Python dependencies
+      run: |
+        pip3 install --user "pyln-proto<=${{ inputs.pyln-version }}" "pyln-client<=${{ inputs.pyln-version }}" "pyln-testing<=${{ inputs.pyln-version }}"
+        pip3 install --user pytest-xdist
+
+    - name: Set up Rust
+      if:  ${{ inputs.tagged-release == false}}
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Set up protoc
+      if: ${{ inputs.tagged-release == false}}
+      uses: arduino/setup-protoc@v3
+
+    - name: Get plugin binary
+      run: |
+        if ${{ inputs.tagged-release }}; then
+          cd tests
+          ./setup.sh
+          cd ..
+        else
+          cargo build
+        fi
+
+    - name: Run tests
+      run: |
+        export CLN_PATH=${{ github.workspace }}/lightning
+        export COMPAT=${{ matrix.deprecated }}
+        export EXPERIMENTAL_FEATURES=${{ matrix.experimental }}
+        export SLOW_MACHINE=1
+        export TEST_DEBUG=1
+        export TRAVIS=1
+        export VALGRIND=0
+        pytest -n=5 tests/test_*.py

@@ -1,0 +1,14 @@
+name: latest release on CLN v23.11.2
+
+on:
+    release:
+        types: [published, edited]
+    workflow_dispatch:
+
+jobs:
+    call-ci:
+        uses: ./.github/workflows/ci.yml
+        with:
+            cln-version: "v23.11.2"
+            pyln-version: "23.11"
+            tagged-release: true
