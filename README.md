@@ -1,3 +1,7 @@
+[![latest release on CLN v24.02.1](https://github.com/daywalker90/sling/actions/workflows/latest_v24.02.yml/badge.svg?event=release)](https://github.com/daywalker90/sling/actions/workflows/latest_v24.02.yml) [![latest release on CLN v23.11.2](https://github.com/daywalker90/sling/actions/workflows/latest_v23.11.yml/badge.svg?event=release)](https://github.com/daywalker90/sling/actions/workflows/latest_v23.11.yml) [![latest release on CLN v23.08.1](https://github.com/daywalker90/sling/actions/workflows/latest_v23.08.yml/badge.svg?event=release)](https://github.com/daywalker90/sling/actions/workflows/latest_v23.08.yml)
+
+[![main on CLN v24.02.1](https://github.com/daywalker90/sling/actions/workflows/main_v24.02.yml/badge.svg?event=push)](https://github.com/daywalker90/sling/actions/workflows/main_v24.02.yml) [![main on CLN v23.11.2](https://github.com/daywalker90/sling/actions/workflows/main_v23.11.yml/badge.svg?event=push)](https://github.com/daywalker90/sling/actions/workflows/main_v23.11.yml) [![main on CLN v23.08.1](https://github.com/daywalker90/sling/actions/workflows/main_v23.08.yml/badge.svg?event=push)](https://github.com/daywalker90/sling/actions/workflows/main_v23.08.yml)
+
 # sling
 A core lightning plugin to automatically rebalance multiple channels.
 
