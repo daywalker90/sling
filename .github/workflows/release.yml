@@ -1,0 +1,104 @@
+name: Build and release
+on:
+    push:
+      tags:
+      - 'v*'
+
+jobs:
+    build:
+        name: build release binaries on ${{ matrix.os }}
+        strategy:
+            fail-fast: false
+            matrix:
+                os: ["ubuntu-latest", "macos-12"]
+        runs-on: ${{ matrix.os }}
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+            - name: Install rust
+              id: rust
+              uses: dtolnay/rust-toolchain@stable
+            - name: Install cross
+              if: contains(matrix.os, 'ubuntu')
+              run: |
+                cargo install cross --git https://github.com/cross-rs/cross
+            - name: Build unix
+              id: unix_build
+              if: contains(matrix.os, 'ubuntu')
+              run: |
+                cross build --profile optimized --locked --target x86_64-unknown-linux-gnu
+                cross build --profile optimized --locked --target armv7-unknown-linux-gnueabihf
+                cross build --profile optimized --locked --target aarch64-unknown-linux-gnu
+                tar -czf "${{ github.event.repository.name }}-${{github.ref_name}}-aarch64-linux-gnu.tar.gz" --transform 's|.*/||' "target/aarch64-unknown-linux-gnu/optimized/${{ github.event.repository.name }}"
+                tar -czf "${{ github.event.repository.name }}-${{github.ref_name}}-armv7-linux-gnueabihf.tar.gz" --transform 's|.*/||' "target/armv7-unknown-linux-gnueabihf/optimized/${{ github.event.repository.name }}"
+                tar -czf "${{ github.event.repository.name }}-${{github.ref_name}}-x86_64-linux-gnu.tar.gz" --transform 's|.*/||' "target/x86_64-unknown-linux-gnu/optimized/${{ github.event.repository.name }}"
+                ls -alh
+            - name: Build macos
+              id: macos_build
+              if: contains(matrix.os, 'macos')
+              run: |
+                rustup target add aarch64-apple-darwin
+                export CROSSBUILD_MACOS_SDK="macosx13.1"
+                export SDKROOT=$(xcrun -sdk $CROSSBUILD_MACOS_SDK --show-sdk-path)
+                export MACOSX_DEPLOYMENT_TARGET=12.0
+                cargo build --profile optimized --locked --target=x86_64-apple-darwin
+                cargo build --profile optimized --locked --target=aarch64-apple-darwin
+                lipo -create -output target/${{ github.event.repository.name }} target/aarch64-apple-darwin/optimized/${{ github.event.repository.name }} target/x86_64-apple-darwin/optimized/${{ github.event.repository.name }}
+                ditto -c -k --sequesterRsrc target/${{ github.event.repository.name }} ${{ github.event.repository.name }}-${{github.ref_name}}-universal-apple-darwin.zip
+                otool -l target/aarch64-apple-darwin/optimized/${{ github.event.repository.name }} | grep -A 5 LC_BUILD_VERSION
+                otool -l target/x86_64-apple-darwin/optimized/${{ github.event.repository.name }} | grep -A 5 LC_BUILD_VERSION
+                echo "macos_version=$MACOSX_DEPLOYMENT_TARGET" >> "$GITHUB_OUTPUT"
+                echo $(xcodebuild -showsdks)
+                ls -alh
+            - name: Upload unix artifacts
+              uses: actions/upload-artifact@v4
+              if: contains(matrix.os, 'ubuntu')
+              with:
+                name: unix-binaries
+                path: |
+                    ${{ github.event.repository.name }}-${{github.ref_name}}-*.tar.gz
+            - name: Upload macos artifacts
+              uses: actions/upload-artifact@v4
+              if: contains(matrix.os, 'macos')
+              with:
+                name: macos-binaries
+                path: |
+                    ${{ github.event.repository.name }}-${{github.ref_name}}-universal-apple-darwin.zip
+            - name: Get rust version
+              id: rversion
+              run: |
+                echo "rust_version=$(rustc --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+        outputs:
+            rust-version: ${{ steps.rversion.outputs.rust_version }}
+            macos-version: ${{ steps.macos_build.outputs.macos_version }}
+
+    release:
+        name: Github Release
+        needs: [build]
+        runs-on: "ubuntu-latest"
+        permissions:
+            contents: write
+        steps:
+            - name: Get semver version from tag
+              id: tag_name
+              run: echo "current_version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+            - name: Checkout code
+              uses: actions/checkout@v4
+            - name: Get Changelog Entry
+              id: changelog_reader
+              uses: mindsers/changelog-reader-action@v2
+              with:
+                validation_level: warn
+                version: ${{ steps.tag_name.outputs.current_version }}
+                path: ./CHANGELOG.md
+            - name: Download Artifacts
+              uses: actions/download-artifact@v4
+              with:
+                merge-multiple: true
+            - name: Release
+              uses: ncipollo/release-action@v1
+              with:
+                allowUpdates: false
+                artifactErrorsFailBuild: true
+                body: "${{ steps.changelog_reader.outputs.changes }} \n\n### Release binaries info\n\n- Release binaries were built using rust ${{ needs.build.outputs.rust-version }}\n- Linux release binaries require glibc>=2.31\n- MacOS release binary requires MacOS>=${{ needs.build.outputs.macos-version }}"
+                artifacts: "${{ github.event.repository.name }}-${{github.ref_name}}-*.tar.gz,${{ github.event.repository.name }}-${{github.ref_name}}-*.zip"

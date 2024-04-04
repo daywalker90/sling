@@ -9,6 +9,7 @@ on:
             - 'LICENSE'
             - '.gitignore'
             - 'coffee.yml'
+            - 'tests/setup.sh'
     pull_request:
     workflow_dispatch:
 
