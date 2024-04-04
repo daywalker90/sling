@@ -1,1 +1,3 @@
 /target
+tests/__pycache__/
+venv/
