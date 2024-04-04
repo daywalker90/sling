@@ -41,25 +41,26 @@ get_platform_file_end() {
     esac
 }
 platform_file_end=$(get_platform_file_end)
+archive_file=$name-v$version-$platform_file_end
 
-github_url="https://github.com/daywalker90/$name/releases/download/v$version/$name-v$version-$platform_file_end"
+github_url="https://github.com/daywalker90/$name/releases/download/v$version/$archive_file"
 
 
 # Download the archive using curl
-if ! curl -L "$github_url" -o "$script_dir/$name-v$version-$platform_file_end"; then
+if ! curl -L "$github_url" -o "$script_dir/$archive_file"; then
     echo "Error downloading the file from $github_url" >&2
     exit 1
 fi
 
 # Extract the contents
 if [[ $archive_file == *.tar.gz ]]; then
-    if ! tar -xzvf "$script_dir/$name-v$version-$platform_file_end" -C "$script_dir"; then
-        echo "Error extracting the contents of $name-v$version-$platform_file_end" >&2
+    if ! tar -xzvf "$script_dir/$archive_file" -C "$script_dir"; then
+        echo "Error extracting the contents of $archive_file" >&2
         exit 1
     fi
 elif [[ $archive_file == *.zip ]]; then
-    if ! unzip "$script_dir/$name-v$version-$platform_file_end" -C "$script_dir"; then
-        echo "Error extracting the contents of $name-v$version-$platform_file_end" >&2
+    if ! unzip "$script_dir/$archive_file" -d "$script_dir"; then
+        echo "Error extracting the contents of $archive_file" >&2
         exit 1
     fi
 else
