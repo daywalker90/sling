@@ -5,6 +5,7 @@ on:
         branches:
             - main
         paths-ignore:
+            - 'tools/**'
             - 'README.md'
             - 'LICENSE'
             - '.gitignore'
