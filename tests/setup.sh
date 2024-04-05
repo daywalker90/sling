@@ -67,3 +67,33 @@ else
     echo "Unknown archive format or unsupported file extension: $archive_file" >&2
     exit 1
 fi
+
+# Function to check if a Python package is installed
+check_package() {
+    python_exec="$1"
+    package_name="$2"
+    if $python_exec -c "import $package_name" &> /dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+proto_path="$script_dir/../proto"
+if [ -d "$proto_path" ]; then
+    # Check if the package is installed in the first Python executable
+    if check_package "$TEST_DIR/bin/python3" "grpc"; then
+        python_exec="$TEST_DIR/bin/python3"
+    elif check_package "python3" "grpc"; then
+        python_exec="python3"
+    else
+        echo "Error: Package 'grpcio' is not installed" >&2
+        exit 1
+    fi
+
+    # Generate grpc files
+    if ! "$python_exec" -m grpc_tools.protoc --proto_path="$proto_path" --python_out=$script_dir --grpc_python_out=$script_dir $proto_path/*.proto; then
+        echo "Error generating grpc files" >&2
+        exit 1
+    fi
+fi
