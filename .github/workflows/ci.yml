@@ -140,13 +140,13 @@ jobs:
 
     - name: Get plugin binary
       run: |
+        source venv/bin/activate
         if ${{ inputs.tagged-release }}; then
           cd tests
           ./setup.sh
           cd ..
         else
           if [ -d "proto" ]; then
-            source venv/bin/activate
             python -m grpc_tools.protoc --proto_path="proto" --python_out="tests" --grpc_python_out="tests" proto/*.proto
           fi
           cargo build
