@@ -118,6 +118,9 @@ jobs:
         python -m pip install -U pip poetry wheel
         pip3 install "pyln-proto<=${{ inputs.pyln-version }}" "pyln-client<=${{ inputs.pyln-version }}" "pyln-testing<=${{ inputs.pyln-version }}"
         pip3 install pytest-xdist pytest-test-groups pytest-timeout
+        if [ -f "tests/requirements.txt" ]; then
+          pip3 install -r tests/requirements.txt
+        fi
 
     - name: Compile Core Lightning ${{ inputs.cln-version }} & install binaries
       if: ${{ contains(matrix.os, 'macos') && steps.cache-cln.outputs.cache-hit != 'true' }}
