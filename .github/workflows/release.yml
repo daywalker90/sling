@@ -100,5 +100,5 @@ jobs:
               with:
                 allowUpdates: false
                 artifactErrorsFailBuild: true
-                body: "${{ steps.changelog_reader.outputs.changes }} \n\n### Release binaries info\n\n- Release binaries were built using rust ${{ needs.build.outputs.rust-version }}\n- Linux release binaries require glibc>=2.31\n- MacOS release binary requires MacOS>=${{ needs.build.outputs.macos-version }}"
-                artifacts: "${{ github.event.repository.name }}-${{github.ref_name}}-*.tar.gz,${{ github.event.repository.name }}-${{github.ref_name}}-*.zip"
+                body: "${{ steps.changelog_reader.outputs.changes }} \n\n### Release binaries info\n\n- Release binaries were built using rust ${{ needs.build.outputs.rust-version }}\n- Linux release binaries require glibc>=2.31"
+                artifacts: "${{ github.event.repository.name }}-${{github.ref_name}}-*.tar.gz"
