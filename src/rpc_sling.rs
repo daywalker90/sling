@@ -77,7 +77,12 @@ pub async fn slinggo(
             },
             Ordering::Less => (),
         },
-        _ => return Err(anyhow!("invalid arguments")),
+        e => {
+            return Err(anyhow!(
+                "sling-go: invalid arguments, expected array, got: {}",
+                e
+            ))
+        }
     }
 
     if jobs.is_empty() {
@@ -246,7 +251,12 @@ pub async fn slingstop(
                     }
                 }
             },
-            _ => return Err(anyhow!("invalid arguments")),
+            e => {
+                return Err(anyhow!(
+                    "sling-stop: invalid arguments, expected array, got: {}",
+                    e
+                ))
+            }
         };
     }
     write_graph(p.clone()).await?;
@@ -321,7 +331,12 @@ pub async fn slingdeletejob(
                 };
             }
         }
-        _ => return Err(anyhow!("invalid arguments")),
+        e => {
+            return Err(anyhow!(
+                "sling-deletejob: invalid arguments, expected array, got {}",
+                e
+            ))
+        }
     };
 
     Ok(json!({ "result": "success" }))
@@ -334,7 +349,12 @@ pub async fn slingexceptchan(
     let peer_channels = plugin.state().peer_channels.lock().await;
     let input_array = match args {
         serde_json::Value::Array(a) => a,
-        _ => return Err(anyhow!("invalid arguments")),
+        e => {
+            return Err(anyhow!(
+                "sling-exceptchan: invalid arguments, expected array, got {}",
+                e
+            ))
+        }
     };
     if input_array.len() > 2 || input_array.is_empty() {
         return Err(anyhow!(
@@ -419,7 +439,12 @@ pub async fn slingexceptpeer(
     let peer_channels = plugin.state().peer_channels.lock().await;
     let array = match args {
         serde_json::Value::Array(a) => a,
-        _ => return Err(anyhow!("invalid arguments")),
+        e => {
+            return Err(anyhow!(
+                "sling-exceptpeer: invalid arguments, expected array, got {}",
+                e
+            ))
+        }
     };
     if array.len() > 2 || array.is_empty() {
         return Err(anyhow!(

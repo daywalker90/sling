@@ -31,7 +31,12 @@ pub async fn slingstats(
 
     let input_array = match args {
         serde_json::Value::Array(a) => a,
-        _ => return Err(anyhow!("invalid arguments")),
+        e => {
+            return Err(anyhow!(
+                "sling-stats: invalid arguments, expected array, got: {}",
+                e
+            ))
+        }
     };
     if input_array.len() > 1 {
         return Err(anyhow!(
