@@ -3,17 +3,20 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::anyhow;
 use cln_plugin::{Error, Plugin};
 use cln_rpc::{
-    model::{requests::SendpayRoute, responses::SendpayResponse},
+    model::{
+        requests::{SendpayRequest, SendpayRoute, WaitsendpayRequest},
+        responses::SendpayResponse,
+    },
     primitives::{Amount, Sha256, ShortChannelId},
-    RpcError,
+    ClnRpc,
 };
 use log::{debug, info, warn};
 use sling::{Job, SatDirection};
 use tokio::time::Instant;
 
 use crate::{
-    errors::WaitsendpayErrorData, feeppm_effective_from_amts, my_sleep, slingsend, waitsendpay2,
-    Config, FailureReb, PluginState, SuccessReb, Task,
+    errors::WaitsendpayErrorData, feeppm_effective_from_amts, my_sleep, Config, FailureReb,
+    PluginState, SuccessReb, Task,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -27,7 +30,16 @@ pub async fn waitsendpay_response(
     route: &[SendpayRoute],
     success_route: &mut Option<Vec<SendpayRoute>>,
 ) -> Result<Option<ShortChannelId>, Error> {
-    match waitsendpay2(&config.rpc_path, payment_hash, config.timeoutpay.value).await {
+    let mut rpc = ClnRpc::new(&config.rpc_path).await?;
+    match rpc
+        .call_typed(&WaitsendpayRequest {
+            payment_hash,
+            timeout: Some(config.timeoutpay.value as u32),
+            partid: None,
+            groupid: None,
+        })
+        .await
+    {
         Ok(o) => {
             info!(
                 "{}/{}: Rebalance SUCCESSFULL after {}s. Sent {}sats plus {}msats fee",
@@ -64,34 +76,14 @@ pub async fn waitsendpay_response(
                 .write()
                 .remove(&payment_hash.to_string());
             let mut special_stop = false;
-            let rpc_error = match err.downcast() {
-                Ok(RpcError {
-                    code,
-                    message,
-                    data,
-                }) => RpcError {
-                    code,
-                    message,
-                    data,
-                },
-                Err(e) => {
-                    return Err(anyhow!(
-                        "{}/{}: UNEXPECTED waitsendpay error type: {} after: {}",
-                        task.chan_id,
-                        task.task_id,
-                        e,
-                        now.elapsed().as_millis().to_string()
-                    ))
-                }
-            };
-            let ws_code = if let Some(c) = rpc_error.code {
+            let ws_code = if let Some(c) = err.code {
                 c
             } else {
                 return Err(anyhow!(
                     "{}/{}: No WaitsendpayErrorCode, instead: {}",
                     task.chan_id,
                     task.task_id,
-                    rpc_error.message
+                    err.message
                 ));
             };
 
@@ -101,7 +93,7 @@ pub async fn waitsendpay_response(
                     task.chan_id,
                     task.task_id,
                     now.elapsed().as_secs().to_string(),
-                    rpc_error.message,
+                    err.message,
                 );
                 let temp_ban_route = &route[..route.len() - 1];
                 let mut source = temp_ban_route.first().unwrap().id;
@@ -152,7 +144,7 @@ pub async fn waitsendpay_response(
                 .write_to_file(task.chan_id, &config.sling_dir)
                 .await?;
                 Ok(None)
-            } else if let Some(d) = rpc_error.data {
+            } else if let Some(d) = err.data {
                 let ws_error = serde_json::from_value::<WaitsendpayErrorData>(d)?;
 
                 info!(
@@ -160,7 +152,7 @@ pub async fn waitsendpay_response(
                     task.chan_id,
                     task.task_id,
                     now.elapsed().as_secs().to_string(),
-                    rpc_error.message,
+                    err.message,
                     ws_error.erring_node,
                     ws_error.erring_channel,
                 );
@@ -197,7 +189,7 @@ pub async fn waitsendpay_response(
                         task.chan_id,
                         task.task_id,
                         now.elapsed().as_secs().to_string(),
-                        rpc_error.message
+                        err.message
                     ));
                 }
 
@@ -206,7 +198,7 @@ pub async fn waitsendpay_response(
                         "{}/{}: Last peer has a problem or just updated their fees? {}",
                         task.chan_id, task.task_id, ws_error.failcodename
                     );
-                    if rpc_error.message.contains("Too many HTLCs") {
+                    if err.message.contains("Too many HTLCs") {
                         my_sleep(3, plugin.state().job_state.clone(), task).await;
                     } else {
                         plugin.state().tempbans.lock().insert(
@@ -222,9 +214,9 @@ pub async fn waitsendpay_response(
                         "{}/{}: First peer has a problem {}",
                         task.chan_id,
                         task.task_id,
-                        rpc_error.message.clone()
+                        err.message.clone()
                     );
-                    if rpc_error.message.contains("Too many HTLCs") {
+                    if err.message.contains("Too many HTLCs") {
                         my_sleep(3, plugin.state().job_state.clone(), task).await;
                     } else {
                         plugin.state().tempbans.lock().insert(
@@ -271,7 +263,7 @@ pub async fn waitsendpay_response(
                     "{}/{}: UNEXPECTED waitsendpay failure: {} after: {}",
                     task.chan_id,
                     task.task_id,
-                    rpc_error.message,
+                    err.message,
                     now.elapsed().as_millis().to_string()
                 ));
             }
@@ -290,7 +282,21 @@ pub async fn sendpay_response(
     route: &[SendpayRoute],
     success_route: &mut Option<Vec<SendpayRoute>>,
 ) -> Result<Option<SendpayResponse>, Error> {
-    match slingsend(&config.rpc_path, route, payment_hash, None, None).await {
+    let mut rpc = ClnRpc::new(&config.rpc_path).await?;
+    match rpc
+        .call_typed(&SendpayRequest {
+            route: route.to_vec(),
+            payment_hash,
+            label: None,
+            amount_msat: None,
+            bolt11: None,
+            payment_secret: None,
+            partid: None,
+            localinvreqid: None,
+            groupid: None,
+        })
+        .await
+    {
         Ok(resp) => {
             plugin
                 .state()

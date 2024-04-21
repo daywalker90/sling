@@ -8,8 +8,12 @@ use anyhow::{anyhow, Error};
 use bitcoin::secp256k1::PublicKey;
 use cln_plugin::Plugin;
 use cln_rpc::{
-    model::responses::ListpeerchannelsChannelsState,
+    model::{
+        requests::{ListchannelsRequest, ListnodesRequest, ListpeerchannelsRequest},
+        responses::ListpeerchannelsChannelsState,
+    },
     primitives::{Amount, ShortChannelId},
+    ClnRpc,
 };
 
 use log::{debug, info};
@@ -20,7 +24,7 @@ use tokio::{
     time::{self, Instant},
 };
 
-use crate::{model::*, rpc_cln::*, util::*};
+use crate::{model::*, util::*};
 
 pub async fn refresh_aliasmap(plugin: Plugin<PluginState>) -> Result<(), Error> {
     let rpc_path;
@@ -30,11 +34,12 @@ pub async fn refresh_aliasmap(plugin: Plugin<PluginState>) -> Result<(), Error> 
         rpc_path = config.rpc_path.clone();
         interval = config.refresh_aliasmap_interval.value;
     }
+    let mut rpc = ClnRpc::new(&rpc_path).await?;
 
     loop {
         let now = Instant::now();
         {
-            let nodes = list_nodes(&rpc_path, None).await?.nodes;
+            let nodes = rpc.call_typed(&ListnodesRequest { id: None }).await?.nodes;
             *plugin.state().alias_peer_map.lock() = nodes
                 .into_iter()
                 .filter_map(|node| node.alias.map(|alias| (node.nodeid, alias)))
@@ -69,9 +74,11 @@ pub async fn refresh_listpeerchannels(plugin: &Plugin<PluginState>) -> Result<()
         let config = plugin.state().config.lock();
         rpc_path = config.rpc_path.clone();
     }
+    let mut rpc = ClnRpc::new(&rpc_path).await?;
 
     let now = Instant::now();
-    *plugin.state().peer_channels.lock().await = list_peer_channels(&rpc_path)
+    *plugin.state().peer_channels.lock().await = rpc
+        .call_typed(&ListpeerchannelsRequest { id: None })
         .await?
         .channels
         .ok_or(anyhow!("refresh_listpeerchannels: no channels found!"))?
@@ -98,6 +105,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
         sling_dir = config.sling_dir.clone();
     }
     *plugin.state().graph.lock().await = read_graph(&sling_dir).await?;
+    let mut rpc = ClnRpc::new(&rpc_path).await?;
 
     loop {
         {
@@ -124,7 +132,14 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                 - 1_209_600) as u32;
 
             info!("Getting all channels in gossip...");
-            let channels = list_channels(&rpc_path, None, None, None).await?.channels;
+            let channels = rpc
+                .call_typed(&ListchannelsRequest {
+                    short_channel_id: None,
+                    source: None,
+                    destination: None,
+                })
+                .await?
+                .channels;
             debug!(
                 "Got {} public channels after {}ms!",
                 channels.len(),
@@ -407,9 +422,9 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
                 let mut file = OpenOptions::new()
                     .write(true)
                     .create(true)
+                    .truncate(true)
                     .open(sling_dir.join(chan_id.to_string() + SUCCESSES_SUFFIX))
                     .await?;
-                file.set_len(0).await?;
                 file.write_all(&content).await?;
             }
             for (chan_id, rebs) in failures {
@@ -451,9 +466,9 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
                 let mut file = OpenOptions::new()
                     .write(true)
                     .create(true)
+                    .truncate(true)
                     .open(sling_dir.join(chan_id.to_string() + FAILURES_SUFFIX))
                     .await?;
-                file.set_len(0).await?;
                 file.write_all(&content).await?;
             }
             debug!(

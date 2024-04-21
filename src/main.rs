@@ -1,3 +1,5 @@
+use cln_rpc::model::requests::GetinfoRequest;
+use cln_rpc::ClnRpc;
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
 
@@ -16,7 +18,6 @@ use htlc::htlc_handler;
 use log::{debug, info, warn};
 use model::*;
 use notifications::*;
-use rpc_cln::*;
 use rpc_sling::*;
 use stats::*;
 use std::path::{Path, PathBuf};
@@ -32,7 +33,6 @@ mod model;
 mod notifications;
 mod parse;
 mod response;
-mod rpc_cln;
 mod rpc_sling;
 mod slings;
 mod stats;
@@ -185,10 +185,11 @@ async fn main() -> Result<(), anyhow::Error> {
         Some(plugin) => {
             let rpc_path = Path::new(&plugin.configuration().lightning_dir)
                 .join(plugin.configuration().rpc_file);
+            let mut rpc = ClnRpc::new(&rpc_path).await?;
             let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
             let mut networkdir = PathBuf::from_str(&plugin.configuration().lightning_dir).unwrap();
             networkdir.pop();
-            let getinfo = get_info(&rpc_path).await?;
+            let getinfo = rpc.call_typed(&GetinfoRequest {}).await?;
             state = PluginState::new(getinfo.id, rpc_path, sling_dir, networkdir);
             {
                 *state.blockheight.lock() = getinfo.blockheight;
