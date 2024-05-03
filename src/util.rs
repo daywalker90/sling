@@ -77,7 +77,6 @@ pub async fn read_jobs(
     sling_dir: &PathBuf,
     plugin: &Plugin<PluginState>,
 ) -> Result<BTreeMap<ShortChannelId, Job>, Error> {
-    let peer_channels = plugin.state().peer_channels.lock().await;
     let jobfile = sling_dir.join(JOB_FILE_NAME);
     let jobfilecontent = fs::read_to_string(jobfile.clone()).await;
     let mut jobs: BTreeMap<ShortChannelId, Job>;
@@ -95,6 +94,7 @@ pub async fn read_jobs(
             jobs = BTreeMap::new();
         }
     };
+    let peer_channels = plugin.state().peer_channels.lock();
     let channels = get_all_normal_channels_from_listpeerchannels(&peer_channels);
     let channels = channels.keys().collect::<Vec<&ShortChannelId>>();
 
@@ -163,7 +163,7 @@ pub async fn write_job(
         );
         jobs.insert(chan_id, my_job);
     }
-    let peer_channels = p.state().peer_channels.lock().await.clone();
+    let peer_channels = p.state().peer_channels.lock().clone();
     let mut jobs_to_remove = HashSet::new();
     if !peer_channels.is_empty() {
         for chan_id in jobs.keys() {
@@ -231,14 +231,10 @@ pub async fn read_graph(sling_dir: &PathBuf) -> Result<LnGraph, Error> {
     Ok(graph)
 }
 pub async fn write_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
-    let graph = plugin.state().graph.lock().await;
+    let graph_string = serde_json::to_string(&*plugin.state().graph.lock())?;
     let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
     let now = Instant::now();
-    fs::write(
-        sling_dir.join(GRAPH_FILE_NAME),
-        serde_json::to_string(&*graph)?,
-    )
-    .await?;
+    fs::write(sling_dir.join(GRAPH_FILE_NAME), graph_string).await?;
     debug!(
         "Wrote graph to disk in {}ms",
         now.elapsed().as_millis().to_string()
@@ -391,7 +387,7 @@ pub async fn my_sleep(
 pub async fn wait_for_gossip(plugin: &Plugin<PluginState>, task: &Task) -> Result<(), Error> {
     loop {
         {
-            let graph = plugin.state().graph.lock().await;
+            let graph = plugin.state().graph.lock();
 
             if graph.graph.is_empty() {
                 info!(

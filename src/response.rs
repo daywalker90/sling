@@ -105,7 +105,6 @@ pub async fn waitsendpay_response(
                             .state()
                             .graph
                             .lock()
-                            .await
                             .graph
                             .get_mut(&source)
                             .unwrap()
@@ -236,7 +235,6 @@ pub async fn waitsendpay_response(
                         .state()
                         .graph
                         .lock()
-                        .await
                         .graph
                         .get_mut(&ws_error.erring_node)
                         .unwrap()

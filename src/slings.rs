@@ -58,7 +58,7 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
         }
 
         let tempbans = plugin.state().tempbans.lock().clone();
-        let peer_channels = plugin.state().peer_channels.lock().await.clone();
+        let peer_channels = plugin.state().peer_channels.lock().clone();
         let other_peer = peer_channels
             .get(&task.chan_id)
             .ok_or(anyhow!("other_peer: channel not found"))?
@@ -179,7 +179,6 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
             .state()
             .graph
             .lock()
-            .await
             .graph
             .get_mut(&route_claim_peer)
             .unwrap()
@@ -279,7 +278,6 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
                 .state()
                 .graph
                 .lock()
-                .await
                 .graph
                 .get_mut(&route_claim_peer)
                 .unwrap()
@@ -312,7 +310,7 @@ async fn next_route(
     keypair: &PublicKeyPair,
     success_route: &mut Option<Vec<SendpayRoute>>,
 ) -> Result<Vec<SendpayRoute>, Error> {
-    let graph = plugin.state().graph.lock().await;
+    let graph = plugin.state().graph.lock();
     #[allow(clippy::clone_on_copy)]
     let blockheight = plugin.state().blockheight.lock().clone();
     let candidatelist;
@@ -380,7 +378,7 @@ async fn next_route(
                     .iter()
                     .any(|c| c == &prev_route.last().unwrap().channel),
             } {
-                route = prev_route.clone();
+                route.clone_from(prev_route);
             } else {
                 *success_route = None;
             }

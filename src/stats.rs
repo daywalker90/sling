@@ -51,7 +51,7 @@ pub async fn slingstats(
         .stats_delete_successes_age
         .value;
     let stats_delete_failures_age = plugin.state().config.lock().stats_delete_failures_age.value;
-    let peer_channels = plugin.state().peer_channels.lock().await.clone();
+    let peer_channels = plugin.state().peer_channels.lock().clone();
 
     if input_array.is_empty() {
         let mut successes = HashMap::new();

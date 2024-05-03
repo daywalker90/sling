@@ -24,7 +24,7 @@ pub async fn slingjob(
 
     let (chan_id, job) = parse_job(v).await?;
 
-    let peer_channels = p.state().peer_channels.lock().await.clone();
+    let peer_channels = p.state().peer_channels.lock().clone();
     let our_listpeers_channel = get_normal_channel_from_listpeerchannels(&peer_channels, &chan_id);
 
     if our_listpeers_channel.is_some() {
@@ -346,7 +346,7 @@ pub async fn slingexceptchan(
     plugin: Plugin<PluginState>,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, Error> {
-    let peer_channels = plugin.state().peer_channels.lock().await;
+    let peer_channels = plugin.state().peer_channels.lock().clone();
     let input_array = match args {
         serde_json::Value::Array(a) => a,
         e => {
@@ -389,7 +389,7 @@ pub async fn slingexceptchan(
                     }
                     let pull_jobs = plugin.state().pull_jobs.lock().clone();
                     let push_jobs = plugin.state().push_jobs.lock().clone();
-                    if peer_channels.get(&scid).is_some() {
+                    if peer_channels.contains_key(&scid) {
                         if pull_jobs.contains(&scid) || push_jobs.contains(&scid) {
                             return Err(anyhow!(
                                 "this channel has a job already and can't be an except too"
@@ -436,7 +436,7 @@ pub async fn slingexceptpeer(
     plugin: Plugin<PluginState>,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, Error> {
-    let peer_channels = plugin.state().peer_channels.lock().await;
+    let peer_channels = plugin.state().peer_channels.lock().clone();
     let array = match args {
         serde_json::Value::Array(a) => a,
         e => {

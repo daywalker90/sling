@@ -77,7 +77,7 @@ pub async fn refresh_listpeerchannels(plugin: &Plugin<PluginState>) -> Result<()
     let mut rpc = ClnRpc::new(&rpc_path).await?;
 
     let now = Instant::now();
-    *plugin.state().peer_channels.lock().await = rpc
+    *plugin.state().peer_channels.lock() = rpc
         .call_typed(&ListpeerchannelsRequest { id: None })
         .await?
         .channels
@@ -104,7 +104,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
         my_pubkey = config.pubkey;
         sling_dir = config.sling_dir.clone();
     }
-    *plugin.state().graph.lock().await = read_graph(&sling_dir).await?;
+    *plugin.state().graph.lock() = read_graph(&sling_dir).await?;
     let mut rpc = ClnRpc::new(&rpc_path).await?;
 
     loop {
@@ -145,7 +145,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                 channels.len(),
                 now.elapsed().as_millis().to_string()
             );
-            let local_channels = plugin.state().peer_channels.lock().await;
+            let local_channels = plugin.state().peer_channels.lock().clone();
             debug!(
                 "Got {} local channels after {}ms!",
                 local_channels.len(),
@@ -268,7 +268,6 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                 .state()
                 .graph
                 .lock()
-                .await
                 .update(LnGraph { graph: new_graph });
 
             write_graph(plugin.clone()).await?;
@@ -292,12 +291,7 @@ pub async fn refresh_liquidity(plugin: Plugin<PluginState>) -> Result<(), Error>
     loop {
         {
             let now = Instant::now();
-            plugin
-                .state()
-                .graph
-                .lock()
-                .await
-                .refresh_liquidity(interval);
+            plugin.state().graph.lock().refresh_liquidity(interval);
             info!(
                 "Refreshed Liquidity in {}ms!",
                 now.elapsed().as_millis().to_string()
@@ -337,7 +331,7 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
 
             let scid_peer_map;
             {
-                let peer_channels = plugin.state().peer_channels.lock().await;
+                let peer_channels = plugin.state().peer_channels.lock();
                 scid_peer_map = get_all_normal_channels_from_listpeerchannels(&peer_channels);
             }
 

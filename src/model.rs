@@ -42,8 +42,8 @@ pub const EXCEPTS_PEERS_FILE_NAME: &str = "excepts_peers.json";
 #[derive(Clone)]
 pub struct PluginState {
     pub config: Arc<Mutex<Config>>,
-    pub peer_channels: Arc<tokio::sync::Mutex<BTreeMap<ShortChannelId, ListpeerchannelsChannels>>>,
-    pub graph: Arc<tokio::sync::Mutex<LnGraph>>,
+    pub peer_channels: Arc<Mutex<BTreeMap<ShortChannelId, ListpeerchannelsChannels>>>,
+    pub graph: Arc<Mutex<LnGraph>>,
     pub pays: Arc<RwLock<HashMap<String, String>>>,
     pub alias_peer_map: Arc<Mutex<HashMap<PublicKey, String>>>,
     pub pull_jobs: Arc<Mutex<HashSet<ShortChannelId>>>,
@@ -68,8 +68,8 @@ impl PluginState {
                 sling_dir,
                 network_dir,
             ))),
-            peer_channels: Arc::new(tokio::sync::Mutex::new(BTreeMap::new())),
-            graph: Arc::new(tokio::sync::Mutex::new(LnGraph::new())),
+            peer_channels: Arc::new(Mutex::new(BTreeMap::new())),
+            graph: Arc::new(Mutex::new(LnGraph::new())),
             pays: Arc::new(RwLock::new(HashMap::new())),
             alias_peer_map: Arc::new(Mutex::new(HashMap::new())),
             pull_jobs: Arc::new(Mutex::new(HashSet::new())),
