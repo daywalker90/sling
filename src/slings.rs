@@ -418,10 +418,6 @@ async fn next_route(
                 pull_jobs.insert(*except);
                 push_jobs.insert(*except);
             }
-            let last_delay = match config.cltv_delta.value {
-                Some(c) => max(144, c),
-                None => 144,
-            };
             let max_hops = match job.maxhops {
                 Some(h) => h + 1,
                 None => config.maxhops.value + 1,
@@ -464,7 +460,7 @@ async fn next_route(
                             exclude_chans: pull_jobs,
                             exclude_peers: excepts_peers,
                         },
-                        last_delay,
+                        config.cltv_delta,
                         tempbans,
                     )?;
                 }
@@ -504,7 +500,7 @@ async fn next_route(
                             exclude_chans: push_jobs,
                             exclude_peers: excepts_peers,
                         },
-                        last_delay,
+                        config.cltv_delta,
                         tempbans,
                     )?;
                 }

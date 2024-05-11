@@ -162,7 +162,7 @@ pub struct Config {
     pub stats_delete_failures_size: DynamicConfigOption<u64>,
     pub stats_delete_successes_age: DynamicConfigOption<u64>,
     pub stats_delete_successes_size: DynamicConfigOption<u64>,
-    pub cltv_delta: DynamicConfigOption<Option<u16>>,
+    pub cltv_delta: u32,
 }
 impl Config {
     pub fn new(
@@ -179,73 +179,70 @@ impl Config {
             network_dir,
             version,
             utf8: DynamicConfigOption {
-                name: OPT_UTF8.name,
+                name: OPT_UTF8,
                 value: true,
             },
             refresh_peers_interval: DynamicConfigOption {
-                name: OPT_REFRESH_PEERS_INTERVAL.name,
+                name: OPT_REFRESH_PEERS_INTERVAL,
                 value: 1,
             },
             refresh_aliasmap_interval: DynamicConfigOption {
-                name: OPT_REFRESH_ALIASMAP_INTERVAL.name,
+                name: OPT_REFRESH_ALIASMAP_INTERVAL,
                 value: 3600,
             },
             refresh_graph_interval: DynamicConfigOption {
-                name: OPT_REFRESH_GRAPH_INTERVAL.name,
+                name: OPT_REFRESH_GRAPH_INTERVAL,
                 value: 600,
             },
             reset_liquidity_interval: DynamicConfigOption {
-                name: OPT_RESET_LIQUIDITY_INTERVAL.name,
+                name: OPT_RESET_LIQUIDITY_INTERVAL,
                 value: 360,
             },
             depleteuptopercent: DynamicConfigOption {
-                name: OPT_DEPLETEUPTOPERCENT.name,
+                name: OPT_DEPLETEUPTOPERCENT,
                 value: 0.2,
             },
             depleteuptoamount: DynamicConfigOption {
-                name: OPT_DEPLETEUPTOAMOUNT.name,
+                name: OPT_DEPLETEUPTOAMOUNT,
                 value: 2_000_000_000,
             },
             maxhops: DynamicConfigOption {
-                name: OPT_MAXHOPS.name,
+                name: OPT_MAXHOPS,
                 value: 8,
             },
             candidates_min_age: DynamicConfigOption {
-                name: OPT_CANDIDATES_MIN_AGE.name,
+                name: OPT_CANDIDATES_MIN_AGE,
                 value: 0,
             },
             paralleljobs: DynamicConfigOption {
-                name: OPT_PARALLELJOBS.name,
+                name: OPT_PARALLELJOBS,
                 value: 1,
             },
             timeoutpay: DynamicConfigOption {
-                name: OPT_TIMEOUTPAY.name,
+                name: OPT_TIMEOUTPAY,
                 value: 120,
             },
             max_htlc_count: DynamicConfigOption {
-                name: OPT_MAX_HTLC_COUNT.name,
+                name: OPT_MAX_HTLC_COUNT,
                 value: 5,
             },
             stats_delete_failures_age: DynamicConfigOption {
-                name: OPT_STATS_DELETE_FAILURES_AGE.name,
+                name: OPT_STATS_DELETE_FAILURES_AGE,
                 value: 30,
             },
             stats_delete_failures_size: DynamicConfigOption {
-                name: OPT_STATS_DELETE_FAILURES_SIZE.name,
+                name: OPT_STATS_DELETE_FAILURES_SIZE,
                 value: 10_000,
             },
             stats_delete_successes_age: DynamicConfigOption {
-                name: OPT_STATS_DELETE_SUCCESSES_AGE.name,
+                name: OPT_STATS_DELETE_SUCCESSES_AGE,
                 value: 30,
             },
             stats_delete_successes_size: DynamicConfigOption {
-                name: OPT_STATS_DELETE_SUCCESSES_SIZE.name,
+                name: OPT_STATS_DELETE_SUCCESSES_SIZE,
                 value: 10_000,
             },
-            cltv_delta: DynamicConfigOption {
-                name: "cltv-delta",
-                value: None,
-            },
+            cltv_delta: 144,
         }
     }
 }

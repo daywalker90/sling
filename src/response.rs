@@ -292,6 +292,8 @@ pub async fn sendpay_response(
             partid: None,
             localinvreqid: None,
             groupid: None,
+            description: None,
+            payment_metadata: None,
         })
         .await
     {

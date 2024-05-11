@@ -16,7 +16,7 @@ A core lightning plugin to automatically rebalance multiple channels.
 * [Feedback](#feedback)
 * [Thanks](#thanks)
 
-## Installation
+# Installation
 For general plugin installation instructions see the plugins repo [README.md](https://github.com/lightningd/plugins/blob/master/README.md#Installation)
 
 Release binaries for
@@ -24,12 +24,12 @@ Release binaries for
 * armv7-linux (Raspberry Pi 32bit)
 * aarch64-linux (Raspberry Pi 64bit)
 
-can be found on the [release](https://github.com/daywalker90/summars/releases) page. If you are unsure about your architecture you can run ``uname -m``.
+can be found on the [release](https://github.com/daywalker90/sling/releases) page. If you are unsure about your architecture you can run ``uname -m``.
 
 They require ``glibc>=2.31``, which you can check with ``ldd --version``.
 
 
-## Building
+# Building
 You can build the plugin yourself instead of using the release binaries.
 First clone the repo:
 
@@ -41,7 +41,9 @@ Install a recent rust version ([rustup](https://rustup.rs/) is recommended) and 
 
 After that the binary will be here: ``target/release/sling``
 
-## Command overview
+Note: Release binaries are built using ``cross`` and the ``optimized`` profile.
+
+# Command overview
 
 * ``sling-version`` print the version of the plugin
 * ``sling-job`` adds a rebalancing job for a channel, you can only have one job per channel and if you add one for the same channel it gets stopped and updated inplace
@@ -53,7 +55,7 @@ After that the binary will be here: ``target/release/sling``
 * ``sling-except-chan`` add or remove ShortChannelIds to completely avoid or alternatively list all current exceptions with keyword ``list``.
 * ``sling-except-peer`` same as ``sling-except-chan`` but with node PublicKeys
 
-## Pull sats into a channel
+# Pull sats into a channel
 To pull sats into a channel you can add a job like this:
 
 ``sling-job -k scid direction amount maxppm (outppm) (target) (maxhops) (candidates) (depleteuptopercent) (depleteuptoamount) (paralleljobs)``
@@ -81,7 +83,7 @@ Advanced example: "Pull sats to our side on ``704776x2087x3`` in amounts of 1000
 
 ``sling-job -k scid=704776x2087x3 direction=pull amount=100000 maxppm=300 target=0.8 maxhops=6 candidates='["704776x2087x5","702776x1087x2"]'``
 
-## Push sats out of a channel
+# Push sats out of a channel
 To push sats out of a channel you can add a job like this:
 
 ``sling-job -k scid direction amount maxppm (outppm) (target) (maxhops) (candidates) (depleteuptopercent) (depleteuptoamount) (paralleljobs)``
@@ -109,22 +111,23 @@ Advanced example: "Push sats to their side on ``704776x2087x3`` in amounts of 10
 
 ``sling-job -k scid=704776x2087x3 direction=push amount=100000 maxppm=300 target=0.8 maxhops=6 candidates='["704776x2087x5","702776x1087x2"]'``
 
-## Depleteformula
+# Depleteformula
 Formula is ``min(depleteuptopercent * channel_capacity, depleteuptoamount)``. If you don't set one or both, the global default will be used for one or both respectively instead. You can change the global defaults here: [Options](#options)
 
-## How to set options
-``sling`` is a dynamic plugin, so you can start it after cln is already running. You have two different methods of setting the options:
+# How to set options
+``sling`` is a dynamic plugin with dynamic options, so you can start it after CLN is already running and modify it's options after the plugin is started. You have two different methods of setting the options:
 
-1. in the cln config file. Example: ``sling-refresh-peers-interval=6``
-2. when starting the plugin. Example: ``lightning-cli -k plugin subcommand=start plugin=/path/to/sling sling-refresh-peers-interval=6``
+1. When starting the plugin dynamically.
 
-:warning:Warning: If you use the cln config file to set ``sling`` options make sure you include ``plugin=/path/to/sling`` (or have the plugin in the folder where cln automatically starts plugins from at startup) otherwise cln will not start next time!
+* Example: ``lightning-cli -k plugin subcommand=start plugin=/path/to/sling sling-refresh-peers-interval=6``
 
-:warning:Only config files in your lightning-dir or the network dir will be read if you start the plugin dynamically after cln is already running!
+2. Permanently saving them in the CLN config file. :warning:If you want to do this while CLN is running you must use [setconfig](https://docs.corelightning.org/reference/lightning-setconfig) instead of manually editing your config file! :warning:If you have options in the config file (either by manually editing it or by using the ``setconfig`` command) make sure the plugin will start automatically with CLN (include ``plugin=/path/to/sling`` or have a symlink to ``sling`` in your ``plugins`` folder). This is because CLN will refuse to start with config options that don't have a corresponding plugin loaded. :warning:If you edit your config file manually while CLN is running and a line changes their line number CLN will crash when you use the [setconfig](https://docs.corelightning.org/reference/lightning-setconfig) command, so better stick to ``setconfig`` only during CLN's uptime!
 
-You can mix these methods but if you set the same option with multiple of these methods the priority is 1. -> 2.
+* Example: ``lightning-cli setconfig sling-refresh-peers-interval 6``
 
-## Options
+You can mix two methods and if you set the same option with different methods, it will pick the value from your most recently used method.
+
+# Options
 * ``sling-refresh-peers-interval``: ``sling`` periodically calls listpeers every ``refresh-peers-interval`` seconds
 and jobs use the data of the last call to check for balances etc. So this option could severely impact rebalancing target precision
 if it's value is too high. Default is ``1``s
@@ -143,10 +146,10 @@ if it's value is too high. Default is ``1``s
 * ``sling-stats-delete-failures-size``: Max number of failure stats per channel. Default is ``10000``, use ``0`` to never delete stats based on count
 * ``sling-stats-delete-successes-size``: Max number of successes stats per channel. Default is ``10000``, use ``0`` to never delete stats based on count
 
-## Feedback
+# Feedback
 You can report issues, feedback etc. here on github or join this telegram channel: [Telegram](https://t.me/+9UKAom1Jam9hYTY6)
 
-## Thanks
+# Thanks
 Thank you to [cdecker](https://github.com/cdecker) for helping me get into writing a plugin with cln-plugin, the people in https://t.me/lightningd and [giovannizotta](https://github.com/giovannizotta) of the original [circular](https://github.com/giovannizotta/circular) plugin.
 
 

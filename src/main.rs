@@ -42,70 +42,22 @@ mod util;
 #[cfg(test)]
 mod tests;
 
-const OPT_UTF8: BooleanConfigOption = ConfigOption::new_bool_no_default(
-    "sling-utf8",
-    "Switch on/off special characters in node alias. Default is `true`",
-);
-const OPT_REFRESH_PEERS_INTERVAL: IntegerConfigOption = ConfigOption::new_i64_no_default(
-    "sling-refresh-peers-interval",
-    "Refresh interval for listpeers task. Default is `1`",
-);
-const OPT_REFRESH_ALIASMAP_INTERVAL: IntegerConfigOption = ConfigOption::new_i64_no_default(
-    "sling-refresh-aliasmap-interval",
-    "Refresh interval for aliasmap task. Default is `3600`",
-);
-const OPT_REFRESH_GRAPH_INTERVAL: IntegerConfigOption = ConfigOption::new_i64_no_default(
-    "sling-refresh-graph-interval",
-    "Refresh interval for graph task. Default is `600`",
-);
-const OPT_RESET_LIQUIDITY_INTERVAL: IntegerConfigOption = ConfigOption::new_i64_no_default(
-    "sling-reset-liquidity-interval",
-    "Refresh interval for liquidity reset task. Default is `360`",
-);
-const OPT_DEPLETEUPTOPERCENT: StringConfigOption = ConfigOption::new_str_no_default(
-    "sling-depleteuptopercent",
-    "Deplete up to percent for candidate search. Default is `0.2`",
-);
-const OPT_DEPLETEUPTOAMOUNT: IntegerConfigOption = ConfigOption::new_i64_no_default(
-    "sling-depleteuptoamount",
-    "Deplete up to amount for candidate search. Default is `2000000000`",
-);
-const OPT_MAXHOPS: IntegerConfigOption = ConfigOption::new_i64_no_default(
-    "sling-maxhops",
-    "Maximum number of hops in a route. Default is `8`",
-);
-const OPT_CANDIDATES_MIN_AGE: IntegerConfigOption = ConfigOption::new_i64_no_default(
-    "sling-candidates-min-age",
-    "Minium age of a candidate to rebalance with in days. Default is `0`",
-);
-const OPT_PARALLELJOBS: IntegerConfigOption = ConfigOption::new_i64_no_default(
-    "sling-paralleljobs",
-    "Number of parallel tasks for a job. Default is `1`",
-);
-const OPT_TIMEOUTPAY: IntegerConfigOption = ConfigOption::new_i64_no_default(
-    "sling-timeoutpay",
-    "Timeout for rebalances until we give up and continue. Default is `120`",
-);
-const OPT_MAX_HTLC_COUNT: IntegerConfigOption = ConfigOption::new_i64_no_default(
-    "sling-max-htlc-count",
-    "Max number of htlc allowed pending in job and candidate. Default is `5`",
-);
-const OPT_STATS_DELETE_FAILURES_AGE: IntegerConfigOption = ConfigOption::new_i64_no_default(
-    "sling-stats-delete-failures-age",
-    "Max age of failure stats in days. Default is `30`",
-);
-const OPT_STATS_DELETE_FAILURES_SIZE: IntegerConfigOption = ConfigOption::new_i64_no_default(
-    "sling-stats-delete-failures-size",
-    "Max number of failure stats per channel. Default is `10000`",
-);
-const OPT_STATS_DELETE_SUCCESSES_AGE: IntegerConfigOption = ConfigOption::new_i64_no_default(
-    "sling-stats-delete-successes-age",
-    "Max age of success stats in days. Default is `30`",
-);
-const OPT_STATS_DELETE_SUCCESSES_SIZE: IntegerConfigOption = ConfigOption::new_i64_no_default(
-    "sling-stats-delete-successes-size",
-    "Max number of success stats per channel. Default is `10000`",
-);
+const OPT_UTF8: &str = "sling-utf8";
+const OPT_REFRESH_PEERS_INTERVAL: &str = "sling-refresh-peers-interval";
+const OPT_REFRESH_ALIASMAP_INTERVAL: &str = "sling-refresh-aliasmap-interval";
+const OPT_REFRESH_GRAPH_INTERVAL: &str = "sling-refresh-graph-interval";
+const OPT_RESET_LIQUIDITY_INTERVAL: &str = "sling-reset-liquidity-interval";
+const OPT_DEPLETEUPTOPERCENT: &str = "sling-depleteuptopercent";
+const OPT_DEPLETEUPTOAMOUNT: &str = "sling-depleteuptoamount";
+const OPT_MAXHOPS: &str = "sling-maxhops";
+const OPT_CANDIDATES_MIN_AGE: &str = "sling-candidates-min-age";
+const OPT_PARALLELJOBS: &str = "sling-paralleljobs";
+const OPT_TIMEOUTPAY: &str = "sling-timeoutpay";
+const OPT_MAX_HTLC_COUNT: &str = "sling-max-htlc-count";
+const OPT_STATS_DELETE_FAILURES_AGE: &str = "sling-stats-delete-failures-age";
+const OPT_STATS_DELETE_FAILURES_SIZE: &str = "sling-stats-delete-failures-size";
+const OPT_STATS_DELETE_SUCCESSES_AGE: &str = "sling-stats-delete-successes-age";
+const OPT_STATS_DELETE_SUCCESSES_SIZE: &str = "sling-stats-delete-successes-size";
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
@@ -113,25 +65,106 @@ async fn main() -> Result<(), anyhow::Error> {
     log_panics::init();
     let state;
     let confplugin;
+    let opt_utf8: BooleanConfigOption = ConfigOption::new_bool_no_default(
+        OPT_UTF8,
+        "Switch on/off special characters in node alias. Default is `true`",
+    )
+    .dynamic();
+    let opt_refresh_peers_interval: IntegerConfigOption = ConfigOption::new_i64_no_default(
+        OPT_REFRESH_PEERS_INTERVAL,
+        "Refresh interval for listpeers task. Default is `1`",
+    )
+    .dynamic();
+    let opt_refresh_aliasmap_interval: IntegerConfigOption = ConfigOption::new_i64_no_default(
+        OPT_REFRESH_ALIASMAP_INTERVAL,
+        "Refresh interval for aliasmap task. Default is `3600`",
+    )
+    .dynamic();
+    let opt_refresh_graph_interval: IntegerConfigOption = ConfigOption::new_i64_no_default(
+        OPT_REFRESH_GRAPH_INTERVAL,
+        "Refresh interval for graph task. Default is `600`",
+    )
+    .dynamic();
+    let opt_reset_liquidity_interval: IntegerConfigOption = ConfigOption::new_i64_no_default(
+        OPT_RESET_LIQUIDITY_INTERVAL,
+        "Refresh interval for liquidity reset task. Default is `360`",
+    )
+    .dynamic();
+    let opt_depleteuptopercent: StringConfigOption = ConfigOption::new_str_no_default(
+        OPT_DEPLETEUPTOPERCENT,
+        "Deplete up to percent for candidate search. Default is `0.2`",
+    )
+    .dynamic();
+    let opt_depleteuptoamount: IntegerConfigOption = ConfigOption::new_i64_no_default(
+        OPT_DEPLETEUPTOAMOUNT,
+        "Deplete up to amount for candidate search. Default is `2000000000`",
+    )
+    .dynamic();
+    let opt_maxhops: IntegerConfigOption = ConfigOption::new_i64_no_default(
+        OPT_MAXHOPS,
+        "Maximum number of hops in a route. Default is `8`",
+    )
+    .dynamic();
+    let opt_candidates_min_age: IntegerConfigOption = ConfigOption::new_i64_no_default(
+        OPT_CANDIDATES_MIN_AGE,
+        "Minium age of a candidate to rebalance with in days. Default is `0`",
+    )
+    .dynamic();
+    let opt_paralleljobs: IntegerConfigOption = ConfigOption::new_i64_no_default(
+        OPT_PARALLELJOBS,
+        "Number of parallel tasks for a job. Default is `1`",
+    )
+    .dynamic();
+    let opt_timeoutpay: IntegerConfigOption = ConfigOption::new_i64_no_default(
+        OPT_TIMEOUTPAY,
+        "Timeout for rebalances until we give up and continue. Default is `120`",
+    )
+    .dynamic();
+    let opt_max_htlc_count: IntegerConfigOption = ConfigOption::new_i64_no_default(
+        OPT_MAX_HTLC_COUNT,
+        "Max number of htlc allowed pending in job and candidate. Default is `5`",
+    )
+    .dynamic();
+    let opt_stats_delete_failures_age: IntegerConfigOption = ConfigOption::new_i64_no_default(
+        OPT_STATS_DELETE_FAILURES_AGE,
+        "Max age of failure stats in days. Default is `30`",
+    )
+    .dynamic();
+    let opt_stats_delete_failures_size: IntegerConfigOption = ConfigOption::new_i64_no_default(
+        OPT_STATS_DELETE_FAILURES_SIZE,
+        "Max number of failure stats per channel. Default is `10000`",
+    )
+    .dynamic();
+    let opt_stats_delete_successes_age: IntegerConfigOption = ConfigOption::new_i64_no_default(
+        OPT_STATS_DELETE_SUCCESSES_AGE,
+        "Max age of success stats in days. Default is `30`",
+    )
+    .dynamic();
+    let opt_stats_delete_successes_size: IntegerConfigOption = ConfigOption::new_i64_no_default(
+        OPT_STATS_DELETE_SUCCESSES_SIZE,
+        "Max number of success stats per channel. Default is `10000`",
+    )
+    .dynamic();
     match Builder::new(tokio::io::stdin(), tokio::io::stdout())
         .hook("htlc_accepted", htlc_handler)
         .subscribe("block_added", block_added)
-        .option(OPT_UTF8)
-        .option(OPT_REFRESH_PEERS_INTERVAL)
-        .option(OPT_REFRESH_ALIASMAP_INTERVAL)
-        .option(OPT_REFRESH_GRAPH_INTERVAL)
-        .option(OPT_RESET_LIQUIDITY_INTERVAL)
-        .option(OPT_DEPLETEUPTOPERCENT)
-        .option(OPT_DEPLETEUPTOAMOUNT)
-        .option(OPT_MAXHOPS)
-        .option(OPT_CANDIDATES_MIN_AGE)
-        .option(OPT_PARALLELJOBS)
-        .option(OPT_TIMEOUTPAY)
-        .option(OPT_MAX_HTLC_COUNT)
-        .option(OPT_STATS_DELETE_FAILURES_AGE)
-        .option(OPT_STATS_DELETE_FAILURES_SIZE)
-        .option(OPT_STATS_DELETE_SUCCESSES_AGE)
-        .option(OPT_STATS_DELETE_SUCCESSES_SIZE)
+        .option(opt_utf8)
+        .option(opt_refresh_peers_interval)
+        .option(opt_refresh_aliasmap_interval)
+        .option(opt_refresh_graph_interval)
+        .option(opt_reset_liquidity_interval)
+        .option(opt_depleteuptopercent)
+        .option(opt_depleteuptoamount)
+        .option(opt_maxhops)
+        .option(opt_candidates_min_age)
+        .option(opt_paralleljobs)
+        .option(opt_timeoutpay)
+        .option(opt_max_htlc_count)
+        .option(opt_stats_delete_failures_age)
+        .option(opt_stats_delete_failures_size)
+        .option(opt_stats_delete_successes_age)
+        .option(opt_stats_delete_successes_size)
+        .setconfig_callback(setconfig_callback)
         .rpcmethod(
             &(PLUGIN_NAME.to_string() + "-job"),
             "add sling job",
@@ -194,16 +227,11 @@ async fn main() -> Result<(), anyhow::Error> {
             {
                 *state.blockheight.lock() = getinfo.blockheight;
             }
+            match get_startup_options(&plugin, state.clone()).await {
+                Ok(()) => &(),
+                Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
+            };
             info!("read startup options");
-            match get_startup_options(&plugin, state.clone()) {
-                Ok(()) => &(),
-                Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
-            };
-            info!("read config");
-            match read_config(&plugin, state.clone()).await {
-                Ok(()) => &(),
-                Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
-            };
             confplugin = plugin;
         }
         None => return Err(anyhow!("Error configuring the plugin!")),

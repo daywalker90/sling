@@ -3,6 +3,8 @@
 import logging
 import time
 
+import pytest
+from pyln.client import RpcError
 from pyln.testing.fixtures import *  # noqa: F403
 from pyln.testing.utils import only_one, sync_blockheight, wait_for
 from util import get_plugin  # noqa: F401
@@ -20,6 +22,7 @@ def test_options(node_factory, get_plugin):  # noqa: F811
     node = node_factory.get_node(
         options={
             "plugin": get_plugin,
+            "sling-utf8": False,
             "sling-refresh-peers-interval": 2,
             "sling-refresh-aliasmap-interval": 3,
             "sling-refresh-graph-interval": 599,
@@ -53,6 +56,47 @@ def test_options(node_factory, get_plugin):  # noqa: F811
     assert configs["sling-stats-delete-successes-age"]["value_int"] == 0
     assert configs["sling-stats-delete-failures-size"]["value_int"] == 0
     assert configs["sling-stats-delete-successes-size"]["value_int"] == 0
+
+
+def test_setconfig_options(node_factory, get_plugin):  # noqa: F811
+    node = node_factory.get_node(
+        options={
+            "plugin": get_plugin,
+            "sling-utf8": True,
+        }
+    )
+
+    with pytest.raises(RpcError) as err:
+        node.rpc.setconfig("sling-utf8", "test")
+    assert err.value.error["message"] == "sling-utf8 is not a valid boolean!"
+    assert err.value.error["code"] == -32602
+    assert (
+        node.rpc.listconfigs("sling-utf8")["configs"]["sling-utf8"][
+            "value_bool"
+        ]
+        != "test"
+    )
+
+    node.rpc.setconfig("sling-refresh-graph-interval", 1)
+
+    node.rpc.setconfig("sling-utf8", False)
+    with pytest.raises(RpcError, match="is not a valid boolean"):
+        node.rpc.setconfig("sling-utf8", "test")
+
+    with pytest.raises(RpcError, match="needs to be greater than 0 and <1"):
+        node.rpc.setconfig("sling-depleteuptopercent", 2)
+    node.rpc.setconfig("sling-depleteuptopercent", 0.12)
+
+    with pytest.raises(
+        RpcError, match="out of range integral type conversion attempted"
+    ):
+        node.rpc.setconfig("sling-paralleljobs", 1000)
+    node.rpc.setconfig("sling-paralleljobs", 50)
+
+    with pytest.raises(
+        RpcError, match="needs to be a positive number and smaller than"
+    ):
+        node.rpc.setconfig("sling-stats-delete-successes-age", 99999999)
 
 
 def test_option_errors(node_factory, get_plugin):  # noqa: F811

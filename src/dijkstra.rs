@@ -21,7 +21,7 @@ pub fn dijkstra(
     candidatelist: &[ShortChannelId],
     max_hops: u8,
     exclude_graph: &ExcludeGraph,
-    last_delay: u16,
+    last_delay: u32,
     tempbans: &HashMap<ShortChannelId, u64>,
 ) -> Result<Vec<SendpayRoute>, Error> {
     let mut visited = HashSet::with_capacity(lngraph.graph.len());
@@ -138,7 +138,7 @@ fn build_route(
     job: &Job,
     start: &PublicKey,
     slingchan: &DijkstraNode,
-    last_delay: u16,
+    last_delay: u32,
 ) -> Result<Vec<SendpayRoute>, Error> {
     let mut dijkstra_path = Vec::new();
     // debug!("predecssors: {:?}", predecessor);
@@ -217,7 +217,7 @@ fn build_route(
                 )
                 .ceil() as u64,
         );
-        delay += hop.channel.delay as u16;
+        delay += hop.channel.delay;
     }
     Ok(sendpay_route)
 }
