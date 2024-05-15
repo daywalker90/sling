@@ -10,7 +10,7 @@ jobs:
         strategy:
             fail-fast: false
             matrix:
-                os: ["ubuntu-latest"]
+                os: ["ubuntu-24.04"]
         runs-on: ${{ matrix.os }}
         steps:
             - name: Checkout code
@@ -75,7 +75,7 @@ jobs:
     release:
         name: Github Release
         needs: [build]
-        runs-on: "ubuntu-latest"
+        runs-on: "ubuntu-24.04"
         permissions:
             contents: write
         steps:

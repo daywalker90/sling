@@ -24,11 +24,11 @@ jobs:
     strategy:
         fail-fast: false
         matrix:
-            bitcoind-version: ["26.1"]
+            bitcoind-version: ["27.0"]
             experimental: [1]
             deprecated: [0]
-            python-version: ["3.8", "3.12"]
-            os: ["ubuntu-latest"]
+            python-version: ["3.9", "3.12"]
+            os: ["ubuntu-24.04"]
 
     runs-on: ${{ matrix.os }}
 
