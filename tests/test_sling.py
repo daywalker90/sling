@@ -446,8 +446,13 @@ def test_private_channel_receive(node_factory, bitcoind, get_plugin):  # noqa: F
 
     l1.wait_channel_active(scid_pub)
     l1.wait_local_channel_active(scid_priv)
-    # craft route with a private channel where source peer
-    # is not the same as sendpay caller
+
+    if l1.info["version"].startswith("v23"):
+        l1.daemon.wait_for_log(r"Added 4 public channels")
+    else:
+        l1.daemon.wait_for_log(r"Added 2 private channels")
+        l1.daemon.wait_for_log(r"Added 2 public channels")
+
     l1.rpc.call(
         "sling-job",
         {
@@ -459,8 +464,7 @@ def test_private_channel_receive(node_factory, bitcoind, get_plugin):  # noqa: F
             "target": 0.7,
         },
     )
-    l1.daemon.wait_for_log(r"Added 2 private channels")
-    l1.daemon.wait_for_log(r"Added 2 public channels")
+
     l1.rpc.call("sling-go", [])
     l1.daemon.wait_for_log(r"already balanced. Taking a break")
     assert l1.daemon.is_in_log(r"Rebalance SUCCESSFULL after")
