@@ -424,16 +424,25 @@ def test_private_channel_receive(node_factory, bitcoind, get_plugin):  # noqa: F
     )
     l1.fundwallet(10_000_000)
     # setup 2 nodes with 1 private and 1 public channel
-    l1.rpc.connect(l2.info["id"], "localhost", l2.port)
-    scid_pub, _ = l1.fundchannel(l2, 1_000_000)
+    l1.rpc.fundchannel(l2.info["id"] + "@localhost:" + str(l2.port), 1_000_000)
     bitcoind.generate_block(1)
     sync_blockheight(bitcoind, [l1, l2])
-    scid_priv, _ = l1.fundchannel(
-        l2, 1_000_000, announce_channel=False, push_msat=500_000_000
+    l1.rpc.fundchannel(
+        l2.info["id"] + "@localhost:" + str(l2.port),
+        1_000_000,
+        announce=False,
+        push_msat=500_000_000,
     )
 
     bitcoind.generate_block(6)
     sync_blockheight(bitcoind, [l1, l2])
+
+    wait_for(lambda: len(l1.rpc.listpeerchannels()["channels"]) == 2)
+    for chan in l1.rpc.listpeerchannels()["channels"]:
+        if chan["private"]:
+            scid_priv = chan["short_channel_id"]
+        else:
+            scid_pub = chan["short_channel_id"]
 
     l1.wait_channel_active(scid_pub)
     l1.wait_local_channel_active(scid_priv)
