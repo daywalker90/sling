@@ -218,12 +218,6 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                 }
             }
 
-            info!(
-                "Added {} private channels to sling graph after {}ms!",
-                private_channel_added_count,
-                now.elapsed().as_millis().to_string()
-            );
-
             let mut public_channel_added_count = 0;
             for chan in &channels {
                 if (feeppm_effective(
@@ -246,7 +240,19 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                             source: chan.source,
                             destination: chan.destination,
                             short_channel_id: chan.short_channel_id,
-                            scid_alias: None,
+                            scid_alias: if chan.public {
+                                None
+                            } else if let Some(loc_chan) =
+                                local_channels.get(&chan.short_channel_id)
+                            {
+                                if chan.source == my_pubkey {
+                                    Some(loc_chan.alias.as_ref().unwrap().local.unwrap())
+                                } else {
+                                    Some(loc_chan.alias.as_ref().unwrap().remote.unwrap())
+                                }
+                            } else {
+                                continue;
+                            },
                             fee_per_millionth: chan.fee_per_millionth,
                             base_fee_millisatoshi: chan.base_fee_millisatoshi,
                             htlc_maximum_msat: chan.htlc_maximum_msat,
@@ -255,9 +261,18 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                             delay: chan.delay,
                         }),
                     );
-                    public_channel_added_count += 1;
+                    if chan.public {
+                        public_channel_added_count += 1;
+                    } else {
+                        private_channel_added_count += 1;
+                    }
                 }
             }
+            info!(
+                "Added {} private channels to sling graph after {}ms!",
+                private_channel_added_count,
+                now.elapsed().as_millis().to_string()
+            );
             info!(
                 "Added {} public channels to sling graph after {}ms!",
                 public_channel_added_count,

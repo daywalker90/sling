@@ -60,6 +60,7 @@ impl PluginState {
         rpc_path: PathBuf,
         sling_dir: PathBuf,
         network_dir: PathBuf,
+        version: String,
     ) -> PluginState {
         PluginState {
             config: Arc::new(Mutex::new(Config::new(
@@ -67,6 +68,7 @@ impl PluginState {
                 rpc_path,
                 sling_dir,
                 network_dir,
+                version,
             ))),
             peer_channels: Arc::new(Mutex::new(BTreeMap::new())),
             graph: Arc::new(Mutex::new(LnGraph::new())),
@@ -143,6 +145,7 @@ pub struct Config {
     pub rpc_path: PathBuf,
     pub sling_dir: PathBuf,
     pub network_dir: PathBuf,
+    pub version: String,
     pub utf8: DynamicConfigOption<bool>,
     pub refresh_peers_interval: DynamicConfigOption<u64>,
     pub refresh_aliasmap_interval: DynamicConfigOption<u64>,
@@ -167,12 +170,14 @@ impl Config {
         rpc_path: PathBuf,
         sling_dir: PathBuf,
         network_dir: PathBuf,
+        version: String,
     ) -> Config {
         Config {
             pubkey,
             rpc_path,
             sling_dir,
             network_dir,
+            version,
             utf8: DynamicConfigOption {
                 name: OPT_UTF8.name,
                 value: true,

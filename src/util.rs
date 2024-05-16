@@ -2,6 +2,7 @@ use bitcoin::secp256k1::hashes::Hash;
 use bitcoin::secp256k1::hashes::HashEngine;
 use cln_rpc::model::responses::ListpeerchannelsChannels;
 use cln_rpc::model::responses::ListpeerchannelsChannelsState;
+use cln_rpc::primitives::Amount;
 use cln_rpc::primitives::PublicKey;
 use cln_rpc::primitives::Sha256;
 use parking_lot::Mutex;
@@ -408,4 +409,65 @@ pub async fn wait_for_gossip(plugin: &Plugin<PluginState>, task: &Task) -> Resul
         my_sleep(600, plugin.state().job_state.clone(), task).await;
     }
     Ok(())
+}
+
+pub fn get_remote_feeppm_effective(
+    channel: &ListpeerchannelsChannels,
+    graph: &LnGraph,
+    scid: ShortChannelId,
+    amount_msat: u64,
+    version: &str,
+) -> Result<u64, Error> {
+    if at_or_above_version(version, "v24.02")? {
+        let chan_updates = if let Some(updates) = &channel.updates {
+            if let Some(remote) = &updates.remote {
+                remote
+            } else {
+                return Err(anyhow!("No remote gossip in listpeerchannels"));
+            }
+        } else {
+            return Err(anyhow!("No gossip in listpeerchannels"));
+        };
+        let chan_in_ppm = feeppm_effective(
+            chan_updates.fee_proportional_millionths.unwrap(),
+            Amount::msat(&chan_updates.fee_base_msat.unwrap()) as u32,
+            amount_msat,
+        );
+        Ok(chan_in_ppm)
+    } else {
+        let chan_from_peer = match graph.get_channel(&channel.peer_id.unwrap(), &scid) {
+            Ok(chan) => chan.channel,
+            Err(_) => return Err(anyhow!("No gossip for {} in graph", scid)),
+        };
+        let chan_in_ppm = feeppm_effective(
+            chan_from_peer.fee_per_millionth,
+            chan_from_peer.base_fee_millisatoshi,
+            amount_msat,
+        );
+        Ok(chan_in_ppm)
+    }
+}
+
+pub fn at_or_above_version(my_version: &str, min_version: &str) -> Result<bool, Error> {
+    let clean_my_version = my_version
+        .trim_end_matches("-modded")
+        .trim_start_matches('v');
+    let clean_min_version = min_version.trim_start_matches('v');
+
+    let my_version_parts: Vec<&str> = clean_my_version.split('.').collect();
+    let min_version_parts: Vec<&str> = clean_min_version.split('.').collect();
+
+    if my_version_parts.len() <= 1 || my_version_parts.len() > 3 {
+        return Err(anyhow!("Version string parse error: {}", my_version));
+    }
+    for (my, min) in my_version_parts.iter().zip(min_version_parts.iter()) {
+        let my_num: u32 = my.parse()?;
+        let min_num: u32 = min.parse()?;
+
+        if my_num != min_num {
+            return Ok(my_num > min_num);
+        }
+    }
+
+    Ok(my_version_parts.len() >= min_version_parts.len())
 }

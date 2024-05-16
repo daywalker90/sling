@@ -25,7 +25,7 @@ use crate::util::{
     feeppm_effective, feeppm_effective_from_amts, get_normal_channel_from_listpeerchannels,
     get_preimage_paymend_hash_pair, get_total_htlc_count, is_channel_normal, my_sleep,
 };
-use crate::{channel_jobstate_update, wait_for_gossip};
+use crate::{channel_jobstate_update, get_remote_feeppm_effective, wait_for_gossip, LnGraph};
 
 pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Result<(), Error> {
     let config = plugin.state().config.lock().clone();
@@ -316,14 +316,36 @@ async fn next_route(
     let candidatelist;
     if let Some(c) = &job.candidatelist {
         if !c.is_empty() {
-            candidatelist =
-                build_candidatelist(peer_channels, job, tempbans, config, Some(c), blockheight)
+            candidatelist = build_candidatelist(
+                peer_channels,
+                job,
+                &graph,
+                tempbans,
+                config,
+                Some(c),
+                blockheight,
+            )
         } else {
-            candidatelist =
-                build_candidatelist(peer_channels, job, tempbans, config, None, blockheight)
+            candidatelist = build_candidatelist(
+                peer_channels,
+                job,
+                &graph,
+                tempbans,
+                config,
+                None,
+                blockheight,
+            )
         }
     } else {
-        candidatelist = build_candidatelist(peer_channels, job, tempbans, config, None, blockheight)
+        candidatelist = build_candidatelist(
+            peer_channels,
+            job,
+            &graph,
+            tempbans,
+            config,
+            None,
+            blockheight,
+        )
     }
 
     debug!(
@@ -630,6 +652,7 @@ async fn health_check(
 fn build_candidatelist(
     peer_channels: &BTreeMap<ShortChannelId, ListpeerchannelsChannels>,
     job: &Job,
+    graph: &LnGraph,
     tempbans: &HashMap<ShortChannelId, u64>,
     config: &Config,
     custom_candidates: Option<&Vec<ShortChannelId>>,
@@ -659,20 +682,16 @@ fn build_candidatelist(
                 }
                 && scid.block() <= blockheight - config.candidates_min_age.value
             {
-                let chan_updates = if let Some(updates) = &channel.updates {
-                    if let Some(remote) = &updates.remote {
-                        remote
-                    } else {
-                        continue;
-                    }
-                } else {
-                    continue;
-                };
-                let chan_in_ppm = feeppm_effective(
-                    chan_updates.fee_proportional_millionths.unwrap(),
-                    Amount::msat(&chan_updates.fee_base_msat.unwrap()) as u32,
+                let chan_in_ppm = match get_remote_feeppm_effective(
+                    channel,
+                    graph,
+                    scid,
                     job.amount_msat,
-                );
+                    &config.version,
+                ) {
+                    Ok(o) => o,
+                    Err(_) => continue,
+                };
 
                 let to_us_msat = Amount::msat(&channel.to_us_msat.unwrap());
                 let total_msat = Amount::msat(&channel.total_msat.unwrap());

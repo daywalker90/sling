@@ -222,11 +222,15 @@ def test_option_errors(node_factory, get_plugin):  # noqa: F811
 def test_maxhops_2(node_factory, bitcoind, get_plugin):  # noqa: F811
     l1, l2 = node_factory.get_nodes(
         2,
-        opts={
-            "plugin": get_plugin,
-            "sling-maxhops": 2,
-            "sling-refresh-graph-interval": 1,
-        },
+        opts=[
+            {
+                "plugin": get_plugin,
+                "sling-maxhops": 2,
+                "sling-refresh-graph-interval": 1,
+                "log-level": "io",
+            },
+            {},
+        ],
     )
     l1.fundwallet(10_000_000)
     l2.fundwallet(10_000_000)
@@ -445,13 +449,9 @@ def test_private_channel_receive(node_factory, bitcoind, get_plugin):  # noqa: F
             scid_pub = chan["short_channel_id"]
 
     l1.wait_channel_active(scid_pub)
-    l1.wait_local_channel_active(scid_priv)
 
-    if l1.info["version"].startswith("v23"):
-        l1.daemon.wait_for_log(r"Added 4 public channels")
-    else:
-        l1.daemon.wait_for_log(r"Added 2 private channels")
-        l1.daemon.wait_for_log(r"Added 2 public channels")
+    l1.daemon.wait_for_log(r"Added 2 private channels")
+    l1.daemon.wait_for_log(r"Added 2 public channels")
 
     l1.rpc.call(
         "sling-job",

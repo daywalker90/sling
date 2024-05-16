@@ -190,7 +190,7 @@ async fn main() -> Result<(), anyhow::Error> {
             let mut networkdir = PathBuf::from_str(&plugin.configuration().lightning_dir).unwrap();
             networkdir.pop();
             let getinfo = rpc.call_typed(&GetinfoRequest {}).await?;
-            state = PluginState::new(getinfo.id, rpc_path, sling_dir, networkdir);
+            state = PluginState::new(getinfo.id, rpc_path, sling_dir, networkdir, getinfo.version);
             {
                 *state.blockheight.lock() = getinfo.blockheight;
             }
