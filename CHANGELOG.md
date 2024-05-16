@@ -1,6 +1,12 @@
 # Changelog
 
 
+## [Unreleased]
+
+### Fixed
+
+- restored backward compatibility to v23.11
+
 ## [1.6.0] - 2024-05-03
 
 ### Changed
