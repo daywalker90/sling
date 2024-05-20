@@ -307,12 +307,11 @@ pub fn feeppm_effective_from_amts(amount_msat_start: u64, amount_msat_end: u64) 
 }
 
 pub fn is_channel_normal(channel: &ListpeerchannelsChannels) -> bool {
-    match channel.state {
-        Some(ListpeerchannelsChannelsState::CHANNELD_NORMAL) => true,
-        Some(ListpeerchannelsChannelsState::CHANNELD_AWAITING_SPLICE) => true,
-        Some(_) => false,
-        None => false,
-    }
+    matches!(
+        channel.state,
+        ListpeerchannelsChannelsState::CHANNELD_NORMAL
+            | ListpeerchannelsChannelsState::CHANNELD_AWAITING_SPLICE
+    )
 }
 
 pub fn get_normal_channel_from_listpeerchannels(
@@ -320,17 +319,11 @@ pub fn get_normal_channel_from_listpeerchannels(
     chan_id: &ShortChannelId,
 ) -> Option<ListpeerchannelsChannels> {
     match peer_channels.get(chan_id) {
-        Some(chan) => {
-            if let Some(state) = chan.state {
-                match state {
-                    ListpeerchannelsChannelsState::CHANNELD_NORMAL => Some(chan.clone()),
-                    ListpeerchannelsChannelsState::CHANNELD_AWAITING_SPLICE => Some(chan.clone()),
-                    _ => None,
-                }
-            } else {
-                None
-            }
-        }
+        Some(chan) => match chan.state {
+            ListpeerchannelsChannelsState::CHANNELD_NORMAL => Some(chan.clone()),
+            ListpeerchannelsChannelsState::CHANNELD_AWAITING_SPLICE => Some(chan.clone()),
+            _ => None,
+        },
         None => None,
     }
 }
@@ -341,7 +334,7 @@ pub fn get_all_normal_channels_from_listpeerchannels(
     let mut scid_peer_map = BTreeMap::new();
     for channel in peer_channels.values() {
         if is_channel_normal(channel) {
-            scid_peer_map.insert(channel.short_channel_id.unwrap(), channel.peer_id.unwrap());
+            scid_peer_map.insert(channel.short_channel_id.unwrap(), channel.peer_id);
         }
     }
     scid_peer_map
@@ -429,13 +422,13 @@ pub fn get_remote_feeppm_effective(
             return Err(anyhow!("No gossip in listpeerchannels"));
         };
         let chan_in_ppm = feeppm_effective(
-            chan_updates.fee_proportional_millionths.unwrap(),
-            Amount::msat(&chan_updates.fee_base_msat.unwrap()) as u32,
+            chan_updates.fee_proportional_millionths,
+            Amount::msat(&chan_updates.fee_base_msat) as u32,
             amount_msat,
         );
         Ok(chan_in_ppm)
     } else {
-        let chan_from_peer = match graph.get_channel(&channel.peer_id.unwrap(), &scid) {
+        let chan_from_peer = match graph.get_channel(&channel.peer_id, &scid) {
             Ok(chan) => chan.channel,
             Err(_) => return Err(anyhow!("No gossip for {} in graph", scid)),
         };

@@ -4,7 +4,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use anyhow::{anyhow, Error};
+use anyhow::Error;
 use bitcoin::secp256k1::PublicKey;
 use cln_plugin::Plugin;
 use cln_rpc::{
@@ -81,7 +81,6 @@ pub async fn refresh_listpeerchannels(plugin: &Plugin<PluginState>) -> Result<()
         .call_typed(&ListpeerchannelsRequest { id: None })
         .await?
         .channels
-        .ok_or(anyhow!("refresh_listpeerchannels: no channels found!"))?
         .into_iter()
         .filter_map(|channel| channel.short_channel_id.map(|id| (id, channel)))
         .collect();
@@ -158,18 +157,8 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                 } else {
                     continue;
                 };
-                let state = if let Some(st) = chan.state {
-                    st
-                } else {
-                    continue;
-                };
                 let updates = if let Some(upd) = &chan.updates {
                     upd
-                } else {
-                    continue;
-                };
-                let local_updates = if let Some(lupd) = &updates.local {
-                    lupd
                 } else {
                     continue;
                 };
@@ -179,39 +168,37 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     continue;
                 };
                 if private
-                    && (state == ListpeerchannelsChannelsState::CHANNELD_NORMAL
-                        || state == ListpeerchannelsChannelsState::CHANNELD_AWAITING_SPLICE)
+                    && (chan.state == ListpeerchannelsChannelsState::CHANNELD_NORMAL
+                        || chan.state == ListpeerchannelsChannelsState::CHANNELD_AWAITING_SPLICE)
                 {
                     new_graph.entry(my_pubkey).or_default().push(
                         DirectedChannelState::from_directed_channel(DirectedChannel {
                             source: my_pubkey,
-                            destination: chan.peer_id.unwrap(),
+                            destination: chan.peer_id,
                             short_channel_id: chan.short_channel_id.unwrap(),
                             scid_alias: Some(chan.alias.as_ref().unwrap().local.unwrap()),
-                            fee_per_millionth: local_updates.fee_proportional_millionths.unwrap(),
-                            base_fee_millisatoshi: Amount::msat(
-                                &local_updates.fee_base_msat.unwrap(),
-                            ) as u32,
-                            htlc_maximum_msat: local_updates.htlc_maximum_msat,
-                            htlc_minimum_msat: local_updates.htlc_minimum_msat.unwrap(),
+                            fee_per_millionth: updates.local.fee_proportional_millionths,
+                            base_fee_millisatoshi: Amount::msat(&updates.local.fee_base_msat)
+                                as u32,
+                            htlc_maximum_msat: Some(updates.local.htlc_maximum_msat),
+                            htlc_minimum_msat: updates.local.htlc_minimum_msat,
                             amount_msat: chan.total_msat.unwrap(),
-                            delay: local_updates.cltv_expiry_delta.unwrap(),
+                            delay: updates.local.cltv_expiry_delta,
                         }),
                     );
-                    new_graph.entry(chan.peer_id.unwrap()).or_default().push(
+                    new_graph.entry(chan.peer_id).or_default().push(
                         DirectedChannelState::from_directed_channel(DirectedChannel {
-                            source: chan.peer_id.unwrap(),
+                            source: chan.peer_id,
                             destination: my_pubkey,
                             short_channel_id: chan.short_channel_id.unwrap(),
                             scid_alias: Some(chan.alias.as_ref().unwrap().remote.unwrap()),
-                            fee_per_millionth: remote_updates.fee_proportional_millionths.unwrap(),
-                            base_fee_millisatoshi: Amount::msat(
-                                &remote_updates.fee_base_msat.unwrap(),
-                            ) as u32,
-                            htlc_maximum_msat: remote_updates.htlc_maximum_msat,
-                            htlc_minimum_msat: remote_updates.htlc_minimum_msat.unwrap(),
+                            fee_per_millionth: remote_updates.fee_proportional_millionths,
+                            base_fee_millisatoshi: Amount::msat(&remote_updates.fee_base_msat)
+                                as u32,
+                            htlc_maximum_msat: Some(remote_updates.htlc_maximum_msat),
+                            htlc_minimum_msat: remote_updates.htlc_minimum_msat,
                             amount_msat: chan.total_msat.unwrap(),
-                            delay: remote_updates.cltv_expiry_delta.unwrap(),
+                            delay: remote_updates.cltv_expiry_delta,
                         }),
                     );
                     private_channel_added_count += 2;

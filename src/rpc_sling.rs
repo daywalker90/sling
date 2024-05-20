@@ -480,7 +480,7 @@ pub async fn slingexceptpeer(
                     debug!("{:?}", all_jobs);
                     for job in &all_jobs {
                         match peer_channels.get(job) {
-                            Some(peer) => all_job_peers.push(peer.peer_id.unwrap()),
+                            Some(peer) => all_job_peers.push(peer.peer_id),
                             None => return Err(anyhow!("peer not found")),
                         };
                     }

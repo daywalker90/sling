@@ -430,7 +430,7 @@ fn get_stats_alias(
     alias_map: &HashMap<PublicKey, String>,
 ) -> String {
     if let Some(chan) = &peer_channels.get(partner) {
-        if let Some(alias) = alias_map.get(&chan.peer_id.unwrap()) {
+        if let Some(alias) = alias_map.get(&chan.peer_id) {
             alias.clone()
         } else {
             "ALIAS_NOT_FOUND".to_string()

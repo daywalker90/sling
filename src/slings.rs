@@ -62,8 +62,7 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
         let other_peer = peer_channels
             .get(&task.chan_id)
             .ok_or(anyhow!("other_peer: channel not found"))?
-            .peer_id
-            .ok_or(anyhow!("other_peer: peer id gone"))?;
+            .peer_id;
 
         if let Some(r) = health_check(
             plugin,
@@ -562,12 +561,9 @@ async fn health_check(
                 my_sleep(10, job_states.clone(), task).await;
                 Ok(Some(true))
             } else {
-                match peer_channels
-                    .values()
-                    .find(|x| x.peer_id.unwrap() == other_peer)
-                {
+                match peer_channels.values().find(|x| x.peer_id == other_peer) {
                     Some(p) => {
-                        if !p.peer_connected.unwrap() {
+                        if !p.peer_connected {
                             info!(
                                 "{}/{}: not connected. Taking a break...",
                                 task.chan_id, task.task_id
@@ -668,10 +664,10 @@ fn build_candidatelist(
     for channel in peer_channels.values() {
         if let Some(scid) = channel.short_channel_id {
             if matches!(
-                channel.state.unwrap(),
+                channel.state,
                 ListpeerchannelsChannelsState::CHANNELD_NORMAL
                     | ListpeerchannelsChannelsState::CHANNELD_AWAITING_SPLICE
-            ) && channel.peer_connected.unwrap()
+            ) && channel.peer_connected
                 && match custom_candidates {
                     Some(c) => c.iter().any(|c| *c == scid),
                     None => true,
