@@ -1,7 +1,6 @@
 #!/usr/bin/python
 
 import logging
-import time
 
 import pytest
 from pyln.client import RpcError
@@ -271,7 +270,7 @@ def test_maxhops_2(node_factory, bitcoind, get_plugin):  # noqa: F811
                 "plugin": get_plugin,
                 "sling-maxhops": 2,
                 "sling-refresh-graph-interval": 1,
-                "log-level": "io",
+                "log-level": "debug",
             },
             {},
         ],
@@ -294,8 +293,7 @@ def test_maxhops_2(node_factory, bitcoind, get_plugin):  # noqa: F811
     l2.wait_channel_active(cl1)
     l2.wait_channel_active(cl2)
 
-    # wait for plugin gossip refresh
-    time.sleep(2)
+    l1.daemon.wait_for_log(r"Added 4 public channels")
 
     l1.rpc.call(
         "sling-job",
@@ -354,8 +352,7 @@ def test_pull_and_push(node_factory, bitcoind, get_plugin):  # noqa: F811
         for scid in [cl1, cl2, cl3]:
             n.wait_channel_active(scid)
 
-    # wait for plugin gossip refresh
-    time.sleep(2)
+    l1.daemon.wait_for_log(r"Added 6 public channels")
 
     l1.rpc.call(
         "sling-job",
@@ -436,8 +433,7 @@ def test_stats(node_factory, bitcoind, get_plugin):  # noqa: F811
     l2.wait_channel_active(cl1)
     l2.wait_channel_active(cl2)
 
-    # wait for plugin gossip refresh
-    time.sleep(2)
+    l1.daemon.wait_for_log(r"Added 4 public channels")
 
     l1.rpc.call(
         "sling-job",

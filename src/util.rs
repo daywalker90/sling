@@ -411,7 +411,7 @@ pub fn get_remote_feeppm_effective(
     amount_msat: u64,
     version: &str,
 ) -> Result<u64, Error> {
-    if at_or_above_version(version, "v24.02")? {
+    if at_or_above_version(version, "24.02")? {
         let chan_updates = if let Some(updates) = &channel.updates {
             if let Some(remote) = &updates.remote {
                 remote
@@ -442,13 +442,14 @@ pub fn get_remote_feeppm_effective(
 }
 
 pub fn at_or_above_version(my_version: &str, min_version: &str) -> Result<bool, Error> {
-    let clean_my_version = my_version
-        .trim_end_matches("-modded")
-        .trim_start_matches('v');
-    let clean_min_version = min_version.trim_start_matches('v');
+    let clean_start_my_version = my_version.trim_start_matches('v');
+    let full_clean_my_version: String = clean_start_my_version
+        .chars()
+        .take_while(|x| x.is_ascii_digit() || *x == '.')
+        .collect();
 
-    let my_version_parts: Vec<&str> = clean_my_version.split('.').collect();
-    let min_version_parts: Vec<&str> = clean_min_version.split('.').collect();
+    let my_version_parts: Vec<&str> = full_clean_my_version.split('.').collect();
+    let min_version_parts: Vec<&str> = min_version.split('.').collect();
 
     if my_version_parts.len() <= 1 || my_version_parts.len() > 3 {
         return Err(anyhow!("Version string parse error: {}", my_version));
