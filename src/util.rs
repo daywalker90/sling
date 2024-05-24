@@ -24,7 +24,7 @@ use crate::model::JOB_FILE_NAME;
 use crate::model::PLUGIN_NAME;
 use crate::model::{JobMessage, JobState, LnGraph};
 use crate::slingstop;
-use crate::DirectedChannel;
+use crate::DirectedChannelState;
 use sling::Job;
 
 use crate::tasks::refresh_listpeerchannels;
@@ -272,7 +272,7 @@ pub fn get_total_htlc_count(channel: &ListpeerchannelsChannels) -> u64 {
     }
 }
 
-pub fn edge_cost(edge: &DirectedChannel, amount: u64) -> u64 {
+pub fn edge_cost(edge: &DirectedChannelState, amount: u64) -> u64 {
     // debug!(
     //     "edge cost for {} source:{} is {}",
     //     edge.short_channel_id.to_string(),
@@ -315,7 +315,7 @@ pub fn is_channel_normal(channel: &ListpeerchannelsChannels) -> bool {
 }
 
 pub fn get_normal_channel_from_listpeerchannels(
-    peer_channels: &BTreeMap<ShortChannelId, ListpeerchannelsChannels>,
+    peer_channels: &HashMap<ShortChannelId, ListpeerchannelsChannels>,
     chan_id: &ShortChannelId,
 ) -> Option<ListpeerchannelsChannels> {
     match peer_channels.get(chan_id) {
@@ -329,9 +329,9 @@ pub fn get_normal_channel_from_listpeerchannels(
 }
 
 pub fn get_all_normal_channels_from_listpeerchannels(
-    peer_channels: &BTreeMap<ShortChannelId, ListpeerchannelsChannels>,
-) -> BTreeMap<ShortChannelId, PublicKey> {
-    let mut scid_peer_map = BTreeMap::new();
+    peer_channels: &HashMap<ShortChannelId, ListpeerchannelsChannels>,
+) -> HashMap<ShortChannelId, PublicKey> {
+    let mut scid_peer_map = HashMap::new();
     for channel in peer_channels.values() {
         if is_channel_normal(channel) {
             scid_peer_map.insert(channel.short_channel_id.unwrap(), channel.peer_id);
@@ -429,7 +429,7 @@ pub fn get_remote_feeppm_effective(
         Ok(chan_in_ppm)
     } else {
         let chan_from_peer = match graph.get_channel(&channel.peer_id, &scid) {
-            Ok(chan) => chan.channel,
+            Ok(chan) => chan,
             Err(_) => return Err(anyhow!("No gossip for {} in graph", scid)),
         };
         let chan_in_ppm = feeppm_effective(

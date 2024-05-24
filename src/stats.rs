@@ -1,5 +1,4 @@
 use std::cmp::max;
-use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, path::Path, str::FromStr};
 
@@ -221,7 +220,7 @@ fn success_stats(
     successes: Vec<SuccessReb>,
     time_window: u64,
     alias_map: &HashMap<PublicKey, String>,
-    peer_channels: &BTreeMap<ShortChannelId, ListpeerchannelsChannels>,
+    peer_channels: &HashMap<ShortChannelId, ListpeerchannelsChannels>,
 ) -> Option<SuccessesInTimeWindow> {
     if successes.is_empty() {
         return None;
@@ -312,7 +311,7 @@ fn failure_stats(
     failures: Vec<FailureReb>,
     time_window: u64,
     alias_map: &HashMap<PublicKey, String>,
-    peer_channels: &BTreeMap<ShortChannelId, ListpeerchannelsChannels>,
+    peer_channels: &HashMap<ShortChannelId, ListpeerchannelsChannels>,
 ) -> Option<FailuresInTimeWindow> {
     if failures.is_empty() {
         return None;
@@ -425,7 +424,7 @@ fn failure_stats(
 }
 
 fn get_stats_alias(
-    peer_channels: &BTreeMap<ShortChannelId, ListpeerchannelsChannels>,
+    peer_channels: &HashMap<ShortChannelId, ListpeerchannelsChannels>,
     partner: &ShortChannelId,
     alias_map: &HashMap<PublicKey, String>,
 ) -> String {

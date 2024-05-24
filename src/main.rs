@@ -28,6 +28,7 @@ use util::*;
 mod config;
 mod dijkstra;
 mod errors;
+mod gossip;
 mod htlc;
 mod model;
 mod notifications;
@@ -45,7 +46,7 @@ mod tests;
 const OPT_UTF8: &str = "sling-utf8";
 const OPT_REFRESH_PEERS_INTERVAL: &str = "sling-refresh-peers-interval";
 const OPT_REFRESH_ALIASMAP_INTERVAL: &str = "sling-refresh-aliasmap-interval";
-const OPT_REFRESH_GRAPH_INTERVAL: &str = "sling-refresh-graph-interval";
+const OPT_REFRESH_GOSSMAP_INTERVAL: &str = "sling-refresh-gossmap-interval";
 const OPT_RESET_LIQUIDITY_INTERVAL: &str = "sling-reset-liquidity-interval";
 const OPT_DEPLETEUPTOPERCENT: &str = "sling-depleteuptopercent";
 const OPT_DEPLETEUPTOAMOUNT: &str = "sling-depleteuptoamount";
@@ -80,9 +81,9 @@ async fn main() -> Result<(), anyhow::Error> {
         "Refresh interval for aliasmap task. Default is `3600`",
     )
     .dynamic();
-    let opt_refresh_graph_interval: IntegerConfigOption = ConfigOption::new_i64_no_default(
-        OPT_REFRESH_GRAPH_INTERVAL,
-        "Refresh interval for graph task. Default is `600`",
+    let opt_refresh_gossmap_interval: IntegerConfigOption = ConfigOption::new_i64_no_default(
+        OPT_REFRESH_GOSSMAP_INTERVAL,
+        "Refresh interval for gossmap task. Default is `10`",
     )
     .dynamic();
     let opt_reset_liquidity_interval: IntegerConfigOption = ConfigOption::new_i64_no_default(
@@ -151,7 +152,7 @@ async fn main() -> Result<(), anyhow::Error> {
         .option(opt_utf8)
         .option(opt_refresh_peers_interval)
         .option(opt_refresh_aliasmap_interval)
-        .option(opt_refresh_graph_interval)
+        .option(opt_refresh_gossmap_interval)
         .option(opt_reset_liquidity_interval)
         .option(opt_depleteuptopercent)
         .option(opt_depleteuptoamount)

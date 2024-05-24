@@ -10,7 +10,6 @@ use log::{debug, info, warn};
 
 use sling::{Job, SatDirection};
 use std::cmp::{max, min};
-use std::collections::BTreeMap;
 
 use std::collections::HashMap;
 
@@ -182,10 +181,10 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
             .get_mut(&route_claim_peer)
             .unwrap()
             .iter_mut()
-            .find_map(|x| {
-                if x.channel.short_channel_id == route_claim_chan
-                    && x.channel.destination != config.pubkey
-                    && x.channel.source != config.pubkey
+            .find_map(|(dir_chan, x)| {
+                if dir_chan.short_channel_id == route_claim_chan
+                    && x.destination != config.pubkey
+                    && x.source != config.pubkey
                 {
                     x.liquidity = 0;
                     Some(x)
@@ -281,10 +280,10 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
                 .get_mut(&route_claim_peer)
                 .unwrap()
                 .iter_mut()
-                .find_map(|x| {
-                    if x.channel.short_channel_id == route_claim_chan
-                        && x.channel.destination != config.pubkey
-                        && x.channel.source != config.pubkey
+                .find_map(|(dir_chan, x)| {
+                    if dir_chan.short_channel_id == route_claim_chan
+                        && x.destination != config.pubkey
+                        && x.source != config.pubkey
                     {
                         x.liquidity = route_claim_liq;
                         Some(x)
@@ -302,7 +301,7 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
 async fn next_route(
     plugin: &Plugin<PluginState>,
     config: &Config,
-    peer_channels: &BTreeMap<ShortChannelId, ListpeerchannelsChannels>,
+    peer_channels: &HashMap<ShortChannelId, ListpeerchannelsChannels>,
     job: &Job,
     tempbans: &HashMap<ShortChannelId, u64>,
     task: &Task,
@@ -449,8 +448,9 @@ async fn next_route(
                         &DijkstraNode {
                             score: 0,
                             destination: keypair.my_pubkey,
-                            channel: &slingchan_inc.channel,
+                            channel_state: slingchan_inc,
                             hops: 0,
+                            short_channel_id: task.chan_id,
                         },
                         job,
                         &candidatelist,
@@ -489,8 +489,9 @@ async fn next_route(
                         &DijkstraNode {
                             score: 0,
                             destination: keypair.other_pubkey,
-                            channel: &slingchan_out.channel,
+                            channel_state: slingchan_out,
                             hops: 0,
+                            short_channel_id: task.chan_id,
                         },
                         job,
                         &candidatelist,
@@ -512,7 +513,7 @@ async fn next_route(
 async fn health_check(
     plugin: &Plugin<PluginState>,
     config: &Config,
-    peer_channels: &BTreeMap<ShortChannelId, ListpeerchannelsChannels>,
+    peer_channels: &HashMap<ShortChannelId, ListpeerchannelsChannels>,
     task: &Task,
     job: &Job,
     other_peer: PublicKey,
@@ -642,7 +643,7 @@ async fn health_check(
 }
 
 fn build_candidatelist(
-    peer_channels: &BTreeMap<ShortChannelId, ListpeerchannelsChannels>,
+    peer_channels: &HashMap<ShortChannelId, ListpeerchannelsChannels>,
     job: &Job,
     graph: &LnGraph,
     tempbans: &HashMap<ShortChannelId, u64>,

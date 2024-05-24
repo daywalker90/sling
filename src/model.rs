@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     fmt::{self, Display, Formatter},
     path::{Path, PathBuf},
     str::FromStr,
@@ -12,9 +12,9 @@ use cln_rpc::{
     model::responses::ListpeerchannelsChannels,
     primitives::{Amount, PublicKey, ShortChannelId},
 };
-use log::{debug, warn};
+use log::{info, warn};
 use parking_lot::{Mutex, RwLock};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tabled::Tabled;
 use tokio::{
     fs::{self, File, OpenOptions},
@@ -22,9 +22,11 @@ use tokio::{
 };
 
 use crate::{
-    create_sling_dir, OPT_CANDIDATES_MIN_AGE, OPT_DEPLETEUPTOAMOUNT, OPT_DEPLETEUPTOPERCENT,
-    OPT_MAXHOPS, OPT_MAX_HTLC_COUNT, OPT_PARALLELJOBS, OPT_REFRESH_ALIASMAP_INTERVAL,
-    OPT_REFRESH_GRAPH_INTERVAL, OPT_REFRESH_PEERS_INTERVAL, OPT_RESET_LIQUIDITY_INTERVAL,
+    create_sling_dir,
+    gossip::{ChannelAnnouncement, ChannelUpdate},
+    OPT_CANDIDATES_MIN_AGE, OPT_DEPLETEUPTOAMOUNT, OPT_DEPLETEUPTOPERCENT, OPT_MAXHOPS,
+    OPT_MAX_HTLC_COUNT, OPT_PARALLELJOBS, OPT_REFRESH_ALIASMAP_INTERVAL,
+    OPT_REFRESH_GOSSMAP_INTERVAL, OPT_REFRESH_PEERS_INTERVAL, OPT_RESET_LIQUIDITY_INTERVAL,
     OPT_STATS_DELETE_FAILURES_AGE, OPT_STATS_DELETE_FAILURES_SIZE, OPT_STATS_DELETE_SUCCESSES_AGE,
     OPT_STATS_DELETE_SUCCESSES_SIZE, OPT_TIMEOUTPAY, OPT_UTF8,
 };
@@ -42,7 +44,7 @@ pub const EXCEPTS_PEERS_FILE_NAME: &str = "excepts_peers.json";
 #[derive(Clone)]
 pub struct PluginState {
     pub config: Arc<Mutex<Config>>,
-    pub peer_channels: Arc<Mutex<BTreeMap<ShortChannelId, ListpeerchannelsChannels>>>,
+    pub peer_channels: Arc<Mutex<HashMap<ShortChannelId, ListpeerchannelsChannels>>>,
     pub graph: Arc<Mutex<LnGraph>>,
     pub pays: Arc<RwLock<HashMap<String, String>>>,
     pub alias_peer_map: Arc<Mutex<HashMap<PublicKey, String>>>,
@@ -53,6 +55,8 @@ pub struct PluginState {
     pub tempbans: Arc<Mutex<HashMap<ShortChannelId, u64>>>,
     pub job_state: Arc<Mutex<HashMap<ShortChannelId, Vec<JobState>>>>,
     pub blockheight: Arc<Mutex<u32>>,
+    pub gossip_store_anns: Arc<Mutex<HashMap<ShortChannelId, ChannelAnnouncement>>>,
+    pub gossip_store_amts: Arc<Mutex<HashMap<ShortChannelId, u64>>>,
 }
 impl PluginState {
     pub fn new(
@@ -70,7 +74,7 @@ impl PluginState {
                 network_dir,
                 version,
             ))),
-            peer_channels: Arc::new(Mutex::new(BTreeMap::new())),
+            peer_channels: Arc::new(Mutex::new(HashMap::new())),
             graph: Arc::new(Mutex::new(LnGraph::new())),
             pays: Arc::new(RwLock::new(HashMap::new())),
             alias_peer_map: Arc::new(Mutex::new(HashMap::new())),
@@ -81,6 +85,8 @@ impl PluginState {
             tempbans: Arc::new(Mutex::new(HashMap::new())),
             job_state: Arc::new(Mutex::new(HashMap::new())),
             blockheight: Arc::new(Mutex::new(0)),
+            gossip_store_anns: Arc::new(Mutex::new(HashMap::new())),
+            gossip_store_amts: Arc::new(Mutex::new(HashMap::new())),
         }
     }
     pub async fn read_excepts(&self) -> Result<(), Error> {
@@ -149,7 +155,7 @@ pub struct Config {
     pub utf8: DynamicConfigOption<bool>,
     pub refresh_peers_interval: DynamicConfigOption<u64>,
     pub refresh_aliasmap_interval: DynamicConfigOption<u64>,
-    pub refresh_graph_interval: DynamicConfigOption<u64>,
+    pub refresh_gossmap_interval: DynamicConfigOption<u64>,
     pub reset_liquidity_interval: DynamicConfigOption<u64>,
     pub depleteuptopercent: DynamicConfigOption<f64>,
     pub depleteuptoamount: DynamicConfigOption<u64>,
@@ -190,9 +196,9 @@ impl Config {
                 name: OPT_REFRESH_ALIASMAP_INTERVAL,
                 value: 3600,
             },
-            refresh_graph_interval: DynamicConfigOption {
-                name: OPT_REFRESH_GRAPH_INTERVAL,
-                value: 600,
+            refresh_gossmap_interval: DynamicConfigOption {
+                name: OPT_REFRESH_GOSSMAP_INTERVAL,
+                value: 10,
             },
             reset_liquidity_interval: DynamicConfigOption {
                 name: OPT_RESET_LIQUIDITY_INTERVAL,
@@ -382,7 +388,8 @@ impl Display for JobMessage {
 #[derive(Debug, Clone, Copy)]
 pub struct DijkstraNode<'a> {
     pub score: u64,
-    pub channel: &'a DirectedChannel,
+    pub channel_state: &'a DirectedChannelState,
+    pub short_channel_id: ShortChannelId,
     pub destination: PublicKey,
     pub hops: u8,
 }
@@ -390,43 +397,69 @@ impl<'a> PartialEq for DijkstraNode<'a> {
     fn eq(&self, other: &Self) -> bool {
         self.score == other.score
             && self.hops == other.hops
-            && self.channel.source == other.channel.source
-            && self.channel.destination == other.channel.destination
-            && self.channel.short_channel_id == other.channel.short_channel_id
+            && self.channel_state.source == other.channel_state.source
+            && self.channel_state.destination == other.channel_state.destination
+            && self.short_channel_id == other.short_channel_id
             && self.destination == other.destination
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct DirectedChannel {
-    pub source: PublicKey,
-    pub destination: PublicKey,
     pub short_channel_id: ShortChannelId,
-    pub scid_alias: Option<ShortChannelId>,
-    pub fee_per_millionth: u32,
-    pub base_fee_millisatoshi: u32,
-    pub htlc_maximum_msat: Option<Amount>,
-    pub htlc_minimum_msat: Amount,
-    pub amount_msat: Amount,
-    pub delay: u32,
+    pub direction: u32,
+}
+impl Serialize for DirectedChannel {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&format!("{}/{}", self.short_channel_id, self.direction))
+    }
+}
+
+impl<'de> Deserialize<'de> for DirectedChannel {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let data = <&str>::deserialize(deserializer)?;
+        let mut parts = data.splitn(2, '/');
+        let short_channel_id = ShortChannelId::from_str(parts.next().unwrap())
+            .map_err(|_| Error::custom("Could not parse short_channel_id"))?;
+        let direction: u32 = parts
+            .next()
+            .ok_or_else(|| Error::custom("request must contain dash"))?
+            .parse()
+            .map_err(Error::custom)?;
+        Ok(Self {
+            short_channel_id,
+            direction,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct DirectedChannelState {
-    pub channel: DirectedChannel,
+    pub source: PublicKey,
+    pub destination: PublicKey,
+    pub active: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scid_alias: Option<ShortChannelId>,
+    pub fee_per_millionth: u32,
+    pub base_fee_millisatoshi: u32,
+    pub htlc_maximum_msat: Amount,
+    pub htlc_minimum_msat: Amount,
+    pub amount_msat: Amount,
+    pub delay: u32,
+    pub last_update: u32,
     pub liquidity: u64,
-    pub timestamp: u64,
+    pub liquidity_age: u64,
 }
 impl DirectedChannelState {
-    pub fn from_directed_channel(channel: DirectedChannel) -> DirectedChannelState {
-        DirectedChannelState {
-            liquidity: Amount::msat(&channel.htlc_maximum_msat.unwrap_or(channel.amount_msat)) / 2,
-            channel,
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-        }
+    pub fn update(&mut self, channel_update: &ChannelUpdate) {
+        self.active = channel_update.active;
+        self.last_update = channel_update.last_update;
+        self.base_fee_millisatoshi = channel_update.base_fee_millisatoshi;
+        self.fee_per_millionth = channel_update.fee_per_millionth;
+        self.delay = channel_update.delay;
+        self.htlc_minimum_msat = channel_update.htlc_minimum_msat;
+        self.htlc_maximum_msat = channel_update.htlc_maximum_msat;
     }
 }
 
@@ -444,50 +477,13 @@ pub struct ExcludeGraph {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LnGraph {
-    pub graph: BTreeMap<PublicKey, Vec<DirectedChannelState>>,
+    pub graph: HashMap<PublicKey, HashMap<DirectedChannel, DirectedChannelState>>,
 }
 impl LnGraph {
     pub fn new() -> Self {
         LnGraph {
-            graph: BTreeMap::new(),
+            graph: HashMap::new(),
         }
-    }
-    pub fn update(&mut self, new_graph: LnGraph) {
-        for (new_node, new_channels) in new_graph.graph.iter() {
-            let old_channels = self.graph.entry(*new_node).or_default();
-            let new_short_channel_ids: HashSet<ShortChannelId> = new_channels
-                .iter()
-                .map(|c| c.channel.short_channel_id)
-                .collect();
-            old_channels.retain(|e| new_short_channel_ids.contains(&e.channel.short_channel_id));
-            for new_channel in new_channels {
-                let new_short_channel_id = &new_channel.channel.short_channel_id;
-                let old_channel = old_channels
-                    .iter_mut()
-                    .find(|e| e.channel.short_channel_id == *new_short_channel_id);
-                match old_channel {
-                    Some(old_channel) => {
-                        if (old_channel.channel.htlc_maximum_msat.is_some()
-                            && new_channel.channel.htlc_maximum_msat.is_some()
-                            && old_channel.channel.htlc_maximum_msat.unwrap()
-                                != new_channel.channel.htlc_maximum_msat.unwrap())
-                            || old_channel.channel.fee_per_millionth
-                                != new_channel.channel.fee_per_millionth
-                        {
-                            old_channel.liquidity = new_channel.liquidity;
-                            old_channel.timestamp = new_channel.timestamp;
-                        }
-                        old_channel.channel = new_channel.channel;
-                    }
-                    None => {
-                        old_channels.push(*new_channel);
-                    }
-                }
-            }
-        }
-
-        let new_nodes: HashSet<&PublicKey> = new_graph.graph.keys().collect();
-        self.graph.retain(|k, _| new_nodes.contains(k));
     }
     pub fn refresh_liquidity(&mut self, interval: u64) {
         let now = SystemTime::now()
@@ -496,42 +492,37 @@ impl LnGraph {
             .as_secs();
         let mut count = 0;
         for (_node, channels) in self.graph.iter_mut() {
-            for channel in channels {
-                if channel.timestamp <= now - interval * 60 {
-                    channel.liquidity = Amount::msat(
-                        &channel
-                            .channel
-                            .htlc_maximum_msat
-                            .unwrap_or(channel.channel.amount_msat),
-                    ) / 2;
-                    channel.timestamp = now;
+            for channel_state in channels.values_mut() {
+                if channel_state.liquidity_age <= now - interval * 60 {
+                    channel_state.liquidity = Amount::msat(&channel_state.htlc_maximum_msat) / 2;
+                    channel_state.liquidity_age = now;
                     count += 1;
                 }
             }
         }
-        debug!("Reset liquidity belief on {} channels!", count);
+        info!("Reset liquidity belief on {} channels!", count);
     }
     pub fn get_channel(
         &self,
         source: &PublicKey,
-        channel: &ShortChannelId,
+        scid: &ShortChannelId,
     ) -> Result<&DirectedChannelState, Error> {
-        match self.graph.get(source) {
-            Some(e) => {
-                let result = e
-                    .iter()
-                    .filter(|&i| i.channel.short_channel_id == *channel)
-                    .collect::<Vec<&DirectedChannelState>>();
-                if result.len() != 1 {
-                    Err(anyhow!("channel {} not found in graph", channel))
-                } else {
-                    Ok(result[0])
-                }
+        if let Some(node_channels) = self.graph.get(source) {
+            if let Some(dir_0) = node_channels.get(&DirectedChannel {
+                short_channel_id: *scid,
+                direction: 0,
+            }) {
+                Ok(dir_0)
+            } else if let Some(dir_1) = node_channels.get(&DirectedChannel {
+                short_channel_id: *scid,
+                direction: 1,
+            }) {
+                Ok(dir_1)
+            } else {
+                Err(anyhow!("Channel {} not found in graph", scid))
             }
-            None => Err(anyhow!(
-                "could not find channel in cached graph: {}",
-                channel
-            )),
+        } else {
+            Err(anyhow!("Could not find channel in lngraph: {}", scid))
         }
     }
 
@@ -542,41 +533,38 @@ impl LnGraph {
         amount: &u64,
         candidatelist: &[ShortChannelId],
         tempbans: &HashMap<ShortChannelId, u64>,
-    ) -> Vec<&DirectedChannelState> {
-        match self.graph.get(&keypair.other_pubkey) {
-            Some(e) => {
-                e.iter()
-                    .filter(|&i| {
-                        // debug!(
-                        //     "{}: liq:{} amt:{}",
-                        //     i.channel.short_channel_id.to_string(),
-                        //     i.liquidity,
-                        //     amount
-                        // );
-                        !exclude_graph
-                            .exclude_chans
-                            .contains(&i.channel.short_channel_id)
-                            && !tempbans.contains_key(&i.channel.short_channel_id)
-                            && i.liquidity >= *amount
-                            && Amount::msat(&i.channel.htlc_minimum_msat) <= *amount
-                            && Amount::msat(
-                                &i.channel.htlc_maximum_msat.unwrap_or(i.channel.amount_msat),
-                            ) >= *amount
-                            && !exclude_graph.exclude_peers.contains(&i.channel.source)
-                            && !exclude_graph.exclude_peers.contains(&i.channel.destination)
-                            && if i.channel.source == keypair.my_pubkey
-                                || i.channel.destination == keypair.my_pubkey
-                            {
-                                candidatelist
-                                    .iter()
-                                    .any(|c| c == &i.channel.short_channel_id)
-                            } else {
-                                true
-                            }
-                    })
-                    .collect::<Vec<&DirectedChannelState>>()
-            }
-            None => Vec::<&DirectedChannelState>::new(),
+    ) -> Vec<(&DirectedChannel, &DirectedChannelState)> {
+        if let Some(node_channels) = self.graph.get(&keypair.other_pubkey) {
+            let twow_ago = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                - 60 * 60 * 24 * 14;
+            node_channels
+                .iter()
+                .filter(|(scid, chan_state)| {
+                    chan_state.active
+                        && chan_state.last_update >= (twow_ago as u32)
+                        && !exclude_graph.exclude_chans.contains(&scid.short_channel_id)
+                        && !tempbans.contains_key(&scid.short_channel_id)
+                        && chan_state.liquidity >= *amount
+                        && Amount::msat(&chan_state.htlc_minimum_msat) <= *amount
+                        && Amount::msat(&chan_state.htlc_maximum_msat) >= *amount
+                        && !exclude_graph.exclude_peers.contains(&chan_state.source)
+                        && !exclude_graph
+                            .exclude_peers
+                            .contains(&chan_state.destination)
+                        && if chan_state.source == keypair.my_pubkey
+                            || chan_state.destination == keypair.my_pubkey
+                        {
+                            candidatelist.iter().any(|c| c == &scid.short_channel_id)
+                        } else {
+                            true
+                        }
+                })
+                .collect::<Vec<(&DirectedChannel, &DirectedChannelState)>>()
+        } else {
+            Vec::<(&DirectedChannel, &DirectedChannelState)>::new()
         }
     }
 }

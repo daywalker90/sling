@@ -109,13 +109,13 @@ pub async fn waitsendpay_response(
                             .get_mut(&source)
                             .unwrap()
                             .iter_mut()
-                            .find_map(|x| {
-                                if x.channel.short_channel_id == hop.channel
-                                    && x.channel.destination != config.pubkey
-                                    && x.channel.source != config.pubkey
+                            .find_map(|(dir_chan, x)| {
+                                if dir_chan.short_channel_id == hop.channel
+                                    && x.destination != config.pubkey
+                                    && x.source != config.pubkey
                                 {
                                     x.liquidity = 0;
-                                    x.timestamp = SystemTime::now()
+                                    x.liquidity_age = SystemTime::now()
                                         .duration_since(UNIX_EPOCH)
                                         .unwrap()
                                         .as_secs();
@@ -239,13 +239,13 @@ pub async fn waitsendpay_response(
                         .get_mut(&ws_error.erring_node)
                         .unwrap()
                         .iter_mut()
-                        .find_map(|x| {
-                            if x.channel.short_channel_id == ws_error.erring_channel
-                                && x.channel.destination != config.pubkey
-                                && x.channel.source != config.pubkey
+                        .find_map(|(dir_chan, x)| {
+                            if dir_chan.short_channel_id == ws_error.erring_channel
+                                && x.destination != config.pubkey
+                                && x.source != config.pubkey
                             {
                                 x.liquidity = ws_error.amount_msat.unwrap().msat() - 1;
-                                x.timestamp = SystemTime::now()
+                                x.liquidity_age = SystemTime::now()
                                     .duration_since(UNIX_EPOCH)
                                     .unwrap()
                                     .as_secs();

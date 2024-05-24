@@ -1,15 +1,14 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::Error;
-use bitcoin::secp256k1::PublicKey;
 use cln_plugin::Plugin;
 use cln_rpc::{
     model::{
-        requests::{ListchannelsRequest, ListnodesRequest, ListpeerchannelsRequest},
+        requests::{ListnodesRequest, ListpeerchannelsRequest},
         responses::ListpeerchannelsChannelsState,
     },
     primitives::{Amount, ShortChannelId},
@@ -24,7 +23,7 @@ use tokio::{
     time::{self, Instant},
 };
 
-use crate::{model::*, util::*};
+use crate::{gossip::read_gossip_store, model::*, util::*};
 
 pub async fn refresh_aliasmap(plugin: Plugin<PluginState>) -> Result<(), Error> {
     let rpc_path;
@@ -92,189 +91,194 @@ pub async fn refresh_listpeerchannels(plugin: &Plugin<PluginState>) -> Result<()
 }
 
 pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
-    let rpc_path;
+    // let rpc_path;
     let interval;
     let my_pubkey;
     let sling_dir;
+    let mut offset = 0;
     {
         let config = plugin.state().config.lock();
-        rpc_path = config.rpc_path.clone();
-        interval = config.refresh_graph_interval.value;
+        // rpc_path = config.rpc_path.clone();
+        interval = config.refresh_gossmap_interval.value;
         my_pubkey = config.pubkey;
         sling_dir = config.sling_dir.clone();
     }
     *plugin.state().graph.lock() = read_graph(&sling_dir).await?;
-    let mut rpc = ClnRpc::new(&rpc_path).await?;
+    // let mut rpc = ClnRpc::new(&rpc_path).await?;
 
     loop {
         {
             let now = Instant::now();
-            let mut new_graph = BTreeMap::<PublicKey, Vec<DirectedChannelState>>::new();
-            let jobs = read_jobs(
-                &Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME),
-                &plugin,
-            )
-            .await?;
+            // let jobs = read_jobs(
+            //     &Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME),
+            //     &plugin,
+            // )
+            // .await?;
 
-            let amounts = jobs.values().map(|job| job.amount_msat);
+            // let amounts = jobs.values().map(|job| job.amount_msat);
             // * 2 because we set our liquidity beliefs to / 2 anyways
-            let min_amount = amounts.clone().min().unwrap_or(1_000) * 2;
-            let max_amount = amounts.max().unwrap_or(10_000_000_000);
-            let maxppms = jobs.values().map(|job| job.maxppm);
+            // let min_amount = amounts.clone().min().unwrap_or(1_000) * 2;
+            // let max_amount = amounts.max().unwrap_or(10_000_000_000);
+            // let maxppms = jobs.values().map(|job| job.maxppm);
             // let min_maxppm = maxppms.min().unwrap_or(0);
-            let max_maxppm = maxppms.max().unwrap_or(3_000);
+            // let max_maxppm = maxppms.max().unwrap_or(3_000);
 
-            let two_w_ago = (SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs()
-                - 1_209_600) as u32;
+            // let two_w_ago = (SystemTime::now()
+            //     .duration_since(UNIX_EPOCH)
+            //     .unwrap()
+            //     .as_secs()
+            //     - 1_209_600) as u32;
+            {
+                debug!("Getting all channels in gossip_store...");
+                read_gossip_store(plugin.clone(), &mut offset).await?;
+                debug!(
+                    "Reading gossip store done after {}ms!",
+                    now.elapsed().as_millis().to_string()
+                );
 
-            info!("Getting all channels in gossip...");
-            let channels = rpc
-                .call_typed(&ListchannelsRequest {
-                    short_channel_id: None,
-                    source: None,
-                    destination: None,
-                })
-                .await?
-                .channels;
-            debug!(
-                "Got {} public channels after {}ms!",
-                channels.len(),
-                now.elapsed().as_millis().to_string()
-            );
-            let local_channels = plugin.state().peer_channels.lock().clone();
-            debug!(
-                "Got {} local channels after {}ms!",
-                local_channels.len(),
-                now.elapsed().as_millis().to_string()
-            );
-            let mut private_channel_added_count = 0;
-            for chan in local_channels.values() {
-                let private = if let Some(pri) = chan.private {
-                    pri
-                } else {
-                    continue;
-                };
-                let updates = if let Some(upd) = &chan.updates {
-                    upd
-                } else {
-                    continue;
-                };
-                let remote_updates = if let Some(rupd) = &updates.remote {
-                    rupd
-                } else {
-                    continue;
-                };
-                if private
-                    && (chan.state == ListpeerchannelsChannelsState::CHANNELD_NORMAL
-                        || chan.state == ListpeerchannelsChannelsState::CHANNELD_AWAITING_SPLICE)
-                {
-                    new_graph.entry(my_pubkey).or_default().push(
-                        DirectedChannelState::from_directed_channel(DirectedChannel {
-                            source: my_pubkey,
-                            destination: chan.peer_id,
-                            short_channel_id: chan.short_channel_id.unwrap(),
-                            scid_alias: Some(chan.alias.as_ref().unwrap().local.unwrap()),
-                            fee_per_millionth: updates.local.fee_proportional_millionths,
-                            base_fee_millisatoshi: Amount::msat(&updates.local.fee_base_msat)
-                                as u32,
-                            htlc_maximum_msat: Some(updates.local.htlc_maximum_msat),
-                            htlc_minimum_msat: updates.local.htlc_minimum_msat,
-                            amount_msat: chan.total_msat.unwrap(),
-                            delay: updates.local.cltv_expiry_delta,
-                        }),
-                    );
-                    new_graph.entry(chan.peer_id).or_default().push(
-                        DirectedChannelState::from_directed_channel(DirectedChannel {
-                            source: chan.peer_id,
-                            destination: my_pubkey,
-                            short_channel_id: chan.short_channel_id.unwrap(),
-                            scid_alias: Some(chan.alias.as_ref().unwrap().remote.unwrap()),
-                            fee_per_millionth: remote_updates.fee_proportional_millionths,
-                            base_fee_millisatoshi: Amount::msat(&remote_updates.fee_base_msat)
-                                as u32,
-                            htlc_maximum_msat: Some(remote_updates.htlc_maximum_msat),
-                            htlc_minimum_msat: remote_updates.htlc_minimum_msat,
-                            amount_msat: chan.total_msat.unwrap(),
-                            delay: remote_updates.cltv_expiry_delta,
-                        }),
-                    );
-                    private_channel_added_count += 2;
-                }
-            }
+                let mut lngraph = plugin.state().graph.lock();
+                info!(
+                    "{} public channels in sling graph after {}ms!",
+                    lngraph
+                        .graph
+                        .values()
+                        .flatten()
+                        .filter(|(_, y)| y.scid_alias.is_none())
+                        .count(),
+                    now.elapsed().as_millis().to_string()
+                );
 
-            let mut public_channel_added_count = 0;
-            for chan in &channels {
-                if (feeppm_effective(
-                    chan.fee_per_millionth,
-                    chan.base_fee_millisatoshi,
-                    max_amount,
-                ) as u32
-                    <= max_maxppm
-                    && Amount::msat(&chan.htlc_maximum_msat.unwrap_or(chan.amount_msat))
-                        >= min_amount
-                    && Amount::msat(&chan.htlc_minimum_msat) <= max_amount
-                    && chan.last_update >= two_w_ago
-                    && chan.delay <= 288
-                    && chan.active)
-                    || chan.source == my_pubkey
-                    || chan.destination == my_pubkey
-                {
-                    new_graph.entry(chan.source).or_default().push(
-                        DirectedChannelState::from_directed_channel(DirectedChannel {
-                            source: chan.source,
-                            destination: chan.destination,
-                            short_channel_id: chan.short_channel_id,
-                            scid_alias: if chan.public {
-                                None
-                            } else if let Some(loc_chan) =
-                                local_channels.get(&chan.short_channel_id)
-                            {
-                                if chan.source == my_pubkey {
-                                    Some(loc_chan.alias.as_ref().unwrap().local.unwrap())
-                                } else {
-                                    Some(loc_chan.alias.as_ref().unwrap().remote.unwrap())
-                                }
-                            } else {
-                                continue;
-                            },
-                            fee_per_millionth: chan.fee_per_millionth,
-                            base_fee_millisatoshi: chan.base_fee_millisatoshi,
-                            htlc_maximum_msat: chan.htlc_maximum_msat,
-                            htlc_minimum_msat: chan.htlc_minimum_msat,
-                            amount_msat: chan.amount_msat,
-                            delay: chan.delay,
-                        }),
-                    );
-                    if chan.public {
-                        public_channel_added_count += 1;
+                let local_channels = plugin.state().peer_channels.lock().clone();
+                let timestamp = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                debug!(
+                    "Got {} local channels after {}ms!",
+                    local_channels.len(),
+                    now.elapsed().as_millis().to_string()
+                );
+                for chan in local_channels.values() {
+                    let private = if let Some(pri) = chan.private {
+                        pri
                     } else {
-                        private_channel_added_count += 1;
+                        continue;
+                    };
+                    if !private {
+                        continue;
+                    }
+                    let updates = if let Some(upd) = &chan.updates {
+                        upd
+                    } else {
+                        // pre 24.02 versions don't have this and
+                        // get private channel gossip from gossip_store
+                        // but we don't get the alias there
+                        if let Some(dir_chans) = lngraph.graph.get_mut(&my_pubkey) {
+                            if let Some(dir_chan_state) = dir_chans.get_mut(&DirectedChannel {
+                                short_channel_id: chan.short_channel_id.unwrap(),
+                                direction: chan.direction.unwrap(),
+                            }) {
+                                dir_chan_state.scid_alias =
+                                    Some(chan.alias.as_ref().unwrap().local.unwrap())
+                            }
+                        }
+                        if let Some(dir_chans) = lngraph.graph.get_mut(&chan.peer_id) {
+                            if let Some(dir_chan_state) = dir_chans.get_mut(&DirectedChannel {
+                                short_channel_id: chan.short_channel_id.unwrap(),
+                                direction: chan.direction.unwrap() ^ 1,
+                            }) {
+                                dir_chan_state.scid_alias =
+                                    Some(chan.alias.as_ref().unwrap().remote.unwrap())
+                            }
+                        }
+                        continue;
+                    };
+                    let remote_updates = if let Some(rupd) = &updates.remote {
+                        rupd
+                    } else {
+                        continue;
+                    };
+                    if chan.state == ListpeerchannelsChannelsState::CHANNELD_NORMAL
+                        || chan.state == ListpeerchannelsChannelsState::CHANNELD_AWAITING_SPLICE
+                    {
+                        lngraph.graph.entry(my_pubkey).or_default().insert(
+                            DirectedChannel {
+                                short_channel_id: chan.short_channel_id.unwrap(),
+                                direction: chan.direction.unwrap(),
+                            },
+                            DirectedChannelState {
+                                source: my_pubkey,
+                                destination: chan.peer_id,
+                                scid_alias: Some(chan.alias.as_ref().unwrap().local.unwrap()),
+                                fee_per_millionth: updates.local.fee_proportional_millionths,
+                                base_fee_millisatoshi: Amount::msat(&updates.local.fee_base_msat)
+                                    as u32,
+                                htlc_maximum_msat: updates.local.htlc_maximum_msat,
+                                htlc_minimum_msat: updates.local.htlc_minimum_msat,
+                                amount_msat: chan.total_msat.unwrap(),
+                                delay: updates.local.cltv_expiry_delta,
+                                active: chan.peer_connected,
+                                last_update: timestamp as u32,
+                                liquidity: chan.spendable_msat.unwrap().msat(),
+                                liquidity_age: timestamp,
+                            },
+                        );
+                        lngraph.graph.entry(chan.peer_id).or_default().insert(
+                            DirectedChannel {
+                                short_channel_id: chan.short_channel_id.unwrap(),
+                                direction: chan.direction.unwrap() ^ 1,
+                            },
+                            DirectedChannelState {
+                                source: chan.peer_id,
+                                destination: my_pubkey,
+                                scid_alias: Some(chan.alias.as_ref().unwrap().remote.unwrap()),
+                                fee_per_millionth: remote_updates.fee_proportional_millionths,
+                                base_fee_millisatoshi: Amount::msat(&remote_updates.fee_base_msat)
+                                    as u32,
+                                htlc_maximum_msat: remote_updates.htlc_maximum_msat,
+                                htlc_minimum_msat: remote_updates.htlc_minimum_msat,
+                                amount_msat: chan.total_msat.unwrap(),
+                                delay: remote_updates.cltv_expiry_delta,
+                                active: chan.peer_connected,
+                                last_update: timestamp as u32,
+                                liquidity: chan.receivable_msat.unwrap().msat(),
+                                liquidity_age: timestamp,
+                            },
+                        );
                     }
                 }
+                for channels in lngraph.graph.values_mut() {
+                    channels.retain(|k, v| {
+                        v.scid_alias.is_none()
+                            || v.scid_alias.is_some()
+                                && if let Some(c) = local_channels.get(&k.short_channel_id) {
+                                    c.state == ListpeerchannelsChannelsState::CHANNELD_NORMAL ||
+                                c.state == ListpeerchannelsChannelsState::CHANNELD_AWAITING_SPLICE
+                                } else {
+                                    false
+                                }
+                    })
+                }
+
+                info!(
+                    "{} private channels in sling graph after {}ms!",
+                    lngraph
+                        .graph
+                        .values()
+                        .flatten()
+                        .filter(|(_, y)| y.scid_alias.is_some())
+                        .count(),
+                    now.elapsed().as_millis().to_string()
+                );
+
+                lngraph.graph.retain(|_, v| !v.is_empty());
             }
+            // match write_graph(plugin.clone()).await {
+            //     Ok(_) => (),
+            //     Err(e) => return Err(anyhow!("Too dumb to write....{}", e)),
+            // };
             info!(
-                "Added {} private channels to sling graph after {}ms!",
-                private_channel_added_count,
-                now.elapsed().as_millis().to_string()
-            );
-            info!(
-                "Added {} public channels to sling graph after {}ms!",
-                public_channel_added_count,
-                now.elapsed().as_millis().to_string()
-            );
-
-            plugin
-                .state()
-                .graph
-                .lock()
-                .update(LnGraph { graph: new_graph });
-
-            write_graph(plugin.clone()).await?;
-            info!(
-                "Built and saved graph in {}ms!",
+                "Refreshed graph in {}ms!",
                 now.elapsed().as_millis().to_string()
             );
         }

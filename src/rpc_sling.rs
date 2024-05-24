@@ -11,9 +11,8 @@ use tokio::{fs, time};
 
 use crate::{
     channel_jobstate_update, get_normal_channel_from_listpeerchannels, parse::parse_job, read_jobs,
-    refresh_joblists, slings::sling, write_excepts, write_graph, write_job, JobMessage, JobState,
-    PluginState, Task, EXCEPTS_CHANS_FILE_NAME, EXCEPTS_PEERS_FILE_NAME, JOB_FILE_NAME,
-    PLUGIN_NAME,
+    refresh_joblists, slings::sling, write_excepts, write_job, JobMessage, JobState, PluginState,
+    Task, EXCEPTS_CHANS_FILE_NAME, EXCEPTS_PEERS_FILE_NAME, JOB_FILE_NAME, PLUGIN_NAME,
 };
 
 pub async fn slingjob(
@@ -259,7 +258,7 @@ pub async fn slingstop(
             }
         };
     }
-    write_graph(p.clone()).await?;
+    // write_graph(p.clone()).await?;
     Ok(json!({ "stopped_count": stopped_count }))
 }
 

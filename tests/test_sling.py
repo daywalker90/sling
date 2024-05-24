@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 import logging
+import os
 
 import pytest
 from pyln.client import RpcError
@@ -24,7 +25,7 @@ def test_options(node_factory, get_plugin):  # noqa: F811
             "sling-utf8": False,
             "sling-refresh-peers-interval": 2,
             "sling-refresh-aliasmap-interval": 3,
-            "sling-refresh-graph-interval": 599,
+            "sling-refresh-gossmap-interval": 599,
             "sling-reset-liquidity-interval": 300,
             "sling-depleteuptopercent": 0.33,
             "sling-depleteuptoamount": 100000,
@@ -42,7 +43,7 @@ def test_options(node_factory, get_plugin):  # noqa: F811
     configs = node.rpc.call("listconfigs")["configs"]
     assert configs["sling-refresh-peers-interval"]["value_int"] == 2
     assert configs["sling-refresh-aliasmap-interval"]["value_int"] == 3
-    assert configs["sling-refresh-graph-interval"]["value_int"] == 599
+    assert configs["sling-refresh-gossmap-interval"]["value_int"] == 599
     assert configs["sling-reset-liquidity-interval"]["value_int"] == 300
     assert configs["sling-depleteuptopercent"]["value_str"] == "0.33"
     assert configs["sling-depleteuptoamount"]["value_int"] == 100000
@@ -76,7 +77,7 @@ def test_setconfig_options(node_factory, get_plugin):  # noqa: F811
         != "test"
     )
 
-    node.rpc.setconfig("sling-refresh-graph-interval", 1)
+    node.rpc.setconfig("sling-refresh-gossmap-interval", 1)
 
     node.rpc.setconfig("sling-utf8", False)
     with pytest.raises(RpcError, match="is not a valid boolean"):
@@ -125,11 +126,14 @@ def test_option_errors(node_factory, get_plugin):  # noqa: F811
     node = node_factory.get_node(
         options={
             "plugin": get_plugin,
-            "sling-refresh-graph-interval": 0,
+            "sling-refresh-gossmap-interval": 0,
         }
     )
     assert node.daemon.is_in_log(
-        (r"sling-refresh-graph-interval must be " r"greater than or equal to 1")
+        (
+            r"sling-refresh-gossmap-interval must be "
+            r"greater than or equal to 1"
+        )
     )
 
     node = node_factory.get_node(
@@ -269,7 +273,7 @@ def test_maxhops_2(node_factory, bitcoind, get_plugin):  # noqa: F811
             {
                 "plugin": get_plugin,
                 "sling-maxhops": 2,
-                "sling-refresh-graph-interval": 1,
+                "sling-refresh-gossmap-interval": 1,
                 "log-level": "debug",
             },
             {},
@@ -293,7 +297,7 @@ def test_maxhops_2(node_factory, bitcoind, get_plugin):  # noqa: F811
     l2.wait_channel_active(cl1)
     l2.wait_channel_active(cl2)
 
-    l1.daemon.wait_for_log(r"Added 4 public channels")
+    l1.daemon.wait_for_log(r"4 public channels")
 
     l1.rpc.call(
         "sling-job",
@@ -323,7 +327,12 @@ def test_maxhops_2(node_factory, bitcoind, get_plugin):  # noqa: F811
 
 def test_pull_and_push(node_factory, bitcoind, get_plugin):  # noqa: F811
     l1, l2, l3 = node_factory.get_nodes(
-        3, opts={"plugin": get_plugin, "sling-refresh-graph-interval": 1}
+        3,
+        opts=[
+            {"plugin": get_plugin, "sling-refresh-gossmap-interval": 1},
+            {},
+            {},
+        ],
     )
     l1.fundwallet(10_000_000)
     l2.fundwallet(10_000_000)
@@ -352,7 +361,7 @@ def test_pull_and_push(node_factory, bitcoind, get_plugin):  # noqa: F811
         for scid in [cl1, cl2, cl3]:
             n.wait_channel_active(scid)
 
-    l1.daemon.wait_for_log(r"Added 6 public channels")
+    l1.daemon.wait_for_log(r"6 public channels")
 
     l1.rpc.call(
         "sling-job",
@@ -407,13 +416,16 @@ def test_stats(node_factory, bitcoind, get_plugin):  # noqa: F811
     LOGGER = logging.getLogger(__name__)
     l1, l2 = node_factory.get_nodes(
         2,
-        opts={
-            "plugin": get_plugin,
-            "sling-maxhops": 2,
-            "sling-refresh-graph-interval": 1,
-            "sling-stats-delete-successes-age": 0,
-            "sling-stats-delete-failures-age": 0,
-        },
+        opts=[
+            {
+                "plugin": get_plugin,
+                "sling-maxhops": 2,
+                "sling-refresh-gossmap-interval": 1,
+                "sling-stats-delete-successes-age": 0,
+                "sling-stats-delete-failures-age": 0,
+            },
+            {},
+        ],
     )
     l1.fundwallet(10_000_000)
     l2.fundwallet(10_000_000)
@@ -433,7 +445,7 @@ def test_stats(node_factory, bitcoind, get_plugin):  # noqa: F811
     l2.wait_channel_active(cl1)
     l2.wait_channel_active(cl2)
 
-    l1.daemon.wait_for_log(r"Added 4 public channels")
+    l1.daemon.wait_for_log(r"4 public channels")
 
     l1.rpc.call(
         "sling-job",
@@ -464,7 +476,8 @@ def test_stats(node_factory, bitcoind, get_plugin):  # noqa: F811
 
 def test_private_channel_receive(node_factory, bitcoind, get_plugin):  # noqa: F811
     l1, l2 = node_factory.get_nodes(
-        2, opts={"plugin": get_plugin, "sling-refresh-graph-interval": 1}
+        2,
+        opts=[{"plugin": get_plugin, "sling-refresh-gossmap-interval": 1}, {}],
     )
     l1.fundwallet(10_000_000)
     # setup 2 nodes with 1 private and 1 public channel
@@ -490,8 +503,8 @@ def test_private_channel_receive(node_factory, bitcoind, get_plugin):  # noqa: F
 
     l1.wait_channel_active(scid_pub)
 
-    l1.daemon.wait_for_log(r"Added 2 private channels")
-    l1.daemon.wait_for_log(r"Added 2 public channels")
+    l1.daemon.wait_for_log(r"2 private channels")
+    l1.daemon.wait_for_log(r"2 public channels")
 
     l1.rpc.call(
         "sling-job",
@@ -512,3 +525,222 @@ def test_private_channel_receive(node_factory, bitcoind, get_plugin):  # noqa: F
     assert not l2.daemon.is_in_log(
         r"No peer channel with scid={}".format(scid_priv)
     )
+
+
+def test_gossip(node_factory, bitcoind, get_plugin):  # noqa: F811
+    #       l2
+    # l1 <      > l4
+    #  |    l3     |
+    #  -------------
+    l1, l2, l3, l4 = node_factory.get_nodes(
+        4,
+        opts=[
+            {
+                "plugin": get_plugin,
+                "sling-refresh-gossmap-interval": 1,
+                "may_reconnect": True,
+            },
+            {
+                "may_reconnect": True,
+            },
+            {
+                "may_reconnect": True,
+            },
+            {
+                "may_reconnect": True,
+            },
+        ],
+    )
+    nodes = [l1, l2, l3, l4]
+    sling_graph = os.path.join(l1.info["lightning-dir"], "sling", "graph.json")
+    l1.fundwallet(10_000_000)
+    l2.fundwallet(10_000_000)
+    l3.fundwallet(10_000_000)
+    l4.fundwallet(10_000_000)
+    l1.rpc.fundchannel(
+        l2.info["id"] + "@localhost:" + str(l2.port),
+        1_000_000,
+        announce=False,
+    )
+    l2.rpc.fundchannel(
+        l4.info["id"] + "@localhost:" + str(l4.port),
+        1_000_000,
+    )
+    l3.rpc.fundchannel(
+        l4.info["id"] + "@localhost:" + str(l4.port),
+        1_000_000,
+    )
+    l4.rpc.fundchannel(
+        l1.info["id"] + "@localhost:" + str(l1.port),
+        1_000_000,
+    )
+    bitcoind.generate_block(1)
+    sync_blockheight(bitcoind, nodes)
+    l1.rpc.fundchannel(
+        l3.info["id"] + "@localhost:" + str(l3.port),
+        1_000_000,
+        announce=False,
+    )
+    l4.rpc.fundchannel(
+        l1.info["id"] + "@localhost:" + str(l1.port),
+        1_000_000,
+    )
+
+    bitcoind.generate_block(6)
+    sync_blockheight(bitcoind, nodes)
+
+    wait_for(lambda: len(l1.rpc.listpeerchannels()["channels"]) == 4)
+    l4_chans = l1.rpc.listpeerchannels(l4.info["id"])["channels"]
+    scid_l1_l4_1 = l4_chans[0]["short_channel_id"]
+    scid_l1_l4_2 = l4_chans[1]["short_channel_id"]
+    scid_l1_l2 = l1.rpc.listpeerchannels(l2.info["id"])["channels"][0][
+        "short_channel_id"
+    ]
+    scid_l2_l4 = l2.rpc.listpeerchannels(l4.info["id"])["channels"][0][
+        "short_channel_id"
+    ]
+
+    l1.daemon.wait_for_log(r"4 private channels")
+    l1.daemon.wait_for_log(r"8 public channels")
+
+    assert os.path.getsize(sling_graph) == 0
+
+    l1.restart()
+    l1.rpc.connect(l2.info["id"] + "@localhost:" + str(l2.port))
+    l1.rpc.connect(l3.info["id"] + "@localhost:" + str(l3.port))
+    l1.rpc.connect(l4.info["id"] + "@localhost:" + str(l4.port))
+
+    assert os.path.getsize(sling_graph) > 0
+    l1.daemon.wait_for_log(r"4 private channels")
+    l1.daemon.wait_for_log(r"8 public channels")
+
+    close_tx = l1.rpc.close(scid_l1_l4_1)["txid"]
+    bitcoind.generate_block(1, wait_for_mempool=close_tx)
+    sync_blockheight(bitcoind, nodes)
+
+    l1.daemon.wait_for_log(r"4 private channels")
+    l1.daemon.wait_for_log(r"6 public channels")
+
+    l1.rpc.call(
+        "sling-job",
+        {
+            "scid": scid_l1_l2,
+            "direction": "push",
+            "amount": 100_000,
+            "maxppm": 1000,
+            "outppm": 0,
+            "candidates": [scid_l1_l4_1, scid_l1_l4_2],
+        },
+    )
+    l1.rpc.call("sling-go", [])
+    l1.daemon.wait_for_log(r"Rebalance SUCCESSFULL after")
+    l1.rpc.call("sling-stop", [])
+    assert not l1.daemon.is_in_log(f"sling: {scid_l1_l4_1}")
+
+    close_tx = l2.rpc.close(scid_l2_l4)["txid"]
+    bitcoind.generate_block(1, wait_for_mempool=close_tx)
+    sync_blockheight(bitcoind, nodes)
+
+    l1.daemon.wait_for_log(r"4 private channels")
+    l1.daemon.wait_for_log(r"4 public channels")
+
+    l1.rpc.call(
+        "sling-job",
+        {
+            "scid": scid_l1_l4_2,
+            "direction": "pull",
+            "amount": 100_000,
+            "maxppm": 1000,
+            "outppm": 1000,
+        },
+    )
+    l1.rpc.call("sling-go", [scid_l1_l4_2])
+    l1.daemon.wait_for_log(r"Rebalance SUCCESSFULL after")
+    l1.rpc.call("sling-stop", [])
+    assert not l1.daemon.is_in_log(f"sling: {scid_l2_l4}")
+
+    close_tx = l2.rpc.close(scid_l1_l2)["txid"]
+    bitcoind.generate_block(1, wait_for_mempool=close_tx)
+    sync_blockheight(bitcoind, nodes)
+
+    l1.daemon.wait_for_log(r"2 private channels")
+    l1.daemon.wait_for_log(r"4 public channels")
+
+
+def test_splice(node_factory, bitcoind, get_plugin):  # noqa: F811
+    LOGGER = logging.getLogger(__name__)
+    l1, l2, l3 = node_factory.line_graph(
+        3,
+        fundamount=1_000_000,
+        wait_for_announce=True,
+        opts=[
+            {
+                "experimental-splicing": None,
+                "plugin": get_plugin,
+                "sling-refresh-gossmap-interval": 1,
+                "log-level": "info",
+                "log-level": "debug:plugin-sling",  # noqa: F601
+            },
+            {
+                "experimental-splicing": None,
+                "log-level": "info",
+            },
+            {},
+        ],
+    )
+    l3.fundwallet(10_000_000)
+
+    l1.daemon.wait_for_log(r"4 public channels")
+
+    chan_id = l1.get_channel_id(l2)
+    LOGGER.info(
+        l1.rpc.listpeerchannels(l2.info["id"])["channels"][0][
+            "short_channel_id"
+        ]
+    )
+
+    funds_result = l1.rpc.fundpsbt(
+        "109000sat", "slow", 166, excess_as_change=True
+    )
+
+    result = l1.rpc.splice_init(chan_id, 100_000, funds_result["psbt"])
+    result = l1.rpc.splice_update(chan_id, result["psbt"])
+    result = l1.rpc.signpsbt(result["psbt"])
+    result = l1.rpc.splice_signed(chan_id, result["signed_psbt"])
+
+    bitcoind.generate_block(1, wait_for_mempool=result["txid"])
+    sync_blockheight(bitcoind, [l1, l2])
+
+    l1.daemon.wait_for_log(r"del:1")
+
+    bitcoind.generate_block(5)
+    sync_blockheight(bitcoind, [l1, l2])
+
+    l1.daemon.wait_for_log(r"4 public channels")
+
+    open = l3.rpc.fundchannel(
+        l1.info["id"] + "@localhost:" + str(l1.port),
+        1_000_000,
+    )
+    bitcoind.generate_block(6, wait_for_mempool=open["txid"])
+    sync_blockheight(bitcoind, [l1, l2, l3])
+
+    l1.daemon.wait_for_log(r"6 public channels")
+
+    chan_id = l1.rpc.listpeerchannels(l2.info["id"])["channels"][0][
+        "short_channel_id"
+    ]
+    LOGGER.info(chan_id)
+
+    l1.rpc.call(
+        "sling-job",
+        {
+            "scid": chan_id,
+            "direction": "push",
+            "amount": 100_000,
+            "maxppm": 1000,
+            "outppm": 0,
+        },
+    )
+    l1.rpc.call("sling-go", [])
+    l1.daemon.wait_for_log(r"Rebalance SUCCESSFULL after")

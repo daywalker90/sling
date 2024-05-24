@@ -10,7 +10,7 @@ use serde_json::json;
 use crate::{
     model::PluginState, Config, OPT_CANDIDATES_MIN_AGE, OPT_DEPLETEUPTOAMOUNT,
     OPT_DEPLETEUPTOPERCENT, OPT_MAXHOPS, OPT_MAX_HTLC_COUNT, OPT_PARALLELJOBS,
-    OPT_REFRESH_ALIASMAP_INTERVAL, OPT_REFRESH_GRAPH_INTERVAL, OPT_REFRESH_PEERS_INTERVAL,
+    OPT_REFRESH_ALIASMAP_INTERVAL, OPT_REFRESH_GOSSMAP_INTERVAL, OPT_REFRESH_PEERS_INTERVAL,
     OPT_RESET_LIQUIDITY_INTERVAL, OPT_STATS_DELETE_FAILURES_AGE, OPT_STATS_DELETE_FAILURES_SIZE,
     OPT_STATS_DELETE_SUCCESSES_AGE, OPT_STATS_DELETE_SUCCESSES_SIZE, OPT_TIMEOUTPAY, OPT_UTF8,
 };
@@ -168,8 +168,8 @@ pub async fn get_startup_options(
     if let Some(rai) = plugin.option_str(OPT_REFRESH_ALIASMAP_INTERVAL)? {
         check_option(&mut config, OPT_REFRESH_ALIASMAP_INTERVAL, &rai)?;
     };
-    if let Some(rgi) = plugin.option_str(OPT_REFRESH_GRAPH_INTERVAL)? {
-        check_option(&mut config, OPT_REFRESH_GRAPH_INTERVAL, &rgi)?;
+    if let Some(rgi) = plugin.option_str(OPT_REFRESH_GOSSMAP_INTERVAL)? {
+        check_option(&mut config, OPT_REFRESH_GOSSMAP_INTERVAL, &rgi)?;
     };
     if let Some(rli) = plugin.option_str(OPT_RESET_LIQUIDITY_INTERVAL)? {
         check_option(&mut config, OPT_RESET_LIQUIDITY_INTERVAL, &rli)?;
@@ -226,9 +226,13 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
                 None,
             )?
         }
-        n if n.eq(OPT_REFRESH_GRAPH_INTERVAL) => {
-            config.refresh_graph_interval.value =
-                options_value_to_u64(OPT_REFRESH_GRAPH_INTERVAL, value.as_i64().unwrap(), 1, None)?
+        n if n.eq(OPT_REFRESH_GOSSMAP_INTERVAL) => {
+            config.refresh_gossmap_interval.value = options_value_to_u64(
+                OPT_REFRESH_GOSSMAP_INTERVAL,
+                value.as_i64().unwrap(),
+                1,
+                None,
+            )?
         }
         n if n.eq(OPT_RESET_LIQUIDITY_INTERVAL) => {
             config.reset_liquidity_interval.value = options_value_to_u64(

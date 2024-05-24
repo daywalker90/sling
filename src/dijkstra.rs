@@ -54,7 +54,7 @@ pub fn dijkstra(
         if current_hops + 2 > max_hops {
             continue;
         }
-        for edge in lngraph.edges(
+        for (scid, edge) in lngraph.edges(
             &PublicKeyPair {
                 my_pubkey: *my_pubkey,
                 other_pubkey: node,
@@ -64,7 +64,7 @@ pub fn dijkstra(
             candidatelist,
             tempbans,
         ) {
-            let next = edge.channel.destination;
+            let next = edge.destination;
             if visited.contains(&next) {
                 // debug!(
                 //     "{}: already visited: {}",
@@ -73,10 +73,10 @@ pub fn dijkstra(
                 // );
                 continue;
             }
-            let next_score = if edge.channel.source == *my_pubkey {
+            let next_score = if edge.source == *my_pubkey {
                 0
             } else {
-                node_score + edge_cost(&edge.channel, job.amount_msat)
+                node_score + edge_cost(edge, job.amount_msat)
             };
             // debug!(
             //     "{}: next: {} node_score:{} next_score:{}",
@@ -87,9 +87,10 @@ pub fn dijkstra(
             // );
             let dijkstra_node = DijkstraNode {
                 score: next_score,
-                channel: &edge.channel,
+                channel_state: edge,
                 destination: next,
                 hops: current_hops + 1,
+                short_channel_id: scid.short_channel_id,
             };
             match scores.entry(next) {
                 Occupied(ent) => {
@@ -156,6 +157,7 @@ fn build_route(
 
     while prev != start {
         let spr = scores.get(prev).unwrap();
+
         prev = predecessor.get(prev).unwrap();
         dijkstra_path.push(*spr);
     }
@@ -177,10 +179,10 @@ fn build_route(
 
     for hop in &dijkstra_path {
         if hop == first_hop {
-            let routing_scid = if let Some(rscid) = first_hop.channel.scid_alias {
+            let routing_scid = if let Some(rscid) = first_hop.channel_state.scid_alias {
                 rscid
             } else {
-                first_hop.channel.short_channel_id
+                first_hop.short_channel_id
             };
             sendpay_route.insert(
                 0,
@@ -192,10 +194,10 @@ fn build_route(
                 },
             );
         } else {
-            let routing_scid = if let Some(rscid) = hop.channel.scid_alias {
+            let routing_scid = if let Some(rscid) = hop.channel_state.scid_alias {
                 rscid
             } else {
-                hop.channel.short_channel_id
+                hop.short_channel_id
             };
             sendpay_route.insert(
                 0,
@@ -211,13 +213,13 @@ fn build_route(
         amount_msat = Amount::from_msat(
             Amount::msat(&prev_amount_msat)
                 + fee_total_msat_precise(
-                    hop.channel.fee_per_millionth,
-                    hop.channel.base_fee_millisatoshi,
+                    hop.channel_state.fee_per_millionth,
+                    hop.channel_state.base_fee_millisatoshi,
                     Amount::msat(&prev_amount_msat),
                 )
                 .ceil() as u64,
         );
-        delay += hop.channel.delay;
+        delay += hop.channel_state.delay;
     }
     Ok(sendpay_route)
 }
