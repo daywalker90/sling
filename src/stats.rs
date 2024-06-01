@@ -157,7 +157,8 @@ pub async fn slingstats(
                 alias: normal_channels_alias
                     .get(&job.clone())
                     .unwrap_or(&NO_ALIAS_SET.to_string())
-                    .clone(),
+                    .clone()
+                    .replace(|c: char| !c.is_ascii(), "?"),
                 scid: *job,
                 pubkey: *scid_peer_map.get(&job.clone()).unwrap(),
                 status: jobstate.join("\n"),
