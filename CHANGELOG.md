@@ -17,7 +17,8 @@
 
 ### Fixed
 
-- restored backward compatibility to v23.11
+- Restored backward compatibility to v23.11
+- When running ``paralleljobs``>1 there were still duplicate routes taken sometimes
 
 ## [1.6.0] - 2024-05-03
 
