@@ -14,7 +14,8 @@ use cln_rpc::{
 };
 use log::{info, warn};
 use parking_lot::{Mutex, RwLock};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
+use sling::{DirectedChannel, Job};
 use tabled::Tabled;
 use tokio::{
     fs::{self, File, OpenOptions},
@@ -53,6 +54,7 @@ pub struct PluginState {
     pub excepts_chans: Arc<Mutex<HashSet<ShortChannelId>>>,
     pub excepts_peers: Arc<Mutex<HashSet<PublicKey>>>,
     pub tempbans: Arc<Mutex<HashMap<ShortChannelId, u64>>>,
+    pub parrallel_bans: Arc<Mutex<HashMap<ShortChannelId, HashMap<u8, DirectedChannel>>>>,
     pub job_state: Arc<Mutex<HashMap<ShortChannelId, Vec<JobState>>>>,
     pub blockheight: Arc<Mutex<u32>>,
     pub gossip_store_anns: Arc<Mutex<HashMap<ShortChannelId, ChannelAnnouncement>>>,
@@ -83,6 +85,7 @@ impl PluginState {
             excepts_chans: Arc::new(Mutex::new(HashSet::new())),
             excepts_peers: Arc::new(Mutex::new(HashSet::new())),
             tempbans: Arc::new(Mutex::new(HashMap::new())),
+            parrallel_bans: Arc::new(Mutex::new(HashMap::new())),
             job_state: Arc::new(Mutex::new(HashMap::new())),
             blockheight: Arc::new(Mutex::new(0)),
             gossip_store_anns: Arc::new(Mutex::new(HashMap::new())),
@@ -139,7 +142,7 @@ impl PluginState {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Copy)]
 pub struct Task {
     pub chan_id: ShortChannelId,
     pub task_id: u8,
@@ -404,36 +407,6 @@ impl<'a> PartialEq for DijkstraNode<'a> {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct DirectedChannel {
-    pub short_channel_id: ShortChannelId,
-    pub direction: u32,
-}
-impl Serialize for DirectedChannel {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&format!("{}/{}", self.short_channel_id, self.direction))
-    }
-}
-
-impl<'de> Deserialize<'de> for DirectedChannel {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        use serde::de::Error;
-        let data = <&str>::deserialize(deserializer)?;
-        let mut parts = data.splitn(2, '/');
-        let short_channel_id = ShortChannelId::from_str(parts.next().unwrap())
-            .map_err(|_| Error::custom("Could not parse short_channel_id"))?;
-        let direction: u32 = parts
-            .next()
-            .ok_or_else(|| Error::custom("request must contain dash"))?
-            .parse()
-            .map_err(Error::custom)?;
-        Ok(Self {
-            short_channel_id,
-            direction,
-        })
-    }
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct DirectedChannelState {
     pub source: PublicKey,
@@ -530,9 +503,10 @@ impl LnGraph {
         &self,
         keypair: &PublicKeyPair,
         exclude_graph: &ExcludeGraph,
-        amount: &u64,
+        job: &Job,
         candidatelist: &[ShortChannelId],
         tempbans: &HashMap<ShortChannelId, u64>,
+        parallel_bans: &[DirectedChannel],
     ) -> Vec<(&DirectedChannel, &DirectedChannelState)> {
         if let Some(node_channels) = self.graph.get(&keypair.other_pubkey) {
             let twow_ago = SystemTime::now()
@@ -542,22 +516,38 @@ impl LnGraph {
                 - 60 * 60 * 24 * 14;
             node_channels
                 .iter()
-                .filter(|(scid, chan_state)| {
-                    chan_state.active
-                        && chan_state.last_update >= (twow_ago as u32)
-                        && !exclude_graph.exclude_chans.contains(&scid.short_channel_id)
-                        && !tempbans.contains_key(&scid.short_channel_id)
-                        && chan_state.liquidity >= *amount
-                        && Amount::msat(&chan_state.htlc_minimum_msat) <= *amount
-                        && Amount::msat(&chan_state.htlc_maximum_msat) >= *amount
-                        && !exclude_graph.exclude_peers.contains(&chan_state.source)
+                .filter(|(dir_chan, dir_chan_state)| {
+                    // debug!(
+                    //     "edges: bans:{} dir_chan:{} source:{} dest:{}",
+                    //     parallel_bans
+                    //         .iter()
+                    //         .map(|c| c.to_string())
+                    //         .collect::<Vec<String>>()
+                    //         .join(","),
+                    //     dir_chan,
+                    //     &dir_chan_state.source.to_string()[..5],
+                    //     &dir_chan_state.destination.to_string()[..5],
+                    // );
+                    dir_chan_state.active
+                        && dir_chan_state.last_update >= (twow_ago as u32)
+                        && !exclude_graph
+                            .exclude_chans
+                            .contains(&dir_chan.short_channel_id)
+                        && !tempbans.contains_key(&dir_chan.short_channel_id)
+                        && !parallel_bans.contains(dir_chan)
+                        && dir_chan_state.liquidity >= job.amount_msat
+                        && Amount::msat(&dir_chan_state.htlc_minimum_msat) <= job.amount_msat
+                        && Amount::msat(&dir_chan_state.htlc_maximum_msat) >= job.amount_msat
+                        && !exclude_graph.exclude_peers.contains(&dir_chan_state.source)
                         && !exclude_graph
                             .exclude_peers
-                            .contains(&chan_state.destination)
-                        && if chan_state.source == keypair.my_pubkey
-                            || chan_state.destination == keypair.my_pubkey
+                            .contains(&dir_chan_state.destination)
+                        && if dir_chan_state.source == keypair.my_pubkey
+                            || dir_chan_state.destination == keypair.my_pubkey
                         {
-                            candidatelist.iter().any(|c| c == &scid.short_channel_id)
+                            candidatelist
+                                .iter()
+                                .any(|c| c == &dir_chan.short_channel_id)
                         } else {
                             true
                         }

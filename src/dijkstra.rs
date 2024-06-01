@@ -3,7 +3,7 @@ use crate::util::{edge_cost, fee_total_msat_precise};
 use anyhow::Error;
 use cln_rpc::model::requests::SendpayRoute;
 use cln_rpc::primitives::*;
-use sling::{Job, SatDirection};
+use sling::{DirectedChannel, Job, SatDirection};
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::BinaryHeap;
 use std::{
@@ -23,6 +23,7 @@ pub fn dijkstra(
     exclude_graph: &ExcludeGraph,
     last_delay: u32,
     tempbans: &HashMap<ShortChannelId, u64>,
+    parallel_bans: &[DirectedChannel],
 ) -> Result<Vec<SendpayRoute>, Error> {
     let mut visited = HashSet::with_capacity(lngraph.graph.len());
     let mut scores = HashMap::new();
@@ -60,9 +61,10 @@ pub fn dijkstra(
                 other_pubkey: node,
             },
             exclude_graph,
-            &job.amount_msat,
+            job,
             candidatelist,
             tempbans,
+            parallel_bans,
         ) {
             let next = edge.destination;
             if visited.contains(&next) {

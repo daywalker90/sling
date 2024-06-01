@@ -341,27 +341,51 @@ def test_pull_and_push(node_factory, bitcoind, get_plugin):  # noqa: F811
     l2.rpc.connect(l3.info["id"], "localhost", l3.port)
     l3.rpc.connect(l1.info["id"], "localhost", l1.port)
     l1.rpc.fundchannel(l2.info["id"], 1_000_000, mindepth=1, announce=True)
-    l2.rpc.fundchannel(l3.info["id"], 1_000_000, mindepth=1, announce=True)
+    l2.rpc.fundchannel(
+        l3.info["id"],
+        1_000_000,
+        mindepth=1,
+        announce=True,
+        push_msat=500_000_000,
+    )
     l3.rpc.fundchannel(l1.info["id"], 1_000_000, mindepth=1, announce=True)
-
+    bitcoind.generate_block(1)
+    sync_blockheight(bitcoind, [l1, l2, l3])
+    l2.rpc.fundchannel(
+        l3.info["id"],
+        1_000_000,
+        mindepth=1,
+        announce=True,
+        push_msat=500_000_000,
+    )
+    bitcoind.generate_block(1)
+    sync_blockheight(bitcoind, [l1, l2, l3])
+    l2.rpc.fundchannel(
+        l3.info["id"],
+        1_000_000,
+        mindepth=1,
+        announce=True,
+        push_msat=500_000_000,
+    )
     bitcoind.generate_block(6)
     sync_blockheight(bitcoind, [l1, l2, l3])
 
     cl1 = l1.rpc.listpeerchannels(l2.info["id"])["channels"][0][
         "short_channel_id"
     ]
-    cl2 = l2.rpc.listpeerchannels(l3.info["id"])["channels"][0][
-        "short_channel_id"
-    ]
+    cl2s = l2.rpc.listpeerchannels(l3.info["id"])["channels"]
+    cl2_0 = cl2s[0]["short_channel_id"]
+    cl2_1 = cl2s[1]["short_channel_id"]
+    cl2_2 = cl2s[2]["short_channel_id"]
     cl3 = l3.rpc.listpeerchannels(l1.info["id"])["channels"][0][
         "short_channel_id"
     ]
 
     for n in [l1, l2, l3]:
-        for scid in [cl1, cl2, cl3]:
+        for scid in [cl1, cl2_0, cl2_1, cl2_2, cl3]:
             n.wait_channel_active(scid)
 
-    l1.daemon.wait_for_log(r"6 public channels")
+    l1.daemon.wait_for_log(r"10 public channels")
 
     l1.rpc.call(
         "sling-job",
@@ -371,7 +395,8 @@ def test_pull_and_push(node_factory, bitcoind, get_plugin):  # noqa: F811
             "amount": 100_000,
             "maxppm": 1000,
             "outppm": 1000,
-            "target": 0.2,
+            "target": 0.4,
+            "paralleljobs": 3,
         },
     )
     l1.rpc.call("sling-go", [])
@@ -380,13 +405,13 @@ def test_pull_and_push(node_factory, bitcoind, get_plugin):  # noqa: F811
         lambda: only_one(l1.rpc.listpeerchannels(l3.info["id"])["channels"])[
             "to_us_msat"
         ]
-        >= 100_000_000
+        >= 400_000_000
     )
     wait_for(
         lambda: only_one(l1.rpc.listpeerchannels(l3.info["id"])["channels"])[
             "to_us_msat"
         ]
-        <= 300_000_000
+        <= 700_000_000
     )
 
     l1.rpc.call("sling-deletejob", ["all"])
@@ -400,6 +425,7 @@ def test_pull_and_push(node_factory, bitcoind, get_plugin):  # noqa: F811
             "maxppm": 1000,
             "outppm": 0,
             "depleteuptopercent": 0,
+            "paralleljobs": 3,
         },
     )
     l1.rpc.call("sling-go", [])
@@ -711,7 +737,7 @@ def test_splice(node_factory, bitcoind, get_plugin):  # noqa: F811
     bitcoind.generate_block(1, wait_for_mempool=result["txid"])
     sync_blockheight(bitcoind, [l1, l2])
 
-    l1.daemon.wait_for_log(r"del:1")
+    l1.daemon.wait_for_log(r"deletes/dying:1")
 
     bitcoind.generate_block(5)
     sync_blockheight(bitcoind, [l1, l2])

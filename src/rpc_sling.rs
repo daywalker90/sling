@@ -144,6 +144,11 @@ pub async fn slinggo(
                                 };
                             }
                         };
+                        plugin
+                            .state()
+                            .parrallel_bans
+                            .lock()
+                            .retain(|_, task_bans| !task_bans.is_empty());
                     });
                 }
             }

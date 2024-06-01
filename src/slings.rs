@@ -8,7 +8,7 @@ use cln_rpc::primitives::*;
 
 use log::{debug, info, warn};
 
-use sling::{Job, SatDirection};
+use sling::{DirectedChannel, Job, SatDirection};
 use std::cmp::{max, min};
 
 use std::collections::HashMap;
@@ -161,40 +161,11 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
                     task.task_id,
                     Amount::msat(&r.amount_msat),
                     r.delay,
-                    r.channel,
+                    r.channel.to_string(),
                     alias_map.get(&r.id).unwrap_or(&r.id.to_string()),
                 );
             }
         }
-
-        let route_claim_chan = route[route.len() / 2].channel;
-        let route_claim_peer = route[(route.len() / 2) - 1].id;
-        debug!(
-            "{}/{}: setting liquidity on {} to 0 to not get same route for parallel tasks.",
-            task.chan_id, task.task_id, route_claim_chan
-        );
-        let route_claim_liq = match plugin
-            .state()
-            .graph
-            .lock()
-            .graph
-            .get_mut(&route_claim_peer)
-            .unwrap()
-            .iter_mut()
-            .find_map(|(dir_chan, x)| {
-                if dir_chan.short_channel_id == route_claim_chan
-                    && x.destination != config.pubkey
-                    && x.source != config.pubkey
-                {
-                    x.liquidity = 0;
-                    Some(x)
-                } else {
-                    None
-                }
-            }) {
-            Some(dc) => dc.liquidity,
-            None => 0,
-        };
 
         let (preimage, payment_hash) = get_preimage_paymend_hash_pair();
         // debug!(
@@ -242,7 +213,7 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
             now.elapsed().as_millis().to_string()
         );
 
-        let waitsendpay_response = match waitsendpay_response(
+        match waitsendpay_response(
             plugin,
             &config,
             send_response.payment_hash,
@@ -267,32 +238,10 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
                 break 'outer;
             }
         };
-
-        if match waitsendpay_response {
-            Some(ec) => ec != route_claim_chan,
-            None => true,
-        } {
-            plugin
-                .state()
-                .graph
-                .lock()
-                .graph
-                .get_mut(&route_claim_peer)
-                .unwrap()
-                .iter_mut()
-                .find_map(|(dir_chan, x)| {
-                    if dir_chan.short_channel_id == route_claim_chan
-                        && x.destination != config.pubkey
-                        && x.source != config.pubkey
-                    {
-                        x.liquidity = route_claim_liq;
-                        Some(x)
-                    } else {
-                        None
-                    }
-                });
-        }
     }
+    if let Some(tk) = plugin.state().parrallel_bans.lock().get_mut(&task.chan_id) {
+        tk.remove(&task.task_id);
+    };
 
     Ok(())
 }
@@ -405,9 +354,25 @@ async fn next_route(
         }
         None => (),
     }
+
+    let mut parallel_bans = plugin.state().parrallel_bans.lock();
+    // for (i, ban) in parallel_bans.entry(task.chan_id).or_default().iter() {
+    //     debug!(
+    //         "{}/{}: {}: Before bans: {}/{}",
+    //         task.chan_id, task.task_id, i, ban.short_channel_id, ban.direction
+    //     );
+    // }
+    let task_bans = if let Some(tk) = parallel_bans.get(&task.chan_id) {
+        tk.values().cloned().collect()
+    } else {
+        Vec::new()
+    };
     match success_route {
         Some(_) => (),
         None => {
+            if let Some(tk) = parallel_bans.get_mut(&task.chan_id) {
+                tk.remove(&task.task_id);
+            };
             let mut pull_jobs = plugin.state().pull_jobs.lock().clone();
             let mut push_jobs = plugin.state().push_jobs.lock().clone();
             let excepts = plugin.state().excepts_chans.lock().clone();
@@ -461,6 +426,7 @@ async fn next_route(
                         },
                         config.cltv_delta,
                         tempbans,
+                        &task_bans,
                     )?;
                 }
                 SatDirection::Push => {
@@ -502,11 +468,48 @@ async fn next_route(
                         },
                         config.cltv_delta,
                         tempbans,
+                        &task_bans,
                     )?;
                 }
             }
         }
     }
+    if route.len() >= 3 {
+        let route_claim_chan = route[route.len() / 2].channel;
+        let route_claim_peer = route[(route.len() / 2) - 1].id;
+        if let Some(source_node) = graph.graph.get(&route_claim_peer) {
+            let dir_chan_0 = DirectedChannel {
+                short_channel_id: route_claim_chan,
+                direction: 0,
+            };
+            let dir_chan_1 = DirectedChannel {
+                short_channel_id: route_claim_chan,
+                direction: 1,
+            };
+            for dir_chan in [dir_chan_0, dir_chan_1] {
+                if let Some(dir_chan_state_0) = source_node.get(&dir_chan) {
+                    if dir_chan_state_0.source != config.pubkey
+                        && dir_chan_state_0.destination != config.pubkey
+                    {
+                        parallel_bans
+                            .entry(task.chan_id)
+                            .or_default()
+                            .insert(task.task_id, dir_chan);
+                    } else if let Some(tk) = parallel_bans.get_mut(&task.chan_id) {
+                        tk.remove(&task.task_id);
+                    }
+                }
+            }
+        };
+        // for (i, ban) in parallel_bans.entry(task.chan_id).or_default().iter() {
+        //     debug!(
+        //         "{}/{}: {}: After bans: {}/{}",
+        //         task.chan_id, task.task_id, i, ban.short_channel_id, ban.direction
+        //     );
+        // }
+    } else if let Some(tk) = parallel_bans.get_mut(&task.chan_id) {
+        tk.remove(&task.task_id);
+    };
     Ok(route)
 }
 

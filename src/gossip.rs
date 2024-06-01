@@ -12,8 +12,9 @@ use bitcoin::secp256k1::PublicKey;
 use cln_plugin::Plugin;
 use cln_rpc::primitives::{Amount, ShortChannelId};
 use log::{debug, warn};
+use sling::DirectedChannel;
 
-use crate::{DirectedChannel, DirectedChannelState, PluginState};
+use crate::{DirectedChannelState, PluginState};
 
 #[derive(Debug, Clone)]
 pub struct ChannelUpdate {

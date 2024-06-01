@@ -17,6 +17,7 @@ use cln_rpc::{
 
 use log::{debug, info};
 
+use sling::DirectedChannel;
 use tokio::{
     fs::OpenOptions,
     io::AsyncWriteExt,
