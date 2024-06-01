@@ -70,7 +70,7 @@ impl<'de> Deserialize<'de> for DirectedChannel {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct Job {
     pub sat_direction: SatDirection,
     #[serde(alias = "amount")]
