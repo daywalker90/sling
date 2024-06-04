@@ -27,8 +27,6 @@ use crate::util::{
 use crate::{channel_jobstate_update, get_remote_feeppm_effective, wait_for_gossip, LnGraph};
 
 pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Result<(), Error> {
-    let config = plugin.state().config.lock().clone();
-
     wait_for_gossip(plugin, task).await?;
 
     let mut success_route: Option<Vec<SendpayRoute>> = None;
@@ -55,6 +53,8 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
             )?;
             break;
         }
+
+        let config = plugin.state().config.lock().clone();
 
         let tempbans = plugin.state().tempbans.lock().clone();
         let peer_channels = plugin.state().peer_channels.lock().clone();
