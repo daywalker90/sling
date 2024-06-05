@@ -50,9 +50,15 @@ fi
 
 # Extract version from Cargo.toml [package] section
 cargo_version=$(awk -F '"' '/^\[package\]/ {p=1} p && /version/ {print $2; exit}' Cargo.toml)
+coffee_version=$(grep '^[[:space:]]*version:' coffee.yml | awk '{print $2}' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
 
 if [ "$cargo_version" != "$version" ]; then
     echo "Version $version does not match the version in Cargo.toml"
+    exit 1
+fi
+
+if [ "$coffee_version" != "$version" ]; then
+    echo "Version $version does not match the version in coffee.yml"
     exit 1
 fi
 
