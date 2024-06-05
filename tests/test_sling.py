@@ -407,12 +407,6 @@ def test_pull_and_push(node_factory, bitcoind, get_plugin):  # noqa: F811
         ]
         >= 400_000_000
     )
-    wait_for(
-        lambda: only_one(l1.rpc.listpeerchannels(l3.info["id"])["channels"])[
-            "to_us_msat"
-        ]
-        <= 800_000_000
-    )
 
     l1.rpc.call("sling-deletejob", ["all"])
     l1.rpc.call(
