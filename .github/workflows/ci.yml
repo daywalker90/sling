@@ -24,10 +24,10 @@ jobs:
     strategy:
         fail-fast: false
         matrix:
-            bitcoind-version: ["27.0"]
+            bitcoind-version: ["27.1"]
             experimental: [1]
             deprecated: [0]
-            python-version: ["3.9", "3.12"]
+            python-version: ["3.8", "3.11"]
             os: ["ubuntu-24.04"]
 
     runs-on: ${{ matrix.os }}
@@ -43,6 +43,21 @@ jobs:
         sudo mkdir /usr/local/libexec/c-lightning/plugins
         sudo chown -R $USER /usr/local/libexec
 
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Extract exact python and os version
+      id: exact_versions
+      run: |
+        PYTHON_VERSION=$(python --version 2>&1 | grep -oP '(?<=Python )\d+\.\d+(\.\d+)?')
+        echo "Python version: $PYTHON_VERSION"
+        echo "python_version=$PYTHON_VERSION" >> "$GITHUB_OUTPUT"
+        OS_VERSION=$(lsb_release -rs)
+        echo "OS version: $OS_VERSION"
+        echo "os_version=$OS_VERSION" >> $GITHUB_OUTPUT
+
     - name: Cache CLN
       id: cache-cln
       uses: actions/cache@v4
@@ -50,14 +65,21 @@ jobs:
         path: |
           /usr/local/bin/lightning*
           /usr/local/libexec/c-lightning
-        key: cache-cln-${{ inputs.cln-version }}-${{ runner.os }}
+        key: cache-cln-${{ inputs.cln-version }}-${{ steps.exact_versions.outputs.os_version }}
 
     - name: Cache bitcoind
       id: cache-bitcoind
       uses: actions/cache@v4
       with:
         path: /usr/local/bin/bitcoin*
-        key: cache-bitcoind-${{ matrix.bitcoind-version }}-${{ runner.os }}
+        key: cache-bitcoind-${{ matrix.bitcoind-version }}-${{ steps.exact_versions.outputs.os_version }}
+
+    - name: Cache python dependencies
+      id: cache-python
+      uses: actions/cache@v4
+      with:
+        path: venv
+        key: cache-python-${{ steps.exact_versions.outputs.python_version }}-${{ steps.exact_versions.outputs.os_version }}-${{ inputs.pyln-version }}-${{ hashFiles('tests/requirements.txt') }}
 
     - name: Download Bitcoin ${{ matrix.bitcoind-version }} & install binaries
       if: ${{ steps.cache-bitcoind.outputs.cache-hit != 'true' }}
@@ -94,11 +116,6 @@ jobs:
       with:
         repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
-
     - name: Checkout Core Lightning ${{ inputs.cln-version }}
       if: ${{ contains(matrix.os, 'macos') && steps.cache-cln.outputs.cache-hit != 'true' }}
       uses: actions/checkout@v4
@@ -108,11 +125,15 @@ jobs:
         ref: ${{ inputs.cln-version }}
         submodules: 'recursive'
 
-    - name: Install Python and System dependencies
+    - name: Install System dependencies
       run: |
         if [[ "${{ matrix.os }}" =~ "macos" ]]; then
           brew install autoconf automake libtool gnu-sed gettext libsodium sqlite
         fi
+
+    - name: Install Python dependencies
+      if: ${{ steps.cache-python.outputs.cache-hit != 'true' }}
+      run: |
         python -m venv venv
         source venv/bin/activate
         python -m pip install -U pip poetry wheel
