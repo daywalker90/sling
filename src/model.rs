@@ -65,16 +65,11 @@ impl PluginState {
         pubkey: PublicKey,
         rpc_path: PathBuf,
         sling_dir: PathBuf,
-        network_dir: PathBuf,
         version: String,
     ) -> PluginState {
         PluginState {
             config: Arc::new(Mutex::new(Config::new(
-                pubkey,
-                rpc_path,
-                sling_dir,
-                network_dir,
-                version,
+                pubkey, rpc_path, sling_dir, version,
             ))),
             peer_channels: Arc::new(Mutex::new(HashMap::new())),
             graph: Arc::new(Mutex::new(LnGraph::new())),
@@ -153,7 +148,6 @@ pub struct Config {
     pub pubkey: PublicKey,
     pub rpc_path: PathBuf,
     pub sling_dir: PathBuf,
-    pub network_dir: PathBuf,
     pub version: String,
     pub utf8: DynamicConfigOption<bool>,
     pub refresh_peers_interval: DynamicConfigOption<u64>,
@@ -178,14 +172,12 @@ impl Config {
         pubkey: PublicKey,
         rpc_path: PathBuf,
         sling_dir: PathBuf,
-        network_dir: PathBuf,
         version: String,
     ) -> Config {
         Config {
             pubkey,
             rpc_path,
             sling_dir,
-            network_dir,
             version,
             utf8: DynamicConfigOption {
                 name: OPT_UTF8,
@@ -639,12 +631,15 @@ impl FailureReb {
     }
 }
 
-#[derive(Debug, Tabled)]
+#[derive(Debug, Serialize, Tabled)]
 pub struct StatSummary {
     pub alias: String,
     pub scid: ShortChannelId,
     pub pubkey: PublicKey,
-    pub status: String,
+    #[tabled(skip)]
+    pub status: Vec<String>,
+    #[serde(skip_serializing)]
+    pub status_str: String,
     pub rebamount: String,
     pub w_feeppm: u64,
     pub last_route_taken: String,

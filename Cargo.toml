@@ -23,7 +23,7 @@ cln-rpc = "0.1.9"
 cln-plugin = "0.1.9"
 # cln-plugin = { path="../lightning/plugins/", version = "^0.1" }
 
-tabled = "0.15"
+tabled = "0.16"
 num-format = "0.4"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"]}
 rand = "0.8"
@@ -33,7 +33,7 @@ bitcoin = "0.30"
 log-panics = "2"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
-tikv-jemallocator = "0.5"
+tikv-jemallocator = "0.6"
 # [dev-dependencies]
 # tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 # cln-grpc = "0.1"

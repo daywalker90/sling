@@ -20,8 +20,7 @@ use model::*;
 use notifications::*;
 use rpc_sling::*;
 use stats::*;
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
+use std::path::Path;
 use tokio::{self};
 use util::*;
 
@@ -221,10 +220,8 @@ async fn main() -> Result<(), anyhow::Error> {
                 .join(plugin.configuration().rpc_file);
             let mut rpc = ClnRpc::new(&rpc_path).await?;
             let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
-            let mut networkdir = PathBuf::from_str(&plugin.configuration().lightning_dir).unwrap();
-            networkdir.pop();
             let getinfo = rpc.call_typed(&GetinfoRequest {}).await?;
-            state = PluginState::new(getinfo.id, rpc_path, sling_dir, networkdir, getinfo.version);
+            state = PluginState::new(getinfo.id, rpc_path, sling_dir, getinfo.version);
             {
                 *state.blockheight.lock() = getinfo.blockheight;
             }

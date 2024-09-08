@@ -39,8 +39,22 @@ pub async fn slingstats(
     };
     if input_array.len() > 1 {
         return Err(anyhow!(
-            "Please provide exactly one short_channel_id or nothing for a summary"
+            "Please provide exactly one short_channel_id or a true/false for the summary to be json"
         ));
+    }
+
+    let mut json_summary = false;
+    let is_summary;
+
+    if !input_array.is_empty() {
+        if let Some(json_flag) = input_array.first().unwrap().as_bool() {
+            json_summary = json_flag;
+            is_summary = true;
+        } else {
+            is_summary = false;
+        }
+    } else {
+        is_summary = true;
     }
 
     let stats_delete_successes_age = plugin
@@ -52,7 +66,7 @@ pub async fn slingstats(
     let stats_delete_failures_age = plugin.state().config.lock().stats_delete_failures_age.value;
     let peer_channels = plugin.state().peer_channels.lock().clone();
 
-    if input_array.is_empty() {
+    if is_summary {
         let mut successes = HashMap::new();
         let mut failures = HashMap::new();
         refresh_joblists(plugin.clone()).await?;
@@ -161,7 +175,8 @@ pub async fn slingstats(
                     .replace(|c: char| !c.is_ascii(), "?"),
                 scid: *job,
                 pubkey: *scid_peer_map.get(&job.clone()).unwrap(),
-                status: jobstate.join("\n"),
+                status: jobstate.clone(),
+                status_str: jobstate.join("\n"),
                 rebamount: (total_amount_msat / 1_000).to_formatted_string(&Locale::en),
                 w_feeppm: weighted_fee_ppm,
                 last_route_taken,
@@ -175,8 +190,12 @@ pub async fn slingstats(
                 .collect::<String>()
                 .to_ascii_lowercase()
         });
-        let tabled = Table::new(table);
-        Ok(json!({"format-hint":"simple","result":format!("{}", tabled,)}))
+        if json_summary {
+            Ok(json!(table))
+        } else {
+            let tabled = Table::new(table);
+            Ok(json!({"format-hint":"simple","result":format!("{}", tabled,)}))
+        }
     } else {
         let scid = match input_array.first().unwrap() {
             serde_json::Value::String(i) => ShortChannelId::from_str(i)?,
