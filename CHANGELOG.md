@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.1.0] - 2024-09-23
+
+### Added
+- nix flake (thanks to @RCasatta)
+- optional boolean argument for ``sling-stats`` to set output of the summary to json, e.g. ``sling-stats true``
+
+### Changed
+- updated dependencies
+
 ## [2.0.0] - 2024-06-05
 
 ### Added
