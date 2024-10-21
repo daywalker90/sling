@@ -716,16 +716,6 @@ fn build_candidatelist(
 
                 if match job.sat_direction {
                     SatDirection::Pull => {
-                        debug!(
-                            "candidates_pull: {} {} {} {}",
-                            scid,
-                            to_us_msat,
-                            job.amount_msat + 10_000_000,
-                            min(
-                                (depleteuptopercent * total_msat as f64) as u64,
-                                depleteuptoamount,
-                            )
-                        );
                         to_us_msat
                             > max(
                                 job.amount_msat + 10_000_000,
@@ -740,16 +730,6 @@ fn build_candidatelist(
                             }
                     }
                     SatDirection::Push => {
-                        debug!(
-                            "candidates_pull: {} {} {} {}",
-                            scid,
-                            total_msat - to_us_msat,
-                            job.amount_msat + 10_000_000,
-                            min(
-                                (depleteuptopercent * total_msat as f64) as u64,
-                                depleteuptoamount,
-                            )
-                        );
                         total_msat - to_us_msat
                             > max(
                                 job.amount_msat + 10_000_000,
