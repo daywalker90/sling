@@ -339,12 +339,32 @@ async fn next_route(
     let mut route = Vec::new();
     if let Some(prev_route) = success_route {
         if match job.sat_direction {
-            SatDirection::Pull => candidatelist
-                .iter()
-                .any(|c| c == &prev_route.first().unwrap().channel),
-            SatDirection::Push => candidatelist
-                .iter()
-                .any(|c| c == &prev_route.last().unwrap().channel),
+            SatDirection::Pull => candidatelist.iter().any(|c| {
+                c == &prev_route.first().unwrap().channel
+                    || peer_channels
+                        .get(c)
+                        .and_then(|chan| {
+                            chan.alias.as_ref().and_then(|alias| {
+                                alias.local.map(|local_alias| {
+                                    local_alias == prev_route.first().unwrap().channel
+                                })
+                            })
+                        })
+                        .unwrap_or(false)
+            }),
+            SatDirection::Push => candidatelist.iter().any(|c| {
+                c == &prev_route.last().unwrap().channel
+                    || peer_channels
+                        .get(c)
+                        .and_then(|chan| {
+                            chan.alias.as_ref().and_then(|alias| {
+                                alias.remote.map(|remote_alias| {
+                                    remote_alias == prev_route.last().unwrap().channel
+                                })
+                            })
+                        })
+                        .unwrap_or(false)
+            }),
         } {
             route.clone_from(prev_route);
         } else {
