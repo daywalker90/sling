@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.1.1] - 2024-10-21
+
+### Fixed
+- rebalances between private channels would fail after the first if only private channels are candidates
+
 ## [2.1.0] - 2024-09-23
 
 ### Added
