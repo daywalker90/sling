@@ -337,22 +337,19 @@ async fn next_route(
     }
 
     let mut route = Vec::new();
-    match success_route {
-        Some(prev_route) => {
-            if match job.sat_direction {
-                SatDirection::Pull => candidatelist
-                    .iter()
-                    .any(|c| c == &prev_route.first().unwrap().channel),
-                SatDirection::Push => candidatelist
-                    .iter()
-                    .any(|c| c == &prev_route.last().unwrap().channel),
-            } {
-                route.clone_from(prev_route);
-            } else {
-                *success_route = None;
-            }
+    if let Some(prev_route) = success_route {
+        if match job.sat_direction {
+            SatDirection::Pull => candidatelist
+                .iter()
+                .any(|c| c == &prev_route.first().unwrap().channel),
+            SatDirection::Push => candidatelist
+                .iter()
+                .any(|c| c == &prev_route.last().unwrap().channel),
+        } {
+            route.clone_from(prev_route);
+        } else {
+            *success_route = None;
         }
-        None => (),
     }
 
     let mut parallel_bans = plugin.state().parrallel_bans.lock();
