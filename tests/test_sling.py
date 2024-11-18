@@ -2,6 +2,7 @@
 
 import logging
 import os
+import time
 
 import pytest
 from pyln.client import RpcError
@@ -692,8 +693,8 @@ def test_gossip(node_factory, bitcoind, get_plugin):  # noqa: F811
     l1.daemon.wait_for_log(r"4 private channels")
     l1.daemon.wait_for_log(r"8 public channels")
 
-    close_tx = l1.rpc.close(scid_l1_l4_1)["txid"]
-    bitcoind.generate_block(1, wait_for_mempool=close_tx)
+    l1.rpc.close(scid_l1_l4_1)
+    bitcoind.generate_block(1, wait_for_mempool=1)
     sync_blockheight(bitcoind, nodes)
 
     l1.daemon.wait_for_log(r"4 private channels")
@@ -715,8 +716,8 @@ def test_gossip(node_factory, bitcoind, get_plugin):  # noqa: F811
     l1.rpc.call("sling-stop", [])
     assert not l1.daemon.is_in_log(f"sling: {scid_l1_l4_1}")
 
-    close_tx = l2.rpc.close(scid_l2_l4)["txid"]
-    bitcoind.generate_block(1, wait_for_mempool=close_tx)
+    l2.rpc.close(scid_l2_l4)
+    bitcoind.generate_block(1, wait_for_mempool=1)
     sync_blockheight(bitcoind, nodes)
 
     l1.daemon.wait_for_log(r"4 private channels")
@@ -737,8 +738,8 @@ def test_gossip(node_factory, bitcoind, get_plugin):  # noqa: F811
     l1.rpc.call("sling-stop", [])
     assert not l1.daemon.is_in_log(f"sling: {scid_l2_l4}")
 
-    close_tx = l2.rpc.close(scid_l1_l2)["txid"]
-    bitcoind.generate_block(1, wait_for_mempool=close_tx)
+    l2.rpc.close(scid_l1_l2)
+    bitcoind.generate_block(1, wait_for_mempool=1)
     sync_blockheight(bitcoind, nodes)
 
     l1.daemon.wait_for_log(r"2 private channels")
@@ -779,6 +780,9 @@ def test_splice(node_factory, bitcoind, get_plugin):  # noqa: F811
 
     result = l1.rpc.splice_init(chan_id, 100_000, funds_result["psbt"])
     result = l1.rpc.splice_update(chan_id, result["psbt"])
+    while result["commitments_secured"] is False:
+        result = l1.rpc.splice_update(chan_id, result["psbt"])
+        time.sleep(0.1)
     result = l1.rpc.signpsbt(result["psbt"])
     result = l1.rpc.splice_signed(chan_id, result["signed_psbt"])
 
