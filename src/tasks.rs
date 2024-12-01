@@ -288,15 +288,9 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
 }
 
 pub async fn refresh_liquidity(plugin: Plugin<PluginState>) -> Result<(), Error> {
-    let interval = plugin
-        .state()
-        .config
-        .lock()
-        .clone()
-        .reset_liquidity_interval
-        .value;
     loop {
         {
+            let interval = plugin.state().config.lock().reset_liquidity_interval.value;
             let now = Instant::now();
             plugin.state().graph.lock().refresh_liquidity(interval);
             info!(
@@ -304,7 +298,7 @@ pub async fn refresh_liquidity(plugin: Plugin<PluginState>) -> Result<(), Error>
                 now.elapsed().as_millis().to_string()
             );
         }
-        time::sleep(Duration::from_secs(600)).await;
+        time::sleep(Duration::from_secs(120)).await;
     }
 }
 

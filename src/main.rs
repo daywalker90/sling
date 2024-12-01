@@ -89,7 +89,7 @@ async fn main() -> Result<(), anyhow::Error> {
     .dynamic();
     let opt_reset_liquidity_interval: IntegerConfigOption = ConfigOption::new_i64_no_default(
         OPT_RESET_LIQUIDITY_INTERVAL,
-        "Refresh interval for liquidity reset task. Default is `360`",
+        "Refresh interval for liquidity reset task. Default is `60`",
     )
     .dynamic();
     let opt_depleteuptopercent: StringConfigOption = ConfigOption::new_str_no_default(

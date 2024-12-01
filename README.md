@@ -133,7 +133,7 @@ and jobs use the data of the last call to check for balances etc. So this option
 if it's value is too high. Default is ``1``s
 * ``sling-refresh-aliasmap-interval``: How often to refresh node aliases in seconds. Default is every ``3600``s
 * ``sling-refresh-gossmap-interval``: How often to read ``gossip_store`` updates in seconds. Default is every ``10``s
-* ``sling-reset-liquidity-interval``: After how many minutes to reset liquidity knowledge. Default is ``360``m
+* ``sling-reset-liquidity-interval``: After how many minutes to reset liquidity knowledge. Default is ``60``m
 * ``sling-depleteuptopercent``: Up to what percent to pull/push sats from/to candidate channels as floating point between 0 and <1. Also see [Depleteformula](#depleteformula). Default is ``0.2``
 * ``sling-depleteuptoamount``: Up to what amount to pull/push sats from/to candidate channels. Also see [Depleteformula](#depleteformula). Default is ``2000000``sats
 * ``sling-maxhops``: Maximum number of hops allowed in a route. A hop is a node that is not us. Default is ``8``

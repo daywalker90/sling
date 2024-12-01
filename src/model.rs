@@ -198,7 +198,7 @@ impl Config {
             },
             reset_liquidity_interval: DynamicConfigOption {
                 name: OPT_RESET_LIQUIDITY_INTERVAL,
-                value: 360,
+                value: 60,
             },
             depleteuptopercent: DynamicConfigOption {
                 name: OPT_DEPLETEUPTOPERCENT,
