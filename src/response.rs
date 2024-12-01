@@ -1,13 +1,19 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    str::FromStr,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use anyhow::anyhow;
 use cln_plugin::{Error, Plugin};
 use cln_rpc::{
     model::{
-        requests::{SendpayRequest, SendpayRoute, WaitsendpayRequest},
+        requests::{
+            AskreneinformchannelInform, AskreneinformchannelRequest, SendpayRequest, SendpayRoute,
+            WaitsendpayRequest,
+        },
         responses::SendpayResponse,
     },
-    primitives::{Amount, Sha256, ShortChannelId},
+    primitives::{Amount, Sha256, ShortChannelId, ShortChannelIdDir},
     ClnRpc,
 };
 use log::{debug, info, warn};
@@ -15,8 +21,8 @@ use sling::{Job, SatDirection};
 use tokio::time::Instant;
 
 use crate::{
-    errors::WaitsendpayErrorData, feeppm_effective_from_amts, my_sleep, Config, FailureReb,
-    PluginState, SuccessReb, Task,
+    at_or_above_version, errors::WaitsendpayErrorData, feeppm_effective_from_amts, my_sleep,
+    Config, FailureReb, PluginState, SuccessReb, Task,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -254,6 +260,20 @@ pub async fn waitsendpay_response(
                                 None
                             }
                         });
+                    if at_or_above_version(&config.version, "24.11")? {
+                        for lay in &config.inform_layers {
+                            rpc.call_typed(&AskreneinformchannelRequest {
+                                amount_msat: Some(ws_error.amount_msat.unwrap()),
+                                inform: Some(AskreneinformchannelInform::CONSTRAINED),
+                                short_channel_id_dir: Some(ShortChannelIdDir::from_str(&format!(
+                                    "{}/{}",
+                                    ws_error.erring_channel, ws_error.erring_direction
+                                ))?),
+                                layer: lay.clone(),
+                            })
+                            .await?;
+                        }
+                    }
                 }
                 Ok(Some(ws_error.erring_channel))
             } else {

@@ -1,5 +1,11 @@
 # Changelog
 
+## [3.0.0] - Unreleased
+
+### Added
+
+- ``sling-inform-layers``: CLN 24.11+ will inform these layers about sling's liquidity information gained by failed rebalances. Can be stated multiple times. Defaults to ``xpay`` which will help the ``xpay`` command.
+
 ## [2.1.1] - 2024-10-21
 
 ### Fixed

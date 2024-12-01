@@ -9,7 +9,8 @@ static GLOBAL: Jemalloc = Jemalloc;
 
 use anyhow::anyhow;
 use cln_plugin::options::{
-    BooleanConfigOption, ConfigOption, IntegerConfigOption, StringConfigOption,
+    BooleanConfigOption, ConfigOption, IntegerConfigOption, StringArrayConfigOption,
+    StringConfigOption,
 };
 use cln_plugin::Builder;
 use config::*;
@@ -58,6 +59,7 @@ const OPT_STATS_DELETE_FAILURES_AGE: &str = "sling-stats-delete-failures-age";
 const OPT_STATS_DELETE_FAILURES_SIZE: &str = "sling-stats-delete-failures-size";
 const OPT_STATS_DELETE_SUCCESSES_AGE: &str = "sling-stats-delete-successes-age";
 const OPT_STATS_DELETE_SUCCESSES_SIZE: &str = "sling-stats-delete-successes-size";
+const OPT_INFORM_LAYERS: &str = "sling-inform-layers";
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
@@ -145,6 +147,12 @@ async fn main() -> Result<(), anyhow::Error> {
         "Max number of success stats per channel. Default is `10000`",
     )
     .dynamic();
+    let opt_inform_layers: StringArrayConfigOption = ConfigOption::new_str_arr_no_default(
+        OPT_INFORM_LAYERS,
+        "Inform these layers about our information we gather from rebalances. \
+         Can be stated multiple times",
+    )
+    .dynamic();
     match Builder::new(tokio::io::stdin(), tokio::io::stdout())
         .hook("htlc_accepted", htlc_handler)
         .subscribe("block_added", block_added)
@@ -164,6 +172,7 @@ async fn main() -> Result<(), anyhow::Error> {
         .option(opt_stats_delete_failures_size)
         .option(opt_stats_delete_successes_age)
         .option(opt_stats_delete_successes_size)
+        .option(opt_inform_layers)
         .setconfig_callback(setconfig_callback)
         .rpcmethod(
             &(PLUGIN_NAME.to_string() + "-job"),

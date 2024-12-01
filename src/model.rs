@@ -166,6 +166,7 @@ pub struct Config {
     pub stats_delete_successes_age: DynamicConfigOption<u64>,
     pub stats_delete_successes_size: DynamicConfigOption<u64>,
     pub cltv_delta: u32,
+    pub inform_layers: Vec<String>,
 }
 impl Config {
     pub fn new(
@@ -244,6 +245,7 @@ impl Config {
                 value: 10_000,
             },
             cltv_delta: 144,
+            inform_layers: vec!["xpay".to_string()],
         }
     }
 }

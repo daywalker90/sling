@@ -9,7 +9,7 @@ use serde_json::json;
 
 use crate::{
     model::PluginState, Config, OPT_CANDIDATES_MIN_AGE, OPT_DEPLETEUPTOAMOUNT,
-    OPT_DEPLETEUPTOPERCENT, OPT_MAXHOPS, OPT_MAX_HTLC_COUNT, OPT_PARALLELJOBS,
+    OPT_DEPLETEUPTOPERCENT, OPT_INFORM_LAYERS, OPT_MAXHOPS, OPT_MAX_HTLC_COUNT, OPT_PARALLELJOBS,
     OPT_REFRESH_ALIASMAP_INTERVAL, OPT_REFRESH_GOSSMAP_INTERVAL, OPT_REFRESH_PEERS_INTERVAL,
     OPT_RESET_LIQUIDITY_INTERVAL, OPT_STATS_DELETE_FAILURES_AGE, OPT_STATS_DELETE_FAILURES_SIZE,
     OPT_STATS_DELETE_SUCCESSES_AGE, OPT_STATS_DELETE_SUCCESSES_SIZE, OPT_TIMEOUTPAY, OPT_UTF8,
@@ -207,6 +207,9 @@ pub async fn get_startup_options(
     if let Some(sdss) = plugin.option_str(OPT_STATS_DELETE_SUCCESSES_SIZE)? {
         check_option(&mut config, OPT_STATS_DELETE_SUCCESSES_SIZE, &sdss)?;
     };
+    if let Some(layers) = plugin.option_str(OPT_INFORM_LAYERS)? {
+        check_option(&mut config, OPT_INFORM_LAYERS, &layers)?;
+    }
 
     Ok(())
 }
@@ -336,6 +339,9 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
                 0,
                 None,
             )?
+        }
+        n if n.eq(OPT_INFORM_LAYERS) => {
+            config.inform_layers = value.as_str_arr().unwrap().clone();
         }
         _ => return Err(anyhow!("Unknown option: {}", name)),
     }
