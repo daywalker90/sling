@@ -388,7 +388,7 @@ pub struct DijkstraNode<'a> {
     pub destination: PublicKey,
     pub hops: u8,
 }
-impl<'a> PartialEq for DijkstraNode<'a> {
+impl PartialEq for DijkstraNode<'_> {
     fn eq(&self, other: &Self) -> bool {
         self.score == other.score
             && self.hops == other.hops
