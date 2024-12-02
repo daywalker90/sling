@@ -14,6 +14,10 @@
 
 - ``sling-reset-liquidity-interval`` was not actually dynamic
 
+### Removed
+
+- ``sling-utf8``, it was not used
+
 ## [2.1.1] - 2024-10-21
 
 ### Fixed

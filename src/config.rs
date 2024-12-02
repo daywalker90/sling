@@ -12,7 +12,7 @@ use crate::{
     OPT_DEPLETEUPTOPERCENT, OPT_INFORM_LAYERS, OPT_MAXHOPS, OPT_MAX_HTLC_COUNT, OPT_PARALLELJOBS,
     OPT_REFRESH_ALIASMAP_INTERVAL, OPT_REFRESH_GOSSMAP_INTERVAL, OPT_REFRESH_PEERS_INTERVAL,
     OPT_RESET_LIQUIDITY_INTERVAL, OPT_STATS_DELETE_FAILURES_AGE, OPT_STATS_DELETE_FAILURES_SIZE,
-    OPT_STATS_DELETE_SUCCESSES_AGE, OPT_STATS_DELETE_SUCCESSES_SIZE, OPT_TIMEOUTPAY, OPT_UTF8,
+    OPT_STATS_DELETE_SUCCESSES_AGE, OPT_STATS_DELETE_SUCCESSES_SIZE, OPT_TIMEOUTPAY,
 };
 
 pub async fn setconfig_callback(
@@ -66,16 +66,16 @@ fn parse_option(name: &str, value: &serde_json::Value) -> Result<options::Value,
                 Err(anyhow!("{} is not a valid string!", name))
             }
         }
-        n if n.eq(OPT_UTF8) => {
-            if let Some(n_bool) = value.as_bool() {
-                return Ok(options::Value::Boolean(n_bool));
-            } else if let Some(n_str) = value.as_str() {
-                if let Ok(n_str_bool) = n_str.parse::<bool>() {
-                    return Ok(options::Value::Boolean(n_str_bool));
-                }
-            }
-            Err(anyhow!("{} is not a valid boolean!", name))
-        }
+        // n if n.eq(OPT_UTF8) => {
+        //     if let Some(n_bool) = value.as_bool() {
+        //         return Ok(options::Value::Boolean(n_bool));
+        //     } else if let Some(n_str) = value.as_str() {
+        //         if let Ok(n_str_bool) = n_str.parse::<bool>() {
+        //             return Ok(options::Value::Boolean(n_str_bool));
+        //         }
+        //     }
+        //     Err(anyhow!("{} is not a valid boolean!", name))
+        // }
         _ => {
             if let Some(n_i64) = value.as_i64() {
                 return Ok(options::Value::Integer(n_i64));
@@ -159,9 +159,6 @@ pub async fn get_startup_options(
     let mut config = state.config.lock();
     config.cltv_delta = cltv_delta;
 
-    if let Some(utf8) = plugin.option_str(OPT_UTF8)? {
-        check_option(&mut config, OPT_UTF8, &utf8)?;
-    };
     if let Some(rpi) = plugin.option_str(OPT_REFRESH_PEERS_INTERVAL)? {
         check_option(&mut config, OPT_REFRESH_PEERS_INTERVAL, &rpi)?;
     };
@@ -216,7 +213,6 @@ pub async fn get_startup_options(
 
 fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Result<(), Error> {
     match name {
-        n if n.eq(OPT_UTF8) => config.utf8 = value.as_bool().unwrap(),
         n if n.eq(OPT_REFRESH_PEERS_INTERVAL) => {
             config.refresh_peers_interval =
                 options_value_to_u64(OPT_REFRESH_PEERS_INTERVAL, value.as_i64().unwrap(), 1, None)?

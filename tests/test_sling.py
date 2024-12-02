@@ -23,7 +23,6 @@ def test_options(node_factory, get_plugin):  # noqa: F811
     node = node_factory.get_node(
         options={
             "plugin": get_plugin,
-            "sling-utf8": False,
             "sling-refresh-peers-interval": 2,
             "sling-refresh-aliasmap-interval": 3,
             "sling-refresh-gossmap-interval": 599,
@@ -63,24 +62,10 @@ def test_setconfig_options(node_factory, get_plugin):  # noqa: F811
     node = node_factory.get_node(
         options={
             "plugin": get_plugin,
-            "sling-utf8": True,
         }
     )
 
-    with pytest.raises(RpcError) as err:
-        node.rpc.setconfig("sling-utf8", "test")
-    assert err.value.error["message"] == "sling-utf8 is not a valid boolean!"
-    assert err.value.error["code"] == -32602
-    assert (
-        node.rpc.listconfigs("sling-utf8")["configs"]["sling-utf8"]["value_bool"]
-        != "test"
-    )
-
     node.rpc.setconfig("sling-refresh-gossmap-interval", 1)
-
-    node.rpc.setconfig("sling-utf8", False)
-    with pytest.raises(RpcError, match="is not a valid boolean"):
-        node.rpc.setconfig("sling-utf8", "test")
 
     with pytest.raises(RpcError, match="needs to be greater than 0 and <1"):
         node.rpc.setconfig("sling-depleteuptopercent", 2)
