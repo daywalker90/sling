@@ -27,17 +27,16 @@ use tokio::{
 use crate::{gossip::read_gossip_store, model::*, util::*};
 
 pub async fn refresh_aliasmap(plugin: Plugin<PluginState>) -> Result<(), Error> {
-    let rpc_path;
-    let interval;
-    {
-        let config = plugin.state().config.lock();
-        rpc_path = config.rpc_path.clone();
-        interval = config.refresh_aliasmap_interval;
-    }
-    let mut rpc = ClnRpc::new(&rpc_path).await?;
-
     loop {
         let now = Instant::now();
+        let rpc_path;
+        let interval;
+        {
+            let config = plugin.state().config.lock();
+            rpc_path = config.rpc_path.clone();
+            interval = config.refresh_aliasmap_interval;
+        }
+        let mut rpc = ClnRpc::new(&rpc_path).await?;
         {
             let nodes = rpc.call_typed(&ListnodesRequest { id: None }).await?.nodes;
             *plugin.state().alias_peer_map.lock() = nodes
@@ -54,13 +53,12 @@ pub async fn refresh_aliasmap(plugin: Plugin<PluginState>) -> Result<(), Error> 
 }
 
 pub async fn refresh_listpeerchannels_loop(plugin: Plugin<PluginState>) -> Result<(), Error> {
-    let interval;
-    {
-        let config = plugin.state().config.lock();
-        interval = config.refresh_peers_interval;
-    }
-
     loop {
+        let interval;
+        {
+            let config = plugin.state().config.lock();
+            interval = config.refresh_peers_interval;
+        }
         {
             refresh_listpeerchannels(&plugin).await?;
         }
@@ -92,43 +90,24 @@ pub async fn refresh_listpeerchannels(plugin: &Plugin<PluginState>) -> Result<()
 }
 
 pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
-    // let rpc_path;
-    let interval;
     let my_pubkey;
     let sling_dir;
     let mut offset = 0;
     {
         let config = plugin.state().config.lock();
-        // rpc_path = config.rpc_path.clone();
-        interval = config.refresh_gossmap_interval;
         my_pubkey = config.pubkey;
         sling_dir = config.sling_dir.clone();
     }
     *plugin.state().graph.lock() = read_graph(&sling_dir).await?;
-    // let mut rpc = ClnRpc::new(&rpc_path).await?;
 
     loop {
+        let interval;
         {
             let now = Instant::now();
-            // let jobs = read_jobs(
-            //     &Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME),
-            //     &plugin,
-            // )
-            // .await?;
-
-            // let amounts = jobs.values().map(|job| job.amount_msat);
-            // * 2 because we set our liquidity beliefs to / 2 anyways
-            // let min_amount = amounts.clone().min().unwrap_or(1_000) * 2;
-            // let max_amount = amounts.max().unwrap_or(10_000_000_000);
-            // let maxppms = jobs.values().map(|job| job.maxppm);
-            // let min_maxppm = maxppms.min().unwrap_or(0);
-            // let max_maxppm = maxppms.max().unwrap_or(3_000);
-
-            // let two_w_ago = (SystemTime::now()
-            //     .duration_since(UNIX_EPOCH)
-            //     .unwrap()
-            //     .as_secs()
-            //     - 1_209_600) as u32;
+            {
+                let config = plugin.state().config.lock();
+                interval = config.refresh_gossmap_interval;
+            }
             {
                 debug!("Getting all channels in gossip_store...");
                 read_gossip_store(plugin.clone(), &mut offset).await?;
@@ -274,10 +253,6 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
 
                 lngraph.graph.retain(|_, v| !v.is_empty());
             }
-            // match write_graph(plugin.clone()).await {
-            //     Ok(_) => (),
-            //     Err(e) => return Err(anyhow!("Too dumb to write....{}", e)),
-            // };
             info!(
                 "Refreshed graph in {}ms!",
                 now.elapsed().as_millis().to_string()

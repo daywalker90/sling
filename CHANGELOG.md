@@ -12,6 +12,9 @@
 
 ### Fixed
 
+- ``sling-refresh-peers-interval`` was not actually dynamic
+- ``sling-refresh-aliasmap-interval`` was not actually dynamic
+- ``sling-refresh-gossmap-interval`` was not actually dynamic
 - ``sling-reset-liquidity-interval`` was not actually dynamic
 
 ### Removed
