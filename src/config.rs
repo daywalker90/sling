@@ -8,7 +8,7 @@ use cln_rpc::{model::requests::ListconfigsRequest, ClnRpc, RpcError};
 use serde_json::json;
 
 use crate::{
-    model::PluginState, Config, OPT_CANDIDATES_MIN_AGE, OPT_DEPLETEUPTOAMOUNT,
+    at_or_above_version, model::PluginState, Config, OPT_CANDIDATES_MIN_AGE, OPT_DEPLETEUPTOAMOUNT,
     OPT_DEPLETEUPTOPERCENT, OPT_INFORM_LAYERS, OPT_MAXHOPS, OPT_MAX_HTLC_COUNT, OPT_PARALLELJOBS,
     OPT_REFRESH_ALIASMAP_INTERVAL, OPT_REFRESH_GOSSMAP_INTERVAL, OPT_REFRESH_PEERS_INTERVAL,
     OPT_RESET_LIQUIDITY_INTERVAL, OPT_STATS_DELETE_FAILURES_AGE, OPT_STATS_DELETE_FAILURES_SIZE,
@@ -158,6 +158,7 @@ pub async fn get_startup_options(
 
     let mut config = state.config.lock();
     config.cltv_delta = cltv_delta;
+    config.at_or_above_24_11 = at_or_above_version(&config.version, "24.11")?;
 
     if let Some(rpi) = plugin.option_str(OPT_REFRESH_PEERS_INTERVAL)? {
         check_option(&mut config, OPT_REFRESH_PEERS_INTERVAL, &rpi)?;

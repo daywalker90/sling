@@ -160,6 +160,7 @@ pub struct Config {
     pub stats_delete_successes_age: u64,
     pub stats_delete_successes_size: u64,
     pub cltv_delta: u32,
+    pub at_or_above_24_11: bool,
     pub inform_layers: Vec<String>,
 }
 impl Config {
@@ -190,6 +191,7 @@ impl Config {
             stats_delete_successes_age: 30,
             stats_delete_successes_size: 10_000,
             cltv_delta: 144,
+            at_or_above_24_11: false,
             inform_layers: vec!["xpay".to_string()],
         }
     }

@@ -21,8 +21,8 @@ use sling::{Job, SatDirection};
 use tokio::time::Instant;
 
 use crate::{
-    at_or_above_version, errors::WaitsendpayErrorData, feeppm_effective_from_amts, my_sleep,
-    Config, FailureReb, PluginState, SuccessReb, Task,
+    errors::WaitsendpayErrorData, feeppm_effective_from_amts, my_sleep, Config, FailureReb,
+    PluginState, SuccessReb, Task,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -260,7 +260,7 @@ pub async fn waitsendpay_response(
                                 None
                             }
                         });
-                    if at_or_above_version(&config.version, "24.11")? {
+                    if config.at_or_above_24_11 {
                         for lay in &config.inform_layers {
                             rpc.call_typed(&AskreneinformchannelRequest {
                                 amount_msat: Some(ws_error.amount_msat.unwrap()),
