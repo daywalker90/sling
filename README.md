@@ -145,6 +145,7 @@ if it's value is too high. Default is ``1``s
 * ``sling-stats-delete-successes-age``: Max age of success stats in days and also time window for sling-stats. Default is ``30`` days, use ``0`` to never delete stats based on age
 * ``sling-stats-delete-failures-size``: Max number of failure stats per channel. Default is ``10000``, use ``0`` to never delete stats based on count
 * ``sling-stats-delete-successes-size``: Max number of successes stats per channel. Default is ``10000``, use ``0`` to never delete stats based on count
+* ``sling-inform-layers``: Inform these layers about information gained by failed rebalances. State multiple times if you want to inform more than one layer. Defaults to ``xpay``'s ``xpay`` layer. Not a dynamic option.
 
 # Feedback
 You can report issues, feedback etc. here on github or join this telegram channel: [Telegram](https://t.me/+9UKAom1Jam9hYTY6)

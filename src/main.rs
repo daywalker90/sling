@@ -151,8 +151,7 @@ async fn main() -> Result<(), anyhow::Error> {
         OPT_INFORM_LAYERS,
         "Inform these layers about our information we gather from rebalances. \
          Can be stated multiple times",
-    )
-    .dynamic();
+    );
     match Builder::new(tokio::io::stdin(), tokio::io::stdout())
         .hook("htlc_accepted", htlc_handler)
         .subscribe("block_added", block_added)
