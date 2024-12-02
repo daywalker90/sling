@@ -25,11 +25,6 @@ use tokio::{
 use crate::{
     create_sling_dir,
     gossip::{ChannelAnnouncement, ChannelUpdate},
-    OPT_CANDIDATES_MIN_AGE, OPT_DEPLETEUPTOAMOUNT, OPT_DEPLETEUPTOPERCENT, OPT_MAXHOPS,
-    OPT_MAX_HTLC_COUNT, OPT_PARALLELJOBS, OPT_REFRESH_ALIASMAP_INTERVAL,
-    OPT_REFRESH_GOSSMAP_INTERVAL, OPT_REFRESH_PEERS_INTERVAL, OPT_RESET_LIQUIDITY_INTERVAL,
-    OPT_STATS_DELETE_FAILURES_AGE, OPT_STATS_DELETE_FAILURES_SIZE, OPT_STATS_DELETE_SUCCESSES_AGE,
-    OPT_STATS_DELETE_SUCCESSES_SIZE, OPT_TIMEOUTPAY, OPT_UTF8,
 };
 
 pub const SUCCESSES_SUFFIX: &str = "_successes.json";
@@ -149,22 +144,22 @@ pub struct Config {
     pub rpc_path: PathBuf,
     pub sling_dir: PathBuf,
     pub version: String,
-    pub utf8: DynamicConfigOption<bool>,
-    pub refresh_peers_interval: DynamicConfigOption<u64>,
-    pub refresh_aliasmap_interval: DynamicConfigOption<u64>,
-    pub refresh_gossmap_interval: DynamicConfigOption<u64>,
-    pub reset_liquidity_interval: DynamicConfigOption<u64>,
-    pub depleteuptopercent: DynamicConfigOption<f64>,
-    pub depleteuptoamount: DynamicConfigOption<u64>,
-    pub maxhops: DynamicConfigOption<u8>,
-    pub candidates_min_age: DynamicConfigOption<u32>,
-    pub paralleljobs: DynamicConfigOption<u8>,
-    pub timeoutpay: DynamicConfigOption<u16>,
-    pub max_htlc_count: DynamicConfigOption<u64>,
-    pub stats_delete_failures_age: DynamicConfigOption<u64>,
-    pub stats_delete_failures_size: DynamicConfigOption<u64>,
-    pub stats_delete_successes_age: DynamicConfigOption<u64>,
-    pub stats_delete_successes_size: DynamicConfigOption<u64>,
+    pub utf8: bool,
+    pub refresh_peers_interval: u64,
+    pub refresh_aliasmap_interval: u64,
+    pub refresh_gossmap_interval: u64,
+    pub reset_liquidity_interval: u64,
+    pub depleteuptopercent: f64,
+    pub depleteuptoamount: u64,
+    pub maxhops: u8,
+    pub candidates_min_age: u32,
+    pub paralleljobs: u8,
+    pub timeoutpay: u16,
+    pub max_htlc_count: u64,
+    pub stats_delete_failures_age: u64,
+    pub stats_delete_failures_size: u64,
+    pub stats_delete_successes_age: u64,
+    pub stats_delete_successes_size: u64,
     pub cltv_delta: u32,
     pub inform_layers: Vec<String>,
 }
@@ -180,80 +175,26 @@ impl Config {
             rpc_path,
             sling_dir,
             version,
-            utf8: DynamicConfigOption {
-                name: OPT_UTF8,
-                value: true,
-            },
-            refresh_peers_interval: DynamicConfigOption {
-                name: OPT_REFRESH_PEERS_INTERVAL,
-                value: 1,
-            },
-            refresh_aliasmap_interval: DynamicConfigOption {
-                name: OPT_REFRESH_ALIASMAP_INTERVAL,
-                value: 3600,
-            },
-            refresh_gossmap_interval: DynamicConfigOption {
-                name: OPT_REFRESH_GOSSMAP_INTERVAL,
-                value: 10,
-            },
-            reset_liquidity_interval: DynamicConfigOption {
-                name: OPT_RESET_LIQUIDITY_INTERVAL,
-                value: 60,
-            },
-            depleteuptopercent: DynamicConfigOption {
-                name: OPT_DEPLETEUPTOPERCENT,
-                value: 0.2,
-            },
-            depleteuptoamount: DynamicConfigOption {
-                name: OPT_DEPLETEUPTOAMOUNT,
-                value: 2_000_000_000,
-            },
-            maxhops: DynamicConfigOption {
-                name: OPT_MAXHOPS,
-                value: 8,
-            },
-            candidates_min_age: DynamicConfigOption {
-                name: OPT_CANDIDATES_MIN_AGE,
-                value: 0,
-            },
-            paralleljobs: DynamicConfigOption {
-                name: OPT_PARALLELJOBS,
-                value: 1,
-            },
-            timeoutpay: DynamicConfigOption {
-                name: OPT_TIMEOUTPAY,
-                value: 120,
-            },
-            max_htlc_count: DynamicConfigOption {
-                name: OPT_MAX_HTLC_COUNT,
-                value: 5,
-            },
-            stats_delete_failures_age: DynamicConfigOption {
-                name: OPT_STATS_DELETE_FAILURES_AGE,
-                value: 30,
-            },
-            stats_delete_failures_size: DynamicConfigOption {
-                name: OPT_STATS_DELETE_FAILURES_SIZE,
-                value: 10_000,
-            },
-            stats_delete_successes_age: DynamicConfigOption {
-                name: OPT_STATS_DELETE_SUCCESSES_AGE,
-                value: 30,
-            },
-            stats_delete_successes_size: DynamicConfigOption {
-                name: OPT_STATS_DELETE_SUCCESSES_SIZE,
-                value: 10_000,
-            },
+            utf8: true,
+            refresh_peers_interval: 1,
+            refresh_aliasmap_interval: 3600,
+            refresh_gossmap_interval: 10,
+            reset_liquidity_interval: 60,
+            depleteuptopercent: 0.2,
+            depleteuptoamount: 2_000_000_000,
+            maxhops: 8,
+            candidates_min_age: 0,
+            paralleljobs: 1,
+            timeoutpay: 120,
+            max_htlc_count: 5,
+            stats_delete_failures_age: 30,
+            stats_delete_failures_size: 10_000,
+            stats_delete_successes_age: 30,
+            stats_delete_successes_size: 10_000,
             cltv_delta: 144,
             inform_layers: vec!["xpay".to_string()],
         }
     }
-}
-
-#[derive(Clone, Debug)]
-pub struct DynamicConfigOption<T> {
-    pub name: &'static str,
-    pub value: T,
 }
 
 #[derive(Debug, Clone)]

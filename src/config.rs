@@ -216,13 +216,13 @@ pub async fn get_startup_options(
 
 fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Result<(), Error> {
     match name {
-        n if n.eq(OPT_UTF8) => config.utf8.value = value.as_bool().unwrap(),
+        n if n.eq(OPT_UTF8) => config.utf8 = value.as_bool().unwrap(),
         n if n.eq(OPT_REFRESH_PEERS_INTERVAL) => {
-            config.refresh_peers_interval.value =
+            config.refresh_peers_interval =
                 options_value_to_u64(OPT_REFRESH_PEERS_INTERVAL, value.as_i64().unwrap(), 1, None)?
         }
         n if n.eq(OPT_REFRESH_ALIASMAP_INTERVAL) => {
-            config.refresh_aliasmap_interval.value = options_value_to_u64(
+            config.refresh_aliasmap_interval = options_value_to_u64(
                 OPT_REFRESH_ALIASMAP_INTERVAL,
                 value.as_i64().unwrap(),
                 1,
@@ -230,7 +230,7 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
             )?
         }
         n if n.eq(OPT_REFRESH_GOSSMAP_INTERVAL) => {
-            config.refresh_gossmap_interval.value = options_value_to_u64(
+            config.refresh_gossmap_interval = options_value_to_u64(
                 OPT_REFRESH_GOSSMAP_INTERVAL,
                 value.as_i64().unwrap(),
                 1,
@@ -238,7 +238,7 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
             )?
         }
         n if n.eq(OPT_RESET_LIQUIDITY_INTERVAL) => {
-            config.reset_liquidity_interval.value = options_value_to_u64(
+            config.reset_liquidity_interval = options_value_to_u64(
                 OPT_RESET_LIQUIDITY_INTERVAL,
                 value.as_i64().unwrap(),
                 10,
@@ -246,14 +246,14 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
             )?
         }
         n if n.eq(OPT_DEPLETEUPTOPERCENT) => {
-            config.depleteuptopercent.value = match value.as_str().unwrap().parse::<f64>() {
+            config.depleteuptopercent = match value.as_str().unwrap().parse::<f64>() {
                 Ok(f) => {
                     if (0.0..1.0).contains(&f) {
                         f
                     } else {
                         return Err(anyhow!(
                             "Error: {} needs to be greater than 0 and <1, not `{}`.",
-                            config.depleteuptopercent.name,
+                            OPT_DEPLETEUPTOPERCENT,
                             f
                         ));
                     }
@@ -262,18 +262,18 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
                     return Err(anyhow!(
                         "Error: {} could not parse a floating point for `{}`.",
                         e,
-                        config.depleteuptopercent.name,
+                        OPT_DEPLETEUPTOPERCENT,
                     ))
                 }
             }
         }
         n if n.eq(OPT_DEPLETEUPTOAMOUNT) => {
-            config.depleteuptoamount.value =
+            config.depleteuptoamount =
                 options_value_to_u64(OPT_DEPLETEUPTOAMOUNT, value.as_i64().unwrap(), 0, None)?
                     * 1000
         }
         n if n.eq(OPT_MAXHOPS) => {
-            config.maxhops.value = u8::try_from(options_value_to_u64(
+            config.maxhops = u8::try_from(options_value_to_u64(
                 OPT_MAXHOPS,
                 value.as_i64().unwrap(),
                 2,
@@ -281,7 +281,7 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
             )?)?
         }
         n if n.eq(OPT_CANDIDATES_MIN_AGE) => {
-            config.candidates_min_age.value = u32::try_from(options_value_to_u64(
+            config.candidates_min_age = u32::try_from(options_value_to_u64(
                 OPT_CANDIDATES_MIN_AGE,
                 value.as_i64().unwrap(),
                 0,
@@ -289,7 +289,7 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
             )?)?
         }
         n if n.eq(OPT_PARALLELJOBS) => {
-            config.paralleljobs.value = u8::try_from(options_value_to_u64(
+            config.paralleljobs = u8::try_from(options_value_to_u64(
                 OPT_PARALLELJOBS,
                 value.as_i64().unwrap(),
                 1,
@@ -297,7 +297,7 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
             )?)?
         }
         n if n.eq(OPT_TIMEOUTPAY) => {
-            config.timeoutpay.value = u16::try_from(options_value_to_u64(
+            config.timeoutpay = u16::try_from(options_value_to_u64(
                 OPT_TIMEOUTPAY,
                 value.as_i64().unwrap(),
                 1,
@@ -305,11 +305,11 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
             )?)?
         }
         n if n.eq(OPT_MAX_HTLC_COUNT) => {
-            config.max_htlc_count.value =
+            config.max_htlc_count =
                 options_value_to_u64(OPT_MAX_HTLC_COUNT, value.as_i64().unwrap(), 1, None)?
         }
         n if n.eq(OPT_STATS_DELETE_FAILURES_AGE) => {
-            config.stats_delete_failures_age.value = options_value_to_u64(
+            config.stats_delete_failures_age = options_value_to_u64(
                 OPT_STATS_DELETE_FAILURES_AGE,
                 value.as_i64().unwrap(),
                 0,
@@ -317,7 +317,7 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
             )?
         }
         n if n.eq(OPT_STATS_DELETE_FAILURES_SIZE) => {
-            config.stats_delete_failures_size.value = options_value_to_u64(
+            config.stats_delete_failures_size = options_value_to_u64(
                 OPT_STATS_DELETE_FAILURES_SIZE,
                 value.as_i64().unwrap(),
                 0,
@@ -325,7 +325,7 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
             )?
         }
         n if n.eq(OPT_STATS_DELETE_SUCCESSES_AGE) => {
-            config.stats_delete_successes_age.value = options_value_to_u64(
+            config.stats_delete_successes_age = options_value_to_u64(
                 OPT_STATS_DELETE_SUCCESSES_AGE,
                 value.as_i64().unwrap(),
                 0,
@@ -333,7 +333,7 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
             )?
         }
         n if n.eq(OPT_STATS_DELETE_SUCCESSES_SIZE) => {
-            config.stats_delete_successes_size.value = options_value_to_u64(
+            config.stats_delete_successes_size = options_value_to_u64(
                 OPT_STATS_DELETE_SUCCESSES_SIZE,
                 value.as_i64().unwrap(),
                 0,

@@ -40,7 +40,7 @@ pub async fn waitsendpay_response(
     match rpc
         .call_typed(&WaitsendpayRequest {
             payment_hash,
-            timeout: Some(config.timeoutpay.value as u32),
+            timeout: Some(config.timeoutpay as u32),
             partid: None,
             groupid: None,
         })

@@ -400,7 +400,7 @@ async fn next_route(
             }
             let max_hops = match job.maxhops {
                 Some(h) => h + 1,
-                None => config.maxhops.value + 1,
+                None => config.maxhops + 1,
             };
             match job.sat_direction {
                 SatDirection::Pull => {
@@ -567,10 +567,10 @@ async fn health_check(
                 )?;
                 my_sleep(600, job_states.clone(), task).await;
                 Ok(Some(true))
-            } else if get_total_htlc_count(&channel) > config.max_htlc_count.value {
+            } else if get_total_htlc_count(&channel) > config.max_htlc_count {
                 info!(
                     "{}/{}: already more than {} pending htlcs. Taking a break...",
-                    task.chan_id, task.task_id, config.max_htlc_count.value
+                    task.chan_id, task.task_id, config.max_htlc_count
                 );
                 channel_jobstate_update(
                     job_states.clone(),
@@ -675,11 +675,11 @@ fn build_candidatelist(
 
     let depleteuptopercent = match job.depleteuptopercent {
         Some(dp) => dp,
-        None => config.depleteuptopercent.value,
+        None => config.depleteuptopercent,
     };
     let depleteuptoamount = match job.depleteuptoamount {
         Some(dp) => dp,
-        None => config.depleteuptoamount.value,
+        None => config.depleteuptoamount,
     };
 
     for channel in peer_channels.values() {
@@ -693,7 +693,7 @@ fn build_candidatelist(
                     Some(c) => c.iter().any(|c| *c == scid),
                     None => true,
                 }
-                && scid.block() <= blockheight - config.candidates_min_age.value
+                && scid.block() <= blockheight - config.candidates_min_age
             {
                 let chan_in_ppm = match get_remote_feeppm_effective(
                     channel,
@@ -745,7 +745,7 @@ fn build_candidatelist(
                             && job.maxppm as u64 >= chan_in_ppm
                     }
                 } && !tempbans.contains_key(&scid)
-                    && get_total_htlc_count(channel) <= config.max_htlc_count.value
+                    && get_total_htlc_count(channel) <= config.max_htlc_count
                 {
                     candidatelist.push(scid);
                 }

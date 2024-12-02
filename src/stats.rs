@@ -57,13 +57,8 @@ pub async fn slingstats(
         is_summary = true;
     }
 
-    let stats_delete_successes_age = plugin
-        .state()
-        .config
-        .lock()
-        .stats_delete_successes_age
-        .value;
-    let stats_delete_failures_age = plugin.state().config.lock().stats_delete_failures_age.value;
+    let stats_delete_successes_age = plugin.state().config.lock().stats_delete_successes_age;
+    let stats_delete_failures_age = plugin.state().config.lock().stats_delete_failures_age;
     let peer_channels = plugin.state().peer_channels.lock().clone();
 
     if is_summary {

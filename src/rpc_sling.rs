@@ -57,7 +57,7 @@ pub async fn slinggo(
 
     let default_paralleljobs;
     {
-        default_paralleljobs = p.state().config.lock().paralleljobs.value
+        default_paralleljobs = p.state().config.lock().paralleljobs
     }
 
     match args {

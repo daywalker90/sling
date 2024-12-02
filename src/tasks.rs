@@ -32,7 +32,7 @@ pub async fn refresh_aliasmap(plugin: Plugin<PluginState>) -> Result<(), Error> 
     {
         let config = plugin.state().config.lock();
         rpc_path = config.rpc_path.clone();
-        interval = config.refresh_aliasmap_interval.value;
+        interval = config.refresh_aliasmap_interval;
     }
     let mut rpc = ClnRpc::new(&rpc_path).await?;
 
@@ -57,7 +57,7 @@ pub async fn refresh_listpeerchannels_loop(plugin: Plugin<PluginState>) -> Resul
     let interval;
     {
         let config = plugin.state().config.lock();
-        interval = config.refresh_peers_interval.value;
+        interval = config.refresh_peers_interval;
     }
 
     loop {
@@ -100,7 +100,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
     {
         let config = plugin.state().config.lock();
         // rpc_path = config.rpc_path.clone();
-        interval = config.refresh_gossmap_interval.value;
+        interval = config.refresh_gossmap_interval;
         my_pubkey = config.pubkey;
         sling_dir = config.sling_dir.clone();
     }
@@ -290,7 +290,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
 pub async fn refresh_liquidity(plugin: Plugin<PluginState>) -> Result<(), Error> {
     loop {
         {
-            let interval = plugin.state().config.lock().reset_liquidity_interval.value;
+            let interval = plugin.state().config.lock().reset_liquidity_interval;
             let now = Instant::now();
             plugin.state().graph.lock().refresh_liquidity(interval);
             info!(
@@ -352,26 +352,13 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     Err(e) => debug!("{}: probably no failure stats yet: {:?}", scid, e),
                 };
             }
-            let stats_delete_successes_age = plugin
-                .state()
-                .config
-                .lock()
-                .stats_delete_successes_age
-                .value;
-            let stats_delete_failures_age =
-                plugin.state().config.lock().stats_delete_failures_age.value;
-            let stats_delete_successes_size = plugin
-                .state()
-                .config
-                .lock()
-                .stats_delete_successes_size
-                .value;
-            let stats_delete_failures_size = plugin
-                .state()
-                .config
-                .lock()
-                .stats_delete_failures_size
-                .value;
+            let stats_delete_successes_age =
+                plugin.state().config.lock().stats_delete_successes_age;
+            let stats_delete_failures_age = plugin.state().config.lock().stats_delete_failures_age;
+            let stats_delete_successes_size =
+                plugin.state().config.lock().stats_delete_successes_size;
+            let stats_delete_failures_size =
+                plugin.state().config.lock().stats_delete_failures_size;
             let sys_time_now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
