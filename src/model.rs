@@ -298,6 +298,7 @@ pub enum JobMessage {
     Stopped,
     Error,
     NoJob,
+    NoAlias,
 }
 impl Display for JobMessage {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
@@ -319,6 +320,7 @@ impl Display for JobMessage {
             JobMessage::Stopped => write!(f, "Stopped"),
             JobMessage::Error => write!(f, "Error"),
             JobMessage::NoJob => write!(f, "NoJob"),
+            JobMessage::NoAlias => write!(f, "NoAlias"),
         }
     }
 }
@@ -358,6 +360,7 @@ pub struct DirectedChannelState {
     pub last_update: u32,
     pub liquidity: u64,
     pub liquidity_age: u64,
+    pub private: bool,
 }
 impl DirectedChannelState {
     pub fn update(&mut self, channel_update: &ChannelUpdate) {
@@ -464,6 +467,7 @@ impl LnGraph {
                     //     &dir_chan_state.destination.to_string()[..5],
                     // );
                     dir_chan_state.active
+                        && (!dir_chan_state.private || dir_chan_state.scid_alias.is_some())
                         && dir_chan_state.last_update >= (twow_ago as u32)
                         && !exclude_graph
                             .exclude_chans

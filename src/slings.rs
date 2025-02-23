@@ -540,10 +540,27 @@ async fn health_check(
     tempbans: &HashMap<ShortChannelId, u64>,
 ) -> Result<Option<bool>, Error> {
     let job_states = plugin.state().job_state.clone();
+
     let our_listpeers_channel =
         get_normal_channel_from_listpeerchannels(peer_channels, &task.chan_id);
     if let Some(channel) = our_listpeers_channel {
         if is_channel_normal(&channel) {
+            if !check_private_alias(plugin, &channel, config, task, job, other_peer) {
+                info!(
+                    "{}/{}: private channel without alias. Taking a break...",
+                    task.chan_id, task.task_id
+                );
+                channel_jobstate_update(
+                    job_states.clone(),
+                    task,
+                    &JobMessage::NoAlias,
+                    true,
+                    false,
+                )?;
+                my_sleep(600, job_states.clone(), task).await;
+                return Ok(Some(true));
+            }
+
             if job.is_balanced(&channel, &task.chan_id)
                 || match job.sat_direction {
                     SatDirection::Pull => {
@@ -660,6 +677,35 @@ async fn health_check(
         )?;
         Ok(Some(false))
     }
+}
+
+fn check_private_alias(
+    plugin: &Plugin<PluginState>,
+    channel: &ListpeerchannelsChannels,
+    config: &Config,
+    task: &Task,
+    job: &Job,
+    other_peer: PublicKey,
+) -> bool {
+    let graph = plugin.state().graph.lock();
+    if let Some(private) = channel.private {
+        if private
+            && graph
+                .get_channel(
+                    match job.sat_direction {
+                        SatDirection::Pull => &other_peer,
+                        SatDirection::Push => &config.pubkey,
+                    },
+                    &task.chan_id,
+                )
+                .unwrap()
+                .scid_alias
+                .is_none()
+        {
+            return false;
+        }
+    }
+    true
 }
 
 fn build_candidatelist(

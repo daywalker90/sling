@@ -9,7 +9,7 @@ use cln_plugin::Plugin;
 use cln_rpc::{
     model::{
         requests::{ListnodesRequest, ListpeerchannelsRequest},
-        responses::ListpeerchannelsChannelsState,
+        responses::{ListpeerchannelsChannelsAlias, ListpeerchannelsChannelsState},
     },
     primitives::{Amount, ShortChannelId},
     ClnRpc,
@@ -147,6 +147,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     if !private {
                         continue;
                     }
+                    let (local_alias, remote_alias) = check_alias_scids(&chan.alias);
                     let updates = if let Some(upd) = &chan.updates {
                         upd
                     } else {
@@ -158,8 +159,8 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                                 short_channel_id: chan.short_channel_id.unwrap(),
                                 direction: chan.direction.unwrap(),
                             }) {
-                                dir_chan_state.scid_alias =
-                                    Some(chan.alias.as_ref().unwrap().local.unwrap())
+                                dir_chan_state.scid_alias = local_alias;
+                                dir_chan_state.private = true;
                             }
                         }
                         if let Some(dir_chans) = lngraph.graph.get_mut(&chan.peer_id) {
@@ -167,8 +168,8 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                                 short_channel_id: chan.short_channel_id.unwrap(),
                                 direction: chan.direction.unwrap() ^ 1,
                             }) {
-                                dir_chan_state.scid_alias =
-                                    Some(chan.alias.as_ref().unwrap().remote.unwrap())
+                                dir_chan_state.scid_alias = remote_alias;
+                                dir_chan_state.private = true;
                             }
                         }
                         continue;
@@ -189,7 +190,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                             DirectedChannelState {
                                 source: my_pubkey,
                                 destination: chan.peer_id,
-                                scid_alias: Some(chan.alias.as_ref().unwrap().local.unwrap()),
+                                scid_alias: local_alias,
                                 fee_per_millionth: updates.local.fee_proportional_millionths,
                                 base_fee_millisatoshi: Amount::msat(&updates.local.fee_base_msat)
                                     as u32,
@@ -201,6 +202,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                                 last_update: timestamp as u32,
                                 liquidity: chan.spendable_msat.unwrap().msat(),
                                 liquidity_age: timestamp,
+                                private: true,
                             },
                         );
                         lngraph.graph.entry(chan.peer_id).or_default().insert(
@@ -211,7 +213,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                             DirectedChannelState {
                                 source: chan.peer_id,
                                 destination: my_pubkey,
-                                scid_alias: Some(chan.alias.as_ref().unwrap().remote.unwrap()),
+                                scid_alias: remote_alias,
                                 fee_per_millionth: remote_updates.fee_proportional_millionths,
                                 base_fee_millisatoshi: Amount::msat(&remote_updates.fee_base_msat)
                                     as u32,
@@ -223,6 +225,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                                 last_update: timestamp as u32,
                                 liquidity: chan.receivable_msat.unwrap().msat(),
                                 liquidity_age: timestamp,
+                                private: true,
                             },
                         );
                     }
@@ -260,6 +263,26 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
         }
         time::sleep(Duration::from_secs(interval)).await;
     }
+}
+
+fn check_alias_scids(
+    scid_alias: &Option<ListpeerchannelsChannelsAlias>,
+) -> (Option<ShortChannelId>, Option<ShortChannelId>) {
+    let mut local_alias = None;
+    let mut remote_alias = None;
+    if let Some(alias) = scid_alias {
+        if let Some(local) = alias.local {
+            if local.txindex() != 0 || local.outnum() != 0 {
+                local_alias = Some(local)
+            }
+        }
+        if let Some(remote) = alias.remote {
+            if remote.txindex() != 0 || remote.outnum() != 0 {
+                remote_alias = Some(remote)
+            }
+        }
+    }
+    (local_alias, remote_alias)
 }
 
 pub async fn refresh_liquidity(plugin: Plugin<PluginState>) -> Result<(), Error> {

@@ -268,6 +268,7 @@ pub async fn read_gossip_store(plugin: Plugin<PluginState>, offset: &mut u64) ->
                         liquidity: chan_update.htlc_maximum_msat.msat() / 2,
                         liquidity_age: timestamp,
                         last_update: chan_update.last_update,
+                        private: false,
                     };
                     if let Some(graph_node_channels) = lngraph.graph.get_mut(&source) {
                         if let Some(old_dir_chan_state) = graph_node_channels.get_mut(&dir_chan) {
