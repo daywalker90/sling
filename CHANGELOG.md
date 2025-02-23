@@ -1,5 +1,11 @@
 # Changelog
 
+## [3.0.1] - 2025-02-23
+
+### Fixed
+
+- no longer panic when private channels have missing aliases or bogus entries (still not possible to rebalance these channels without the correct data from cln)
+
 ## [3.0.0] - 2024-12-10
 
 ### Added

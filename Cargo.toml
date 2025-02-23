@@ -1,6 +1,6 @@
 [package]
 name = "sling"
-version = "3.0.0"
+version = "3.0.1"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -23,10 +23,10 @@ cln-rpc = "0.3"
 cln-plugin = "0.3"
 # cln-plugin = { path="../lightning/plugins/", version = "^0.2" }
 
-tabled = "0.17"
+tabled = "0.18"
 num-format = "0.4"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"]}
-rand = "0.8"
+rand = "0.9"
 parking_lot = "0.12"
 bitcoin = "0.31"
 

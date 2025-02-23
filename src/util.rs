@@ -35,7 +35,7 @@ use cln_plugin::Plugin;
 use cln_rpc::primitives::ShortChannelId;
 use log::{debug, info, warn};
 
-use rand::thread_rng;
+use rand::rng;
 use tokio::fs::{self, File};
 
 use tokio::time::{self, Instant};
@@ -255,7 +255,7 @@ pub async fn create_sling_dir(sling_dir: &PathBuf) -> Result<(), Error> {
 
 pub fn get_preimage_paymend_hash_pair() -> (String, Sha256) {
     let mut preimage = [0u8; 32];
-    thread_rng().fill(&mut preimage[..]);
+    rng().fill(&mut preimage[..]);
 
     let pi_str = serialize_hex(&preimage);
 
