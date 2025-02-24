@@ -1,5 +1,11 @@
 # Changelog
 
+## [3.0.2] - 2025-02-24
+
+### Fixed
+
+- support modified cln clients with prefix in version strings
+
 ## [3.0.1] - 2025-02-23
 
 ### Fixed
