@@ -442,7 +442,10 @@ pub fn get_remote_feeppm_effective(
 }
 
 pub fn at_or_above_version(my_version: &str, min_version: &str) -> Result<bool, Error> {
-    let clean_start_my_version = my_version.trim_start_matches('v');
+    let clean_start_my_version = my_version
+        .split_once('v')
+        .ok_or_else(|| anyhow!("Could not find v in version string"))?
+        .1;
     let full_clean_my_version: String = clean_start_my_version
         .chars()
         .take_while(|x| x.is_ascii_digit() || *x == '.')
