@@ -1,8 +1,8 @@
 use bitcoin::secp256k1::hashes::Hash;
 use bitcoin::secp256k1::hashes::HashEngine;
 use cln_rpc::model::responses::ListpeerchannelsChannels;
-use cln_rpc::model::responses::ListpeerchannelsChannelsState;
 use cln_rpc::primitives::Amount;
+use cln_rpc::primitives::ChannelState;
 use cln_rpc::primitives::PublicKey;
 use cln_rpc::primitives::Sha256;
 use parking_lot::Mutex;
@@ -309,8 +309,7 @@ pub fn feeppm_effective_from_amts(amount_msat_start: u64, amount_msat_end: u64) 
 pub fn is_channel_normal(channel: &ListpeerchannelsChannels) -> bool {
     matches!(
         channel.state,
-        ListpeerchannelsChannelsState::CHANNELD_NORMAL
-            | ListpeerchannelsChannelsState::CHANNELD_AWAITING_SPLICE
+        ChannelState::CHANNELD_NORMAL | ChannelState::CHANNELD_AWAITING_SPLICE
     )
 }
 
@@ -320,8 +319,8 @@ pub fn get_normal_channel_from_listpeerchannels(
 ) -> Option<ListpeerchannelsChannels> {
     match peer_channels.get(chan_id) {
         Some(chan) => match chan.state {
-            ListpeerchannelsChannelsState::CHANNELD_NORMAL => Some(chan.clone()),
-            ListpeerchannelsChannelsState::CHANNELD_AWAITING_SPLICE => Some(chan.clone()),
+            ChannelState::CHANNELD_NORMAL => Some(chan.clone()),
+            ChannelState::CHANNELD_AWAITING_SPLICE => Some(chan.clone()),
             _ => None,
         },
         None => None,

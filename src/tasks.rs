@@ -9,9 +9,9 @@ use cln_plugin::Plugin;
 use cln_rpc::{
     model::{
         requests::{ListnodesRequest, ListpeerchannelsRequest},
-        responses::{ListpeerchannelsChannelsAlias, ListpeerchannelsChannelsState},
+        responses::ListpeerchannelsChannelsAlias,
     },
-    primitives::{Amount, ShortChannelId},
+    primitives::{Amount, ChannelState, ShortChannelId},
     ClnRpc,
 };
 
@@ -179,8 +179,8 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     } else {
                         continue;
                     };
-                    if chan.state == ListpeerchannelsChannelsState::CHANNELD_NORMAL
-                        || chan.state == ListpeerchannelsChannelsState::CHANNELD_AWAITING_SPLICE
+                    if chan.state == ChannelState::CHANNELD_NORMAL
+                        || chan.state == ChannelState::CHANNELD_AWAITING_SPLICE
                     {
                         lngraph.graph.entry(my_pubkey).or_default().insert(
                             DirectedChannel {
@@ -235,8 +235,8 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                         v.scid_alias.is_none()
                             || v.scid_alias.is_some()
                                 && if let Some(c) = local_channels.get(&k.short_channel_id) {
-                                    c.state == ListpeerchannelsChannelsState::CHANNELD_NORMAL ||
-                                c.state == ListpeerchannelsChannelsState::CHANNELD_AWAITING_SPLICE
+                                    c.state == ChannelState::CHANNELD_NORMAL
+                                        || c.state == ChannelState::CHANNELD_AWAITING_SPLICE
                                 } else {
                                     false
                                 }

@@ -3,7 +3,7 @@ use anyhow::{anyhow, Error};
 use cln_plugin::Plugin;
 
 use cln_rpc::model::requests::SendpayRoute;
-use cln_rpc::model::responses::{ListpeerchannelsChannels, ListpeerchannelsChannelsState};
+use cln_rpc::model::responses::ListpeerchannelsChannels;
 use cln_rpc::primitives::*;
 
 use log::{debug, info, warn};
@@ -732,8 +732,7 @@ fn build_candidatelist(
         if let Some(scid) = channel.short_channel_id {
             if matches!(
                 channel.state,
-                ListpeerchannelsChannelsState::CHANNELD_NORMAL
-                    | ListpeerchannelsChannelsState::CHANNELD_AWAITING_SPLICE
+                ChannelState::CHANNELD_NORMAL | ChannelState::CHANNELD_AWAITING_SPLICE
             ) && channel.peer_connected
                 && match custom_candidates {
                     Some(c) => c.iter().any(|c| *c == scid),
