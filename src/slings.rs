@@ -541,119 +541,10 @@ async fn health_check(
 ) -> Result<Option<bool>, Error> {
     let job_states = plugin.state().job_state.clone();
 
-    let our_listpeers_channel =
-        get_normal_channel_from_listpeerchannels(peer_channels, &task.chan_id);
-    if let Some(channel) = our_listpeers_channel {
-        if is_channel_normal(&channel) {
-            if !check_private_alias(plugin, &channel, config, task, job, other_peer) {
-                info!(
-                    "{}/{}: private channel without alias. Taking a break...",
-                    task.chan_id, task.task_id
-                );
-                channel_jobstate_update(
-                    job_states.clone(),
-                    task,
-                    &JobMessage::NoAlias,
-                    true,
-                    false,
-                )?;
-                my_sleep(600, job_states.clone(), task).await;
-                return Ok(Some(true));
-            }
-
-            if job.is_balanced(&channel, &task.chan_id)
-                || match job.sat_direction {
-                    SatDirection::Pull => {
-                        Amount::msat(&channel.receivable_msat.unwrap()) < job.amount_msat
-                    }
-                    SatDirection::Push => {
-                        Amount::msat(&channel.spendable_msat.unwrap()) < job.amount_msat
-                    }
-                }
-            {
-                info!(
-                    "{}/{}: already balanced. Taking a break...",
-                    task.chan_id, task.task_id
-                );
-                channel_jobstate_update(
-                    job_states.clone(),
-                    task,
-                    &JobMessage::Balanced,
-                    true,
-                    false,
-                )?;
-                my_sleep(600, job_states.clone(), task).await;
-                Ok(Some(true))
-            } else if get_total_htlc_count(&channel) > config.max_htlc_count {
-                info!(
-                    "{}/{}: already more than {} pending htlcs. Taking a break...",
-                    task.chan_id, task.task_id, config.max_htlc_count
-                );
-                channel_jobstate_update(
-                    job_states.clone(),
-                    task,
-                    &JobMessage::HTLCcapped,
-                    true,
-                    false,
-                )?;
-                my_sleep(10, job_states.clone(), task).await;
-                Ok(Some(true))
-            } else {
-                match peer_channels.values().find(|x| x.peer_id == other_peer) {
-                    Some(p) => {
-                        if !p.peer_connected {
-                            info!(
-                                "{}/{}: not connected. Taking a break...",
-                                task.chan_id, task.task_id
-                            );
-                            channel_jobstate_update(
-                                job_states.clone(),
-                                task,
-                                &JobMessage::Disconnected,
-                                true,
-                                false,
-                            )?;
-                            my_sleep(60, job_states.clone(), task).await;
-                            Ok(Some(true))
-                        } else if tempbans.contains_key(&task.chan_id) {
-                            info!(
-                                "{}/{}: Job peer not ready. Taking a break...",
-                                task.chan_id, task.task_id
-                            );
-                            channel_jobstate_update(
-                                job_states.clone(),
-                                task,
-                                &JobMessage::PeerNotReady,
-                                true,
-                                false,
-                            )?;
-                            my_sleep(20, job_states.clone(), task).await;
-                            Ok(Some(true))
-                        } else {
-                            Ok(None)
-                        }
-                    }
-                    None => {
-                        channel_jobstate_update(
-                            job_states.clone(),
-                            task,
-                            &JobMessage::PeerNotFound,
-                            false,
-                            true,
-                        )?;
-                        warn!(
-                            "{}/{}: peer not found. Stopping job.",
-                            task.chan_id, task.task_id
-                        );
-                        Ok(Some(false))
-                    }
-                }
-            }
-        } else {
-            warn!(
-                "{}/{}: not in CHANNELD_NORMAL state. Stopping Job.",
-                task.chan_id, task.task_id
-            );
+    let channel = match get_normal_channel_from_listpeerchannels(peer_channels, &task.chan_id) {
+        Ok(o) => o,
+        Err(e) => {
+            warn!("{}/{}: {}. Stopping Job.", task.chan_id, task.task_id, e);
             channel_jobstate_update(
                 job_states.clone(),
                 task,
@@ -661,21 +552,97 @@ async fn health_check(
                 false,
                 true,
             )?;
-            Ok(Some(false))
+            return Ok(Some(false));
         }
-    } else {
-        warn!(
-            "{}/{}: not found. Stopping Job.",
+    };
+
+    if !check_private_alias(plugin, &channel, config, task, job, other_peer) {
+        info!(
+            "{}/{}: private channel without alias. Taking a break...",
             task.chan_id, task.task_id
+        );
+        channel_jobstate_update(job_states.clone(), task, &JobMessage::NoAlias, true, false)?;
+        my_sleep(600, job_states.clone(), task).await;
+        return Ok(Some(true));
+    }
+
+    if job.is_balanced(&channel, &task.chan_id)
+        || match job.sat_direction {
+            SatDirection::Pull => Amount::msat(&channel.receivable_msat.unwrap()) < job.amount_msat,
+            SatDirection::Push => Amount::msat(&channel.spendable_msat.unwrap()) < job.amount_msat,
+        }
+    {
+        info!(
+            "{}/{}: already balanced. Taking a break...",
+            task.chan_id, task.task_id
+        );
+        channel_jobstate_update(job_states.clone(), task, &JobMessage::Balanced, true, false)?;
+        my_sleep(600, job_states.clone(), task).await;
+        Ok(Some(true))
+    } else if get_total_htlc_count(&channel) > config.max_htlc_count {
+        info!(
+            "{}/{}: already more than {} pending htlcs. Taking a break...",
+            task.chan_id, task.task_id, config.max_htlc_count
         );
         channel_jobstate_update(
             job_states.clone(),
             task,
-            &JobMessage::ChanNotNormal,
-            false,
+            &JobMessage::HTLCcapped,
             true,
+            false,
         )?;
-        Ok(Some(false))
+        my_sleep(10, job_states.clone(), task).await;
+        Ok(Some(true))
+    } else {
+        match peer_channels.values().find(|x| x.peer_id == other_peer) {
+            Some(p) => {
+                if !p.peer_connected {
+                    info!(
+                        "{}/{}: not connected. Taking a break...",
+                        task.chan_id, task.task_id
+                    );
+                    channel_jobstate_update(
+                        job_states.clone(),
+                        task,
+                        &JobMessage::Disconnected,
+                        true,
+                        false,
+                    )?;
+                    my_sleep(60, job_states.clone(), task).await;
+                    Ok(Some(true))
+                } else if tempbans.contains_key(&task.chan_id) {
+                    info!(
+                        "{}/{}: Job peer not ready. Taking a break...",
+                        task.chan_id, task.task_id
+                    );
+                    channel_jobstate_update(
+                        job_states.clone(),
+                        task,
+                        &JobMessage::PeerNotReady,
+                        true,
+                        false,
+                    )?;
+                    my_sleep(20, job_states.clone(), task).await;
+                    Ok(Some(true))
+                } else {
+                    Ok(None)
+                }
+            }
+            None => {
+                channel_jobstate_update(
+                    job_states.clone(),
+                    task,
+                    &JobMessage::PeerNotFound,
+                    false,
+                    true,
+                )?;
+                warn!(
+                    "{}/{}: peer not found. Stopping job.",
+                    task.chan_id, task.task_id
+                );
+                Ok(Some(false))
+            }
+        }
     }
 }
 
@@ -730,10 +697,8 @@ fn build_candidatelist(
 
     for channel in peer_channels.values() {
         if let Some(scid) = channel.short_channel_id {
-            if matches!(
-                channel.state,
-                ChannelState::CHANNELD_NORMAL | ChannelState::CHANNELD_AWAITING_SPLICE
-            ) && channel.peer_connected
+            if is_channel_normal(channel).is_ok()
+                && channel.peer_connected
                 && match custom_candidates {
                     Some(c) => c.iter().any(|c| *c == scid),
                     None => true,

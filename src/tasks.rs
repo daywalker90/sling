@@ -7,10 +7,7 @@ use std::{
 use anyhow::Error;
 use cln_plugin::Plugin;
 use cln_rpc::{
-    model::{
-        requests::{ListnodesRequest, ListpeerchannelsRequest},
-        responses::ListpeerchannelsChannelsAlias,
-    },
+    model::requests::{ListnodesRequest, ListpeerchannelsRequest},
     primitives::{Amount, ChannelState, ShortChannelId},
     ClnRpc,
 };
@@ -147,7 +144,8 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     if !private {
                         continue;
                     }
-                    let (local_alias, remote_alias) = check_alias_scids(&chan.alias);
+                    let local_alias = chan.alias.as_ref().and_then(|l| l.local);
+                    let remote_alias = chan.alias.as_ref().and_then(|l| l.remote);
                     let updates = if let Some(upd) = &chan.updates {
                         upd
                     } else {
@@ -263,26 +261,6 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
         }
         time::sleep(Duration::from_secs(interval)).await;
     }
-}
-
-fn check_alias_scids(
-    scid_alias: &Option<ListpeerchannelsChannelsAlias>,
-) -> (Option<ShortChannelId>, Option<ShortChannelId>) {
-    let mut local_alias = None;
-    let mut remote_alias = None;
-    if let Some(alias) = scid_alias {
-        if let Some(local) = alias.local {
-            if local.txindex() != 0 || local.outnum() != 0 {
-                local_alias = Some(local)
-            }
-        }
-        if let Some(remote) = alias.remote {
-            if remote.txindex() != 0 || remote.outnum() != 0 {
-                remote_alias = Some(remote)
-            }
-        }
-    }
-    (local_alias, remote_alias)
 }
 
 pub async fn refresh_liquidity(plugin: Plugin<PluginState>) -> Result<(), Error> {

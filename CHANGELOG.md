@@ -1,5 +1,11 @@
 # Changelog
 
+## [3.0.3] - Unreleased
+
+### Changed
+
+- check private channels for existing aliases when adding a job
+
 ## [3.0.2] - 2025-02-24
 
 ### Fixed

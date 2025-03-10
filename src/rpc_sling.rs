@@ -24,17 +24,11 @@ pub async fn slingjob(
     let (chan_id, job) = parse_job(v).await?;
 
     let peer_channels = p.state().peer_channels.lock().clone();
-    let our_listpeers_channel = get_normal_channel_from_listpeerchannels(&peer_channels, &chan_id);
+    let _our_listpeers_channel =
+        get_normal_channel_from_listpeerchannels(&peer_channels, &chan_id)?;
 
-    if our_listpeers_channel.is_some() {
-        write_job(p.clone(), sling_dir, chan_id, Some(job), false).await?;
-        Ok(json!({"result":"success"}))
-    } else {
-        Err(anyhow!(
-            "Could not find channel or not in CHANNELD_NORMAL state: {}",
-            chan_id
-        ))
-    }
+    write_job(p.clone(), sling_dir, chan_id, Some(job), false).await?;
+    Ok(json!({"result":"success"}))
 }
 
 pub async fn slinggo(

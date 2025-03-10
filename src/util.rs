@@ -168,7 +168,7 @@ pub async fn write_job(
     let mut jobs_to_remove = HashSet::new();
     if !peer_channels.is_empty() {
         for chan_id in jobs.keys() {
-            if get_normal_channel_from_listpeerchannels(&peer_channels, chan_id).is_none() {
+            if get_normal_channel_from_listpeerchannels(&peer_channels, chan_id).is_err() {
                 jobs_to_remove.insert(*chan_id);
             }
         }
@@ -306,24 +306,48 @@ pub fn feeppm_effective_from_amts(amount_msat_start: u64, amount_msat_end: u64) 
         as u32
 }
 
-pub fn is_channel_normal(channel: &ListpeerchannelsChannels) -> bool {
-    matches!(
+pub fn is_channel_normal(channel: &ListpeerchannelsChannels) -> Result<(), Error> {
+    if !matches!(
         channel.state,
         ChannelState::CHANNELD_NORMAL | ChannelState::CHANNELD_AWAITING_SPLICE
-    )
+    ) {
+        return Err(anyhow!(
+            "Not in CHANNELD_NORMAL or CHANNELD_AWAITING_SPLICE state!"
+        ));
+    }
+
+    if let Some(private) = channel.private {
+        if private {
+            let aliases = channel
+                .alias
+                .as_ref()
+                .ok_or_else(|| anyhow!("Missing aliases for private channel"))?;
+            if aliases.local.is_none() {
+                return Err(anyhow!("Missing local channel alias for private channel"));
+            }
+            if aliases.remote.is_none() {
+                return Err(anyhow!("Missing remote alias for private channel"));
+            }
+            Ok(())
+        } else {
+            Ok(())
+        }
+    } else {
+        Ok(())
+    }
 }
 
 pub fn get_normal_channel_from_listpeerchannels(
     peer_channels: &HashMap<ShortChannelId, ListpeerchannelsChannels>,
     chan_id: &ShortChannelId,
-) -> Option<ListpeerchannelsChannels> {
-    match peer_channels.get(chan_id) {
-        Some(chan) => match chan.state {
-            ChannelState::CHANNELD_NORMAL => Some(chan.clone()),
-            ChannelState::CHANNELD_AWAITING_SPLICE => Some(chan.clone()),
-            _ => None,
-        },
-        None => None,
+) -> Result<ListpeerchannelsChannels, Error> {
+    if let Some(chan) = peer_channels.get(chan_id) {
+        match is_channel_normal(chan) {
+            Ok(_) => Ok(chan.clone()),
+            Err(e) => Err(e),
+        }
+    } else {
+        Err(anyhow!("Channel not found"))
     }
 }
 
@@ -332,7 +356,7 @@ pub fn get_all_normal_channels_from_listpeerchannels(
 ) -> HashMap<ShortChannelId, PublicKey> {
     let mut scid_peer_map = HashMap::new();
     for channel in peer_channels.values() {
-        if is_channel_normal(channel) {
+        if is_channel_normal(channel).is_ok() {
             scid_peer_map.insert(channel.short_channel_id.unwrap(), channel.peer_id);
         }
     }
