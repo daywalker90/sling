@@ -288,7 +288,7 @@ pub async fn read_gossip_store(plugin: Plugin<PluginState>, offset: &mut u64) ->
 
     channel_anns.retain(|scid, chan_ann| {
         let has_channel = |node| {
-            lngraph.graph.get(node).map_or(false, |channels| {
+            lngraph.graph.get(node).is_some_and(|channels| {
                 channels.contains_key(&DirectedChannel {
                     short_channel_id: *scid,
                     direction: 0,
