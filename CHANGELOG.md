@@ -1,6 +1,6 @@
 # Changelog
 
-## [3.0.3] - Unreleased
+## [3.0.3] - 2025-03-11
 
 ### Changed
 
