@@ -265,6 +265,7 @@ async fn next_route(
         if !c.is_empty() {
             candidatelist = build_candidatelist(
                 peer_channels,
+                task,
                 job,
                 &graph,
                 tempbans,
@@ -275,6 +276,7 @@ async fn next_route(
         } else {
             candidatelist = build_candidatelist(
                 peer_channels,
+                task,
                 job,
                 &graph,
                 tempbans,
@@ -286,6 +288,7 @@ async fn next_route(
     } else {
         candidatelist = build_candidatelist(
             peer_channels,
+            task,
             job,
             &graph,
             tempbans,
@@ -685,8 +688,10 @@ fn check_private_alias(
     true
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_candidatelist(
     peer_channels: &HashMap<ShortChannelId, ListpeerchannelsChannels>,
+    task: &Task,
     job: &Job,
     graph: &LnGraph,
     tempbans: &HashMap<ShortChannelId, u64>,
@@ -706,71 +711,193 @@ fn build_candidatelist(
     };
 
     for channel in peer_channels.values() {
-        if let Some(scid) = channel.short_channel_id {
-            if is_channel_normal(channel).is_ok()
-                && channel.peer_connected
-                && match custom_candidates {
-                    Some(c) => c.iter().any(|c| *c == scid),
-                    None => true,
-                }
-                && scid.block() <= blockheight - config.candidates_min_age
-            {
-                let chan_in_ppm = match get_remote_feeppm_effective(
-                    channel,
-                    graph,
-                    scid,
-                    job.amount_msat,
-                    &config.version,
-                ) {
-                    Ok(o) => o,
-                    Err(_) => continue,
-                };
+        let scid = if let Some(scid) = channel.short_channel_id {
+            scid
+        } else {
+            log::debug!(
+                "{}/{}: build_candidatelist: channel with {} has no short_channel_id",
+                task.chan_id,
+                task.task_id,
+                channel.peer_id
+            );
+            continue;
+        };
 
-                let to_us_msat = Amount::msat(&channel.to_us_msat.unwrap());
-                let total_msat = Amount::msat(&channel.total_msat.unwrap());
-                let chan_out_ppm = feeppm_effective(
-                    channel.fee_proportional_millionths.unwrap(),
-                    Amount::msat(&channel.fee_base_msat.unwrap()) as u32,
-                    job.amount_msat,
+        if let Some(c) = custom_candidates {
+            if c.iter().any(|c| *c == scid) {
+                log::debug!(
+                    "{}/{}: build_candidatelist: found custom candidate {}",
+                    task.chan_id,
+                    task.task_id,
+                    scid
                 );
+            } else {
+                continue;
+            }
+        };
 
-                if match job.sat_direction {
-                    SatDirection::Pull => {
-                        to_us_msat
-                            > max(
-                                job.amount_msat + 10_000_000,
-                                min(
-                                    (depleteuptopercent * total_msat as f64) as u64,
-                                    depleteuptoamount,
-                                ),
-                            )
-                            && match job.outppm {
-                                Some(out) => chan_out_ppm <= out,
-                                None => true,
-                            }
+        if let Err(e) = is_channel_normal(channel) {
+            log::debug!(
+                "{}/{}: build_candidatelist: {} is not normal: {}",
+                task.chan_id,
+                task.task_id,
+                scid,
+                e
+            );
+            continue;
+        }
+
+        if !channel.peer_connected {
+            log::debug!(
+                "{}/{}: build_candidatelist: {} is not connected",
+                task.chan_id,
+                task.task_id,
+                scid
+            );
+            continue;
+        }
+
+        if scid.block() > blockheight - config.candidates_min_age {
+            log::debug!(
+                "{}/{}: build_candidatelist: {} is too new: {}>{}",
+                task.chan_id,
+                task.task_id,
+                scid,
+                scid.block(),
+                blockheight - config.candidates_min_age
+            );
+            continue;
+        }
+
+        let chan_in_ppm = match get_remote_feeppm_effective(
+            channel,
+            graph,
+            scid,
+            job.amount_msat,
+            &config.version,
+        ) {
+            Ok(o) => o,
+            Err(e) => {
+                log::debug!(
+                    "{}/{}: build_candidatelist: could not get remote feeppm for {}: {}",
+                    task.chan_id,
+                    task.task_id,
+                    scid,
+                    e
+                );
+                continue;
+            }
+        };
+
+        let to_us_msat = Amount::msat(&channel.to_us_msat.unwrap());
+        let total_msat = Amount::msat(&channel.total_msat.unwrap());
+        let chan_out_ppm = feeppm_effective(
+            channel.fee_proportional_millionths.unwrap(),
+            Amount::msat(&channel.fee_base_msat.unwrap()) as u32,
+            job.amount_msat,
+        );
+
+        match job.sat_direction {
+            SatDirection::Pull => {
+                let liquidity_target = max(
+                    job.amount_msat + 10_000_000,
+                    min(
+                        (depleteuptopercent * total_msat as f64) as u64,
+                        depleteuptoamount,
+                    ),
+                );
+                if to_us_msat <= liquidity_target {
+                    log::debug!(
+                        "{}/{}: build_candidatelist: {} does not have enough liquidity: {}<={}",
+                        task.chan_id,
+                        task.task_id,
+                        scid,
+                        to_us_msat,
+                        liquidity_target
+                    );
+                    continue;
+                }
+                if let Some(outppm) = job.outppm {
+                    if chan_out_ppm > outppm {
+                        log::debug!(
+                            "{}/{}: build_candidatelist: {} outppm is too high: {}>{}",
+                            task.chan_id,
+                            task.task_id,
+                            scid,
+                            chan_out_ppm,
+                            outppm
+                        );
+                        continue;
                     }
-                    SatDirection::Push => {
-                        total_msat - to_us_msat
-                            > max(
-                                job.amount_msat + 10_000_000,
-                                min(
-                                    (depleteuptopercent * total_msat as f64) as u64,
-                                    depleteuptoamount,
-                                ),
-                            )
-                            && match job.outppm {
-                                Some(out) => chan_out_ppm >= out,
-                                None => true,
-                            }
-                            && job.maxppm as u64 >= chan_in_ppm
-                    }
-                } && !tempbans.contains_key(&scid)
-                    && get_total_htlc_count(channel) <= config.max_htlc_count
-                {
-                    candidatelist.push(scid);
                 }
             }
+            SatDirection::Push => {
+                let liquidity_target = max(
+                    job.amount_msat + 10_000_000,
+                    min(
+                        (depleteuptopercent * total_msat as f64) as u64,
+                        depleteuptoamount,
+                    ),
+                );
+                if total_msat - to_us_msat <= liquidity_target {
+                    log::debug!(
+                        "{}/{}: build_candidatelist: {} does not have enough liquidity: {}<={}",
+                        task.chan_id,
+                        task.task_id,
+                        scid,
+                        total_msat - to_us_msat,
+                        liquidity_target
+                    );
+                    continue;
+                }
+                if let Some(outppm) = job.outppm {
+                    if chan_out_ppm < outppm {
+                        log::debug!(
+                            "{}/{}: build_candidatelist: {} outppm is too low: {}<{}",
+                            task.chan_id,
+                            task.task_id,
+                            scid,
+                            chan_out_ppm,
+                            outppm
+                        );
+                        continue;
+                    }
+                }
+                if chan_in_ppm > (job.maxppm as u64) {
+                    log::debug!(
+                        "{}/{}: build_candidatelist: {} inppm is too high: {}>{}",
+                        task.chan_id,
+                        task.task_id,
+                        scid,
+                        chan_in_ppm,
+                        job.maxppm
+                    );
+                    continue;
+                }
+            }
+        };
+
+        if tempbans.contains_key(&scid) {
+            log::debug!(
+                "{}/{}: build_candidatelist: {} is temporarily banned",
+                task.chan_id,
+                task.task_id,
+                scid
+            );
+            continue;
         }
+
+        if get_total_htlc_count(channel) > config.max_htlc_count {
+            log::debug!(
+                "{}/{}: build_candidatelist: {} has too many pending htlcs",
+                task.chan_id,
+                task.task_id,
+                scid
+            );
+            continue;
+        }
+
+        candidatelist.push(scid);
     }
 
     candidatelist

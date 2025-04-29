@@ -1,4 +1,15 @@
-# Changelog
+# Changelog,
+
+## [3.0.4] - 2025-04-29
+
+### Added
+
+- more debug logging for candidates selection
+
+### Changed
+
+- only add private channels to graph if they have an alias, remove private channels without an alias
+- lower log level to debug for repetitive graph refresh lines
 
 ## [3.0.3] - 2025-03-11
 

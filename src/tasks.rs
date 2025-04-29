@@ -137,6 +137,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     let private = if let Some(pri) = chan.private {
                         pri
                     } else {
+                        log::debug!("{:?} is missing private field", chan.short_channel_id);
                         continue;
                     };
                     if !private {
@@ -151,21 +152,41 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                         // get private channel gossip from gossip_store
                         // but we don't get the alias there
                         if let Some(dir_chans) = lngraph.graph.get_mut(&my_pubkey) {
-                            if let Some(dir_chan_state) = dir_chans.get_mut(&DirectedChannel {
+                            let dir_chan = DirectedChannel {
                                 short_channel_id: chan.short_channel_id.unwrap(),
                                 direction: chan.direction.unwrap(),
-                            }) {
-                                dir_chan_state.scid_alias = local_alias;
-                                dir_chan_state.private = true;
+                            };
+                            if let Some(dir_chan_state) = dir_chans.get_mut(&dir_chan) {
+                                if let Some(la) = local_alias {
+                                    dir_chan_state.scid_alias = Some(la);
+                                    dir_chan_state.private = true;
+                                } else {
+                                    log::debug!(
+                                        "No local alias found for private channel {:?}, removing \
+                                        channel...",
+                                        chan.short_channel_id
+                                    );
+                                    dir_chans.remove(&dir_chan);
+                                }
                             }
                         }
                         if let Some(dir_chans) = lngraph.graph.get_mut(&chan.peer_id) {
-                            if let Some(dir_chan_state) = dir_chans.get_mut(&DirectedChannel {
+                            let dir_chan = DirectedChannel {
                                 short_channel_id: chan.short_channel_id.unwrap(),
                                 direction: chan.direction.unwrap() ^ 1,
-                            }) {
-                                dir_chan_state.scid_alias = remote_alias;
-                                dir_chan_state.private = true;
+                            };
+                            if let Some(dir_chan_state) = dir_chans.get_mut(&dir_chan) {
+                                if let Some(ra) = remote_alias {
+                                    dir_chan_state.scid_alias = Some(ra);
+                                    dir_chan_state.private = true;
+                                } else {
+                                    log::debug!(
+                                        "No remote alias found for private channel {:?}, removing \
+                                        channel...",
+                                        chan.short_channel_id
+                                    );
+                                    dir_chans.remove(&dir_chan);
+                                }
                             }
                         }
                         continue;
@@ -173,57 +194,83 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     let remote_updates = if let Some(rupd) = &updates.remote {
                         rupd
                     } else {
+                        log::debug!(
+                            "{} is missing remote gossip for private channel : {:?}",
+                            chan.peer_id,
+                            chan.short_channel_id
+                        );
                         continue;
                     };
                     if chan.state == ChannelState::CHANNELD_NORMAL
                         || chan.state == ChannelState::CHANNELD_AWAITING_SPLICE
                     {
-                        lngraph.graph.entry(my_pubkey).or_default().insert(
-                            DirectedChannel {
-                                short_channel_id: chan.short_channel_id.unwrap(),
-                                direction: chan.direction.unwrap(),
-                            },
-                            DirectedChannelState {
-                                source: my_pubkey,
-                                destination: chan.peer_id,
-                                scid_alias: local_alias,
-                                fee_per_millionth: updates.local.fee_proportional_millionths,
-                                base_fee_millisatoshi: Amount::msat(&updates.local.fee_base_msat)
-                                    as u32,
-                                htlc_maximum_msat: updates.local.htlc_maximum_msat,
-                                htlc_minimum_msat: updates.local.htlc_minimum_msat,
-                                amount_msat: chan.total_msat.unwrap(),
-                                delay: updates.local.cltv_expiry_delta,
-                                active: chan.peer_connected,
-                                last_update: timestamp as u32,
-                                liquidity: chan.spendable_msat.unwrap().msat(),
-                                liquidity_age: timestamp,
-                                private: true,
-                            },
-                        );
-                        lngraph.graph.entry(chan.peer_id).or_default().insert(
-                            DirectedChannel {
-                                short_channel_id: chan.short_channel_id.unwrap(),
-                                direction: chan.direction.unwrap() ^ 1,
-                            },
-                            DirectedChannelState {
-                                source: chan.peer_id,
-                                destination: my_pubkey,
-                                scid_alias: remote_alias,
-                                fee_per_millionth: remote_updates.fee_proportional_millionths,
-                                base_fee_millisatoshi: Amount::msat(&remote_updates.fee_base_msat)
-                                    as u32,
-                                htlc_maximum_msat: remote_updates.htlc_maximum_msat,
-                                htlc_minimum_msat: remote_updates.htlc_minimum_msat,
-                                amount_msat: chan.total_msat.unwrap(),
-                                delay: remote_updates.cltv_expiry_delta,
-                                active: chan.peer_connected,
-                                last_update: timestamp as u32,
-                                liquidity: chan.receivable_msat.unwrap().msat(),
-                                liquidity_age: timestamp,
-                                private: true,
-                            },
-                        );
+                        if let Some(la) = local_alias {
+                            lngraph.graph.entry(my_pubkey).or_default().insert(
+                                DirectedChannel {
+                                    short_channel_id: chan.short_channel_id.unwrap(),
+                                    direction: chan.direction.unwrap(),
+                                },
+                                DirectedChannelState {
+                                    source: my_pubkey,
+                                    destination: chan.peer_id,
+                                    scid_alias: Some(la),
+                                    fee_per_millionth: updates.local.fee_proportional_millionths,
+                                    base_fee_millisatoshi: Amount::msat(
+                                        &updates.local.fee_base_msat,
+                                    )
+                                        as u32,
+                                    htlc_maximum_msat: updates.local.htlc_maximum_msat,
+                                    htlc_minimum_msat: updates.local.htlc_minimum_msat,
+                                    amount_msat: chan.total_msat.unwrap(),
+                                    delay: updates.local.cltv_expiry_delta,
+                                    active: chan.peer_connected,
+                                    last_update: timestamp as u32,
+                                    liquidity: chan.spendable_msat.unwrap().msat(),
+                                    liquidity_age: timestamp,
+                                    private: true,
+                                },
+                            );
+                        } else {
+                            log::debug!(
+                                "No local alias found for private channel {:?}, \
+                            not adding to graph",
+                                chan.short_channel_id
+                            );
+                        }
+
+                        if let Some(ra) = remote_alias {
+                            lngraph.graph.entry(chan.peer_id).or_default().insert(
+                                DirectedChannel {
+                                    short_channel_id: chan.short_channel_id.unwrap(),
+                                    direction: chan.direction.unwrap() ^ 1,
+                                },
+                                DirectedChannelState {
+                                    source: chan.peer_id,
+                                    destination: my_pubkey,
+                                    scid_alias: Some(ra),
+                                    fee_per_millionth: remote_updates.fee_proportional_millionths,
+                                    base_fee_millisatoshi: Amount::msat(
+                                        &remote_updates.fee_base_msat,
+                                    )
+                                        as u32,
+                                    htlc_maximum_msat: remote_updates.htlc_maximum_msat,
+                                    htlc_minimum_msat: remote_updates.htlc_minimum_msat,
+                                    amount_msat: chan.total_msat.unwrap(),
+                                    delay: remote_updates.cltv_expiry_delta,
+                                    active: chan.peer_connected,
+                                    last_update: timestamp as u32,
+                                    liquidity: chan.receivable_msat.unwrap().msat(),
+                                    liquidity_age: timestamp,
+                                    private: true,
+                                },
+                            );
+                        } else {
+                            log::debug!(
+                                "No remote alias found for private channel {:?}, \
+                            not adding to graph",
+                                chan.short_channel_id
+                            );
+                        }
                     }
                 }
                 for channels in lngraph.graph.values_mut() {
