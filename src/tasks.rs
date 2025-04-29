@@ -112,7 +112,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                 );
 
                 let mut lngraph = plugin.state().graph.lock();
-                log::info!(
+                log::debug!(
                     "{} public channels in sling graph after {}ms!",
                     lngraph
                         .graph
@@ -239,7 +239,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     })
                 }
 
-                log::info!(
+                log::debug!(
                     "{} private channels in sling graph after {}ms!",
                     lngraph
                         .graph
@@ -252,7 +252,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
 
                 lngraph.graph.retain(|_, v| !v.is_empty());
             }
-            log::info!(
+            log::debug!(
                 "Refreshed graph in {}ms!",
                 now.elapsed().as_millis().to_string()
             );
