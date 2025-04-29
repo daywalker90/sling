@@ -109,7 +109,7 @@ impl PluginState {
                 log::warn!(
                     "Could not open {}: {}. First time using sling? Creating new file.",
                     excepts_file.to_str().unwrap(),
-                    e.to_string()
+                    e
                 );
                 File::create(excepts_file.clone()).await?;
                 excepts_tostring = Vec::new();

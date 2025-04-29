@@ -50,7 +50,7 @@ pub async fn waitsendpay_response(
                 "{}/{}: Rebalance SUCCESSFULL after {}s. Sent {}sats plus {}msats fee",
                 task.chan_id,
                 task.task_id,
-                now.elapsed().as_secs().to_string(),
+                now.elapsed().as_secs(),
                 Amount::msat(&o.amount_msat.unwrap()) / 1_000,
                 Amount::msat(&o.amount_sent_msat) - Amount::msat(&o.amount_msat.unwrap()),
             );
@@ -97,7 +97,7 @@ pub async fn waitsendpay_response(
                     "{}/{}: Rebalance WAITSENDPAY_TIMEOUT failure after {}s: {}",
                     task.chan_id,
                     task.task_id,
-                    now.elapsed().as_secs().to_string(),
+                    now.elapsed().as_secs(),
                     err.message,
                 );
                 let temp_ban_route = &route[..route.len() - 1];
@@ -155,7 +155,7 @@ pub async fn waitsendpay_response(
                     "{}/{}: Rebalance failure after {}s: {} at node:{} chan:{}",
                     task.chan_id,
                     task.task_id,
-                    now.elapsed().as_secs().to_string(),
+                    now.elapsed().as_secs(),
                     err.message,
                     ws_error.erring_node,
                     ws_error.erring_channel,

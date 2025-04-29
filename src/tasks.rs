@@ -41,7 +41,7 @@ pub async fn refresh_aliasmap(plugin: Plugin<PluginState>) -> Result<(), Error> 
         }
         log::info!(
             "Refreshing alias map done in {}ms!",
-            now.elapsed().as_millis().to_string()
+            now.elapsed().as_millis()
         );
         time::sleep(Duration::from_secs(interval)).await;
     }
@@ -77,10 +77,7 @@ pub async fn refresh_listpeerchannels(plugin: &Plugin<PluginState>) -> Result<()
         .into_iter()
         .filter_map(|channel| channel.short_channel_id.map(|id| (id, channel)))
         .collect();
-    log::debug!(
-        "Peerchannels refreshed in {}ms",
-        now.elapsed().as_millis().to_string()
-    );
+    log::debug!("Peerchannels refreshed in {}ms", now.elapsed().as_millis());
     Ok(())
 }
 
@@ -108,7 +105,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                 read_gossip_store(plugin.clone(), &mut offset).await?;
                 log::debug!(
                     "Reading gossip store done after {}ms!",
-                    now.elapsed().as_millis().to_string()
+                    now.elapsed().as_millis()
                 );
 
                 let mut lngraph = plugin.state().graph.lock();
@@ -120,7 +117,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                         .flatten()
                         .filter(|(_, y)| y.scid_alias.is_none())
                         .count(),
-                    now.elapsed().as_millis().to_string()
+                    now.elapsed().as_millis()
                 );
 
                 let local_channels = plugin.state().peer_channels.lock().clone();
@@ -131,7 +128,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                 log::debug!(
                     "Got {} local channels after {}ms!",
                     local_channels.len(),
-                    now.elapsed().as_millis().to_string()
+                    now.elapsed().as_millis()
                 );
                 for chan in local_channels.values() {
                     let private = if let Some(pri) = chan.private {
@@ -294,15 +291,12 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                         .flatten()
                         .filter(|(_, y)| y.scid_alias.is_some())
                         .count(),
-                    now.elapsed().as_millis().to_string()
+                    now.elapsed().as_millis()
                 );
 
                 lngraph.graph.retain(|_, v| !v.is_empty());
             }
-            log::debug!(
-                "Refreshed graph in {}ms!",
-                now.elapsed().as_millis().to_string()
-            );
+            log::debug!("Refreshed graph in {}ms!", now.elapsed().as_millis());
         }
         time::sleep(Duration::from_secs(interval)).await;
     }
@@ -314,10 +308,7 @@ pub async fn refresh_liquidity(plugin: Plugin<PluginState>) -> Result<(), Error>
             let interval = plugin.state().config.lock().reset_liquidity_interval;
             let now = Instant::now();
             plugin.state().graph.lock().refresh_liquidity(interval);
-            log::info!(
-                "Refreshed Liquidity in {}ms!",
-                now.elapsed().as_millis().to_string()
-            );
+            log::info!("Refreshed Liquidity in {}ms!", now.elapsed().as_millis());
         }
         time::sleep(Duration::from_secs(120)).await;
     }
@@ -474,10 +465,7 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     .await?;
                 file.write_all(&content).await?;
             }
-            log::debug!(
-                "Pruned stats successfully in {}s!",
-                now.elapsed().as_secs().to_string()
-            );
+            log::debug!("Pruned stats successfully in {}s!", now.elapsed().as_secs());
         }
         time::sleep(Duration::from_secs(21_600)).await;
     }

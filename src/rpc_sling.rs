@@ -122,7 +122,7 @@ pub async fn slinggo(
                         match sling(&job_clone, &task, &plugin).await {
                             Ok(()) => log::info!("{}/{}: Spawned job exited.", chan_id, i),
                             Err(e) => {
-                                log::warn!("{}/{}: Error in job: {}", chan_id, e.to_string(), i);
+                                log::warn!("{}/{}: Error in job: {}", chan_id, e, i);
                                 match channel_jobstate_update(
                                     plugin.state().job_state.clone(),
                                     &task,

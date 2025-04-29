@@ -131,7 +131,7 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
             task.task_id,
             fee_ppm_effective,
             route.len() - 1,
-            now.elapsed().as_millis().to_string()
+            now.elapsed().as_millis()
         );
 
         if fee_ppm_effective > job.maxppm {
@@ -210,7 +210,7 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
             "{}/{}: Sent on route. Total: {}ms",
             task.chan_id,
             task.task_id,
-            now.elapsed().as_millis().to_string()
+            now.elapsed().as_millis()
         );
 
         match waitsendpay_response(

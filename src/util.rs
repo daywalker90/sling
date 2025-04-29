@@ -67,7 +67,7 @@ pub async fn refresh_joblists(p: Plugin<PluginState>) -> Result<(), Error> {
         "Read {} pull jobs and {} push jobs in {}ms",
         pull_jobs.len(),
         push_jobs.len(),
-        now.elapsed().as_millis().to_string(),
+        now.elapsed().as_millis(),
     );
 
     Ok(())
@@ -88,7 +88,7 @@ pub async fn read_jobs(
             log::warn!(
                 "Couldn't open {}: {}. First time using sling? Creating new file.",
                 jobfile.to_str().unwrap(),
-                e.to_string()
+                e
             );
             File::create(jobfile.clone()).await?;
             jobs = BTreeMap::new();
@@ -212,7 +212,7 @@ pub async fn read_graph(sling_dir: &PathBuf) -> Result<LnGraph, Error> {
             graph = match serde_json::from_str(&file) {
                 Ok(o) => o,
                 Err(e) => {
-                    log::warn!("could not read graph: {}", e.to_string());
+                    log::warn!("could not read graph: {}", e);
                     LnGraph::new()
                 }
             }
@@ -221,7 +221,7 @@ pub async fn read_graph(sling_dir: &PathBuf) -> Result<LnGraph, Error> {
             log::warn!(
                 "Could not open {}: {}. First time using sling? Creating new file.",
                 graphfile.to_str().unwrap(),
-                e.to_string()
+                e
             );
             File::create(graphfile.clone()).await?;
             graph = LnGraph::new();
@@ -235,10 +235,7 @@ pub async fn write_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
     let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
     let now = Instant::now();
     fs::write(sling_dir.join(GRAPH_FILE_NAME), graph_string).await?;
-    log::debug!(
-        "Wrote graph to disk in {}ms",
-        now.elapsed().as_millis().to_string()
-    );
+    log::debug!("Wrote graph to disk in {}ms", now.elapsed().as_millis());
     Ok(())
 }
 
