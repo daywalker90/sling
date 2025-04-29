@@ -6,8 +6,6 @@ use cln_rpc::model::requests::SendpayRoute;
 use cln_rpc::model::responses::ListpeerchannelsChannels;
 use cln_rpc::primitives::*;
 
-use log::{debug, info, warn};
-
 use sling::{DirectedChannel, Job, SatDirection};
 use std::cmp::{max, min};
 
@@ -43,7 +41,7 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
             .unwrap()
             .should_stop();
         if should_stop {
-            info!("{}/{}: Stopped job!", task.chan_id, task.task_id);
+            log::info!("{}/{}: Stopped job!", task.chan_id, task.task_id);
             channel_jobstate_update(
                 plugin.state().job_state.clone(),
                 task,
@@ -104,9 +102,10 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
             )
             .await;
             if nr.is_err() || nr.as_ref().unwrap().is_empty() {
-                info!(
+                log::info!(
                     "{}/{}: could not find a route. Sleeping...",
-                    task.chan_id, task.task_id
+                    task.chan_id,
+                    task.task_id
                 );
                 channel_jobstate_update(
                     plugin.state().job_state.clone(),
@@ -126,7 +125,7 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
             Amount::msat(&route.first().unwrap().amount_msat),
             Amount::msat(&route.last().unwrap().amount_msat),
         );
-        info!(
+        log::info!(
             "{}/{}: Found {}ppm route with {} hops. Total: {}ms",
             task.chan_id,
             task.task_id,
@@ -136,9 +135,10 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
         );
 
         if fee_ppm_effective > job.maxppm {
-            info!(
+            log::info!(
                 "{}/{}: route not cheap enough! Sleeping...",
-                task.chan_id, task.task_id
+                task.chan_id,
+                task.task_id
             );
             channel_jobstate_update(
                 plugin.state().job_state.clone(),
@@ -155,7 +155,7 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
         {
             let alias_map = plugin.state().alias_peer_map.lock();
             for r in &route {
-                debug!(
+                log::debug!(
                     "{}/{}: route: {} {:4} {:17} {}",
                     task.chan_id,
                     task.task_id,
@@ -202,11 +202,11 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
                     false,
                     true,
                 )?;
-                warn!("{}", e);
+                log::warn!("{}", e);
                 break 'outer;
             }
         };
-        info!(
+        log::info!(
             "{}/{}: Sent on route. Total: {}ms",
             task.chan_id,
             task.task_id,
@@ -234,7 +234,7 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
                     false,
                     true,
                 )?;
-                warn!("{}", e);
+                log::warn!("{}", e);
                 break 'outer;
             }
         };
@@ -295,7 +295,7 @@ async fn next_route(
         )
     }
 
-    debug!(
+    log::debug!(
         "{}/{}: Candidates: {}",
         task.chan_id,
         task.task_id,
@@ -306,7 +306,7 @@ async fn next_route(
             .join(", ")
     );
     if !tempbans.is_empty() {
-        debug!(
+        log::debug!(
             "{}/{}: Tempbans: {}",
             task.chan_id,
             task.task_id,
@@ -322,9 +322,10 @@ async fn next_route(
         );
     }
     if candidatelist.is_empty() {
-        info!(
+        log::info!(
             "{}/{}: No candidates found. Adjust out_ppm or wait for liquidity. Sleeping...",
-            task.chan_id, task.task_id
+            task.chan_id,
+            task.task_id
         );
         channel_jobstate_update(
             plugin.state().job_state.clone(),
@@ -408,9 +409,10 @@ async fn next_route(
                         match graph.get_channel(&keypair.other_pubkey, &task.chan_id) {
                             Ok(in_chan) => in_chan,
                             Err(_) => {
-                                warn!(
+                                log::warn!(
                                     "{}/{}: channel not found in graph!",
-                                    task.chan_id, task.task_id
+                                    task.chan_id,
+                                    task.task_id
                                 );
                                 channel_jobstate_update(
                                     plugin.state().job_state.clone(),
@@ -450,9 +452,10 @@ async fn next_route(
                     let slingchan_out = match graph.get_channel(&keypair.my_pubkey, &task.chan_id) {
                         Ok(out_chan) => out_chan,
                         Err(_) => {
-                            warn!(
+                            log::warn!(
                                 "{}/{}: channel not found in graph!",
-                                task.chan_id, task.task_id
+                                task.chan_id,
+                                task.task_id
                             );
                             channel_jobstate_update(
                                 plugin.state().job_state.clone(),
@@ -544,7 +547,7 @@ async fn health_check(
     let channel = match get_normal_channel_from_listpeerchannels(peer_channels, &task.chan_id) {
         Ok(o) => o,
         Err(e) => {
-            warn!("{}/{}: {}. Stopping Job.", task.chan_id, task.task_id, e);
+            log::warn!("{}/{}: {}. Stopping Job.", task.chan_id, task.task_id, e);
             channel_jobstate_update(
                 job_states.clone(),
                 task,
@@ -557,9 +560,10 @@ async fn health_check(
     };
 
     if !check_private_alias(plugin, &channel, config, task, job, other_peer) {
-        info!(
+        log::info!(
             "{}/{}: private channel without alias. Taking a break...",
-            task.chan_id, task.task_id
+            task.chan_id,
+            task.task_id
         );
         channel_jobstate_update(job_states.clone(), task, &JobMessage::NoAlias, true, false)?;
         my_sleep(600, job_states.clone(), task).await;
@@ -572,17 +576,20 @@ async fn health_check(
             SatDirection::Push => Amount::msat(&channel.spendable_msat.unwrap()) < job.amount_msat,
         }
     {
-        info!(
+        log::info!(
             "{}/{}: already balanced. Taking a break...",
-            task.chan_id, task.task_id
+            task.chan_id,
+            task.task_id
         );
         channel_jobstate_update(job_states.clone(), task, &JobMessage::Balanced, true, false)?;
         my_sleep(600, job_states.clone(), task).await;
         Ok(Some(true))
     } else if get_total_htlc_count(&channel) > config.max_htlc_count {
-        info!(
+        log::info!(
             "{}/{}: already more than {} pending htlcs. Taking a break...",
-            task.chan_id, task.task_id, config.max_htlc_count
+            task.chan_id,
+            task.task_id,
+            config.max_htlc_count
         );
         channel_jobstate_update(
             job_states.clone(),
@@ -597,9 +604,10 @@ async fn health_check(
         match peer_channels.values().find(|x| x.peer_id == other_peer) {
             Some(p) => {
                 if !p.peer_connected {
-                    info!(
+                    log::info!(
                         "{}/{}: not connected. Taking a break...",
-                        task.chan_id, task.task_id
+                        task.chan_id,
+                        task.task_id
                     );
                     channel_jobstate_update(
                         job_states.clone(),
@@ -611,9 +619,10 @@ async fn health_check(
                     my_sleep(60, job_states.clone(), task).await;
                     Ok(Some(true))
                 } else if tempbans.contains_key(&task.chan_id) {
-                    info!(
+                    log::info!(
                         "{}/{}: Job peer not ready. Taking a break...",
-                        task.chan_id, task.task_id
+                        task.chan_id,
+                        task.task_id
                     );
                     channel_jobstate_update(
                         job_states.clone(),
@@ -636,9 +645,10 @@ async fn health_check(
                     false,
                     true,
                 )?;
-                warn!(
+                log::warn!(
                     "{}/{}: peer not found. Stopping job.",
-                    task.chan_id, task.task_id
+                    task.chan_id,
+                    task.task_id
                 );
                 Ok(Some(false))
             }

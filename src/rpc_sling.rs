@@ -4,7 +4,6 @@ use anyhow::anyhow;
 use bitcoin::secp256k1::PublicKey;
 use cln_plugin::{Error, Plugin};
 use cln_rpc::primitives::ShortChannelId;
-use log::{debug, info, warn};
 use serde_json::json;
 use sling::Job;
 use tokio::{fs, time};
@@ -104,7 +103,7 @@ pub async fn slinggo(
                     let plugin = p.clone();
                     let job_clone = job.clone();
                     spawn_count += 1;
-                    debug!("{}/{}: Spawning job.", chan_id, i);
+                    log::debug!("{}/{}: Spawning job.", chan_id, i);
                     match job_states.get_mut(&chan_id) {
                         Some(jts) => match jts.iter_mut().find(|jt| jt.id() == i) {
                             Some(jobstate) => *jobstate = JobState::new(JobMessage::Starting, i),
@@ -121,9 +120,9 @@ pub async fn slinggo(
                             task_id: i,
                         };
                         match sling(&job_clone, &task, &plugin).await {
-                            Ok(()) => info!("{}/{}: Spawned job exited.", chan_id, i),
+                            Ok(()) => log::info!("{}/{}: Spawned job exited.", chan_id, i),
                             Err(e) => {
-                                warn!("{}/{}: Error in job: {}", chan_id, e.to_string(), i);
+                                log::warn!("{}/{}: Error in job: {}", chan_id, e.to_string(), i);
                                 match channel_jobstate_update(
                                     plugin.state().job_state.clone(),
                                     &task,
@@ -133,7 +132,12 @@ pub async fn slinggo(
                                 ) {
                                     Ok(_) => (),
                                     Err(e) => {
-                                        warn!("{}/{}: Error updating jobstate: {}", chan_id, i, e)
+                                        log::warn!(
+                                            "{}/{}: Error updating jobstate: {}",
+                                            chan_id,
+                                            i,
+                                            e
+                                        )
                                     }
                                 };
                             }
@@ -185,7 +189,7 @@ pub async fn slingstop(
                                         true,
                                         true,
                                     )?;
-                                    debug!("{}/{}: Stopping job...", scid, jt.id());
+                                    log::debug!("{}/{}: Stopping job...", scid, jt.id());
                                 }
                             } else {
                                 return Err(anyhow!("{}: No job running", scid));
@@ -227,7 +231,7 @@ pub async fn slingstop(
                                     true,
                                     true,
                                 )?;
-                                debug!("{}/{}: Stopping job...", chan_id, jt.id());
+                                log::debug!("{}/{}: Stopping job...", chan_id, jt.id());
                             }
                         }
                     }
@@ -318,7 +322,7 @@ pub async fn slingdeletejob(
                             slingstop(p.clone(), serde_json::Value::Array(vec![])).await?;
                             let jobfile = sling_dir.join(JOB_FILE_NAME);
                             fs::remove_file(jobfile).await?;
-                            info!("Deleted all jobs");
+                            log::info!("Deleted all jobs");
                         }
                         _ => {
                             let scid = ShortChannelId::from_str(i)?;
@@ -475,7 +479,7 @@ pub async fn slingexceptpeer(
                     let all_jobs: Vec<ShortChannelId> =
                         pull_jobs.into_iter().chain(push_jobs.into_iter()).collect();
                     let mut all_job_peers: Vec<PublicKey> = vec![];
-                    debug!("{:?}", all_jobs);
+                    log::debug!("{:?}", all_jobs);
                     for job in &all_jobs {
                         match peer_channels.get(job) {
                             Some(peer) => all_job_peers.push(peer.peer_id),

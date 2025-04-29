@@ -33,7 +33,6 @@ use bitcoin::consensus::encode::serialize_hex;
 use cln_plugin::Plugin;
 
 use cln_rpc::primitives::ShortChannelId;
-use log::{debug, info, warn};
 
 use rand::rng;
 use tokio::fs::{self, File};
@@ -64,7 +63,7 @@ pub async fn refresh_joblists(p: Plugin<PluginState>) -> Result<(), Error> {
             SatDirection::Push => push_jobs.insert(chan_id),
         };
     }
-    debug!(
+    log::debug!(
         "Read {} pull jobs and {} push jobs in {}ms",
         pull_jobs.len(),
         push_jobs.len(),
@@ -86,7 +85,7 @@ pub async fn read_jobs(
     match jobfilecontent {
         Ok(file) => jobs = serde_json::from_str(&file).unwrap_or(BTreeMap::new()),
         Err(e) => {
-            warn!(
+            log::warn!(
                 "Couldn't open {}: {}. First time using sling? Creating new file.",
                 jobfile.to_str().unwrap(),
                 e.to_string()
@@ -143,10 +142,10 @@ pub async fn write_job(
         }
     }
     if remove {
-        info!("{} job for {}", job_change, &chan_id);
+        log::info!("{} job for {}", job_change, &chan_id);
     } else {
         my_job = job.unwrap();
-        info!(
+        log::info!(
             "{} job for {} with amount: {}msat, maxppm: {}, outppm: {:?}, target: {:?},\
             maxhops: {:?}, candidatelist: {:?},\
             depleteuptopercent: {:?}, depleteuptoamount: {:?}, paralleljobs: {:?}",
@@ -213,13 +212,13 @@ pub async fn read_graph(sling_dir: &PathBuf) -> Result<LnGraph, Error> {
             graph = match serde_json::from_str(&file) {
                 Ok(o) => o,
                 Err(e) => {
-                    warn!("could not read graph: {}", e.to_string());
+                    log::warn!("could not read graph: {}", e.to_string());
                     LnGraph::new()
                 }
             }
         }
         Err(e) => {
-            warn!(
+            log::warn!(
                 "Could not open {}: {}. First time using sling? Creating new file.",
                 graphfile.to_str().unwrap(),
                 e.to_string()
@@ -236,7 +235,7 @@ pub async fn write_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
     let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
     let now = Instant::now();
     fs::write(sling_dir.join(GRAPH_FILE_NAME), graph_string).await?;
-    debug!(
+    log::debug!(
         "Wrote graph to disk in {}ms",
         now.elapsed().as_millis().to_string()
     );
@@ -368,9 +367,11 @@ pub async fn my_sleep(
     job_state: Arc<Mutex<HashMap<ShortChannelId, Vec<JobState>>>>,
     task: &Task,
 ) {
-    debug!(
+    log::debug!(
         "{}/{}: Starting sleeper for {}s",
-        task.chan_id, task.task_id, seconds
+        task.chan_id,
+        task.task_id,
+        seconds
     );
     let timer = Instant::now();
     while timer.elapsed() < Duration::from_secs(seconds) {
@@ -383,16 +384,18 @@ pub async fn my_sleep(
                         break;
                     }
                 } else {
-                    warn!(
+                    log::warn!(
                         "{}/{}: my_sleep: task id not found",
-                        task.chan_id, task.task_id
+                        task.chan_id,
+                        task.task_id
                     );
                     break;
                 }
             } else {
-                warn!(
+                log::warn!(
                     "{}/{}: my_sleep: scid not found",
-                    task.chan_id, task.task_id
+                    task.chan_id,
+                    task.task_id
                 );
                 break;
             }
@@ -407,9 +410,10 @@ pub async fn wait_for_gossip(plugin: &Plugin<PluginState>, task: &Task) -> Resul
             let graph = plugin.state().graph.lock();
 
             if graph.graph.is_empty() {
-                info!(
+                log::info!(
                     "{}/{}: graph is still empty. Sleeping...",
-                    task.chan_id, task.task_id
+                    task.chan_id,
+                    task.task_id
                 );
                 channel_jobstate_update(
                     plugin.state().job_state.clone(),

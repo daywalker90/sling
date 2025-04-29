@@ -15,7 +15,6 @@ use cln_plugin::Builder;
 use config::*;
 use htlc::block_added;
 use htlc::htlc_handler;
-use log::{debug, info, warn};
 use model::*;
 use notifications::*;
 use rpc_sling::*;
@@ -229,18 +228,18 @@ async fn main() -> Result<(), anyhow::Error> {
                 Ok(()) => &(),
                 Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
             };
-            info!("read startup options");
+            log::info!("read startup options");
             confplugin = plugin;
         }
         None => return Err(anyhow!("Error configuring the plugin!")),
     };
     if let Ok(plugin) = confplugin.start(state).await {
-        debug!("{:?}", plugin.configuration());
+        log::debug!("{:?}", plugin.configuration());
         let peersclone = plugin.clone();
         tokio::spawn(async move {
             match tasks::refresh_listpeerchannels_loop(peersclone).await {
                 Ok(()) => (),
-                Err(e) => warn!("Error in refresh_listpeers thread: {:?}", e),
+                Err(e) => log::warn!("Error in refresh_listpeers thread: {:?}", e),
             };
         });
         plugin.state().read_excepts().await?;
@@ -250,35 +249,35 @@ async fn main() -> Result<(), anyhow::Error> {
         tokio::spawn(async move {
             match tasks::refresh_graph(channelsclone).await {
                 Ok(()) => (),
-                Err(e) => warn!("Error in refresh_graph thread: {:?}", e),
+                Err(e) => log::warn!("Error in refresh_graph thread: {:?}", e),
             };
         });
         let aliasclone = plugin.clone();
         tokio::spawn(async move {
             match tasks::refresh_aliasmap(aliasclone).await {
                 Ok(()) => (),
-                Err(e) => warn!("Error in refresh_aliasmap thread: {:?}", e),
+                Err(e) => log::warn!("Error in refresh_aliasmap thread: {:?}", e),
             };
         });
         let liquidityclone = plugin.clone();
         tokio::spawn(async move {
             match tasks::refresh_liquidity(liquidityclone).await {
                 Ok(()) => (),
-                Err(e) => warn!("Error in refresh_liquidity thread: {:?}", e),
+                Err(e) => log::warn!("Error in refresh_liquidity thread: {:?}", e),
             };
         });
         let tempbanclone = plugin.clone();
         tokio::spawn(async move {
             match tasks::clear_tempbans(tempbanclone).await {
                 Ok(()) => (),
-                Err(e) => warn!("Error in clear_tempbans thread: {:?}", e),
+                Err(e) => log::warn!("Error in clear_tempbans thread: {:?}", e),
             };
         });
         let clearstatsclone = plugin.clone();
         tokio::spawn(async move {
             match tasks::clear_stats(clearstatsclone).await {
                 Ok(()) => (),
-                Err(e) => warn!("Error in clear_stats thread: {:?}", e),
+                Err(e) => log::warn!("Error in clear_stats thread: {:?}", e),
             };
         });
 

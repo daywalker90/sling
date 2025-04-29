@@ -12,8 +12,6 @@ use cln_rpc::{
     ClnRpc,
 };
 
-use log::{debug, info};
-
 use sling::DirectedChannel;
 use tokio::{
     fs::OpenOptions,
@@ -41,7 +39,7 @@ pub async fn refresh_aliasmap(plugin: Plugin<PluginState>) -> Result<(), Error> 
                 .filter_map(|node| node.alias.map(|alias| (node.nodeid, alias)))
                 .collect();
         }
-        info!(
+        log::info!(
             "Refreshing alias map done in {}ms!",
             now.elapsed().as_millis().to_string()
         );
@@ -79,7 +77,7 @@ pub async fn refresh_listpeerchannels(plugin: &Plugin<PluginState>) -> Result<()
         .into_iter()
         .filter_map(|channel| channel.short_channel_id.map(|id| (id, channel)))
         .collect();
-    debug!(
+    log::debug!(
         "Peerchannels refreshed in {}ms",
         now.elapsed().as_millis().to_string()
     );
@@ -106,15 +104,15 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                 interval = config.refresh_gossmap_interval;
             }
             {
-                debug!("Getting all channels in gossip_store...");
+                log::debug!("Getting all channels in gossip_store...");
                 read_gossip_store(plugin.clone(), &mut offset).await?;
-                debug!(
+                log::debug!(
                     "Reading gossip store done after {}ms!",
                     now.elapsed().as_millis().to_string()
                 );
 
                 let mut lngraph = plugin.state().graph.lock();
-                info!(
+                log::info!(
                     "{} public channels in sling graph after {}ms!",
                     lngraph
                         .graph
@@ -130,7 +128,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
                     .as_secs();
-                debug!(
+                log::debug!(
                     "Got {} local channels after {}ms!",
                     local_channels.len(),
                     now.elapsed().as_millis().to_string()
@@ -241,7 +239,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     })
                 }
 
-                info!(
+                log::info!(
                     "{} private channels in sling graph after {}ms!",
                     lngraph
                         .graph
@@ -254,7 +252,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
 
                 lngraph.graph.retain(|_, v| !v.is_empty());
             }
-            info!(
+            log::info!(
                 "Refreshed graph in {}ms!",
                 now.elapsed().as_millis().to_string()
             );
@@ -269,7 +267,7 @@ pub async fn refresh_liquidity(plugin: Plugin<PluginState>) -> Result<(), Error>
             let interval = plugin.state().config.lock().reset_liquidity_interval;
             let now = Instant::now();
             plugin.state().graph.lock().refresh_liquidity(interval);
-            info!(
+            log::info!(
                 "Refreshed Liquidity in {}ms!",
                 now.elapsed().as_millis().to_string()
             );
@@ -318,14 +316,14 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     Ok(o) => {
                         successes.insert(scid, o);
                     }
-                    Err(e) => debug!("{}: probably no success stats yet: {:?}", scid, e),
+                    Err(e) => log::debug!("{}: probably no success stats yet: {:?}", scid, e),
                 };
 
                 match FailureReb::read_from_file(&sling_dir, scid).await {
                     Ok(o) => {
                         failures.insert(scid, o);
                     }
-                    Err(e) => debug!("{}: probably no failure stats yet: {:?}", scid, e),
+                    Err(e) => log::debug!("{}: probably no failure stats yet: {:?}", scid, e),
                 };
             }
             let stats_delete_successes_age =
@@ -351,7 +349,7 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     rebs
                 };
                 let filtered_rebs_len = filtered_rebs.len();
-                debug!(
+                log::debug!(
                     "{}: filtered {} success entries because of age",
                     chan_id,
                     rebs_len - filtered_rebs_len
@@ -366,7 +364,7 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
                 } else {
                     filtered_rebs
                 };
-                debug!(
+                log::debug!(
                     "{}: filtered {} success entries because of size",
                     chan_id,
                     filtered_rebs_len - pruned_rebs.len()
@@ -395,7 +393,7 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     rebs
                 };
                 let filtered_rebs_len = filtered_rebs.len();
-                debug!(
+                log::debug!(
                     "{}: filtered {} failure entries because of age",
                     chan_id,
                     rebs_len - filtered_rebs_len
@@ -410,7 +408,7 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
                 } else {
                     filtered_rebs
                 };
-                debug!(
+                log::debug!(
                     "{}: filtered {} failure entries because of size",
                     chan_id,
                     filtered_rebs_len - pruned_rebs.len()
@@ -429,7 +427,7 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     .await?;
                 file.write_all(&content).await?;
             }
-            debug!(
+            log::debug!(
                 "Pruned stats successfully in {}s!",
                 now.elapsed().as_secs().to_string()
             );

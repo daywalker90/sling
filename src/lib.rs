@@ -5,7 +5,6 @@ use cln_rpc::{
     model::responses::ListpeerchannelsChannels,
     primitives::{Amount, PublicKey, ShortChannelId},
 };
-use log::debug;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::json;
 
@@ -99,7 +98,7 @@ impl Job {
         chan_id: &ShortChannelId,
     ) -> bool {
         let target_cap = self.target_cap(channel);
-        debug!("{}: target: {}sats", chan_id, target_cap / 1_000);
+        log::debug!("{}: target: {}sats", chan_id, target_cap / 1_000);
 
         let channel_msat = Amount::msat(&channel.total_msat.unwrap());
         let to_us_msat = Amount::msat(&channel.to_us_msat.unwrap());

@@ -16,7 +16,6 @@ use cln_rpc::{
     primitives::{Amount, Sha256, ShortChannelId, ShortChannelIdDir},
     ClnRpc,
 };
-use log::{debug, info, warn};
 use sling::{Job, SatDirection};
 use tokio::time::Instant;
 
@@ -47,7 +46,7 @@ pub async fn waitsendpay_response(
         .await
     {
         Ok(o) => {
-            info!(
+            log::info!(
                 "{}/{}: Rebalance SUCCESSFULL after {}s. Sent {}sats plus {}msats fee",
                 task.chan_id,
                 task.task_id,
@@ -94,7 +93,7 @@ pub async fn waitsendpay_response(
             };
 
             if ws_code == 200 {
-                warn!(
+                log::warn!(
                     "{}/{}: Rebalance WAITSENDPAY_TIMEOUT failure after {}s: {}",
                     task.chan_id,
                     task.task_id,
@@ -152,7 +151,7 @@ pub async fn waitsendpay_response(
             } else if let Some(d) = err.data {
                 let ws_error = serde_json::from_value::<WaitsendpayErrorData>(d)?;
 
-                info!(
+                log::info!(
                     "{}/{}: Rebalance failure after {}s: {} at node:{} chan:{}",
                     task.chan_id,
                     task.task_id,
@@ -166,9 +165,12 @@ pub async fn waitsendpay_response(
                     err if err.eq("WIRE_INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS")
                         && ws_error.erring_node == config.pubkey =>
                     {
-                        warn!(
+                        log::warn!(
                             "{}/{}: PAYMENT DETAILS ERROR:{:?} {:?}",
-                            task.chan_id, task.task_id, err, route
+                            task.chan_id,
+                            task.task_id,
+                            err,
+                            route
                         );
                         special_stop = true;
                     }
@@ -199,9 +201,11 @@ pub async fn waitsendpay_response(
                 }
 
                 if ws_error.erring_channel == route.last().unwrap().channel {
-                    warn!(
+                    log::warn!(
                         "{}/{}: Last peer has a problem or just updated their fees? {}",
-                        task.chan_id, task.task_id, ws_error.failcodename
+                        task.chan_id,
+                        task.task_id,
+                        ws_error.failcodename
                     );
                     if err.message.contains("Too many HTLCs") {
                         my_sleep(3, plugin.state().job_state.clone(), task).await;
@@ -215,7 +219,7 @@ pub async fn waitsendpay_response(
                         );
                     }
                 } else if ws_error.erring_channel == route.first().unwrap().channel {
-                    warn!(
+                    log::warn!(
                         "{}/{}: First peer has a problem {}",
                         task.chan_id,
                         task.task_id,
@@ -233,9 +237,11 @@ pub async fn waitsendpay_response(
                         );
                     }
                 } else {
-                    debug!(
+                    log::debug!(
                         "{}/{}: Adjusting liquidity for {}.",
-                        task.chan_id, task.task_id, ws_error.erring_channel
+                        task.chan_id,
+                        task.task_id,
+                        ws_error.erring_channel
                     );
                     plugin
                         .state()
@@ -327,9 +333,10 @@ pub async fn sendpay_response(
         }
         Err(e) => {
             if e.to_string().contains("First peer not ready") {
-                info!(
+                log::info!(
                     "{}/{}: First peer not ready, banning it for now...",
-                    task.chan_id, task.task_id
+                    task.chan_id,
+                    task.task_id
                 );
                 plugin.state().tempbans.lock().insert(
                     route.first().unwrap().channel,

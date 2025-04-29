@@ -9,7 +9,6 @@ use cln_plugin::Plugin;
 
 use cln_rpc::model::responses::ListpeerchannelsChannels;
 use cln_rpc::primitives::{PublicKey, ShortChannelId};
-use log::{debug, info};
 use num_format::{Locale, ToFormattedString};
 use serde_json::json;
 use sling::{
@@ -91,14 +90,14 @@ pub async fn slingstats(
                 Ok(o) => {
                     successes.insert(scid, o);
                 }
-                Err(e) => debug!("probably no success stats yet: {:?}", e),
+                Err(e) => log::debug!("probably no success stats yet: {:?}", e),
             };
 
             match FailureReb::read_from_file(&sling_dir, scid).await {
                 Ok(o) => {
                     failures.insert(scid, o);
                 }
-                Err(e) => debug!("probably no failure stats yet: {:?}", e),
+                Err(e) => log::debug!("probably no failure stats yet: {:?}", e),
             };
         }
 
@@ -199,14 +198,14 @@ pub async fn slingstats(
         let successes = match SuccessReb::read_from_file(&sling_dir, &scid).await {
             Ok(o) => o,
             Err(e) => {
-                info!("Could not get any successes: {}", e);
+                log::info!("Could not get any successes: {}", e);
                 Vec::new()
             }
         };
         let failures = match FailureReb::read_from_file(&sling_dir, &scid).await {
             Ok(o) => o,
             Err(e) => {
-                info!("Could not get any failures: {}", e);
+                log::info!("Could not get any failures: {}", e);
                 Vec::new()
             }
         };

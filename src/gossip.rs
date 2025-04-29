@@ -11,7 +11,6 @@ use anyhow::{anyhow, Error};
 use bitcoin::secp256k1::PublicKey;
 use cln_plugin::Plugin;
 use cln_rpc::primitives::{Amount, ShortChannelId};
-use log::{debug, warn};
 use sling::DirectedChannel;
 
 use crate::{DirectedChannelState, PluginState};
@@ -39,7 +38,7 @@ pub struct ChannelAnnouncement {
 
 pub async fn read_gossip_store(plugin: Plugin<PluginState>, offset: &mut u64) -> Result<(), Error> {
     let now = Instant::now();
-    debug!("gossip_reader: offset:{}", offset);
+    log::debug!("gossip_reader: offset:{}", offset);
     let is_start_up = *offset == 0;
 
     let file = File::open(Path::new(&plugin.configuration().lightning_dir).join("gossip_store"))?;
@@ -47,14 +46,14 @@ pub async fn read_gossip_store(plugin: Plugin<PluginState>, offset: &mut u64) ->
 
     if is_start_up {
         // Read and check the version
-        debug!("gossip_reader: checking gossip_store version...");
+        log::debug!("gossip_reader: checking gossip_store version...");
         let mut version = [0u8; 1];
         reader.read_exact(&mut version)?;
         if (u8::from_be_bytes(version) & 0b1110_0000) != 0b0000_0000 {
-            warn!("gossip_reader: Unsupported gossip_store version!");
+            log::warn!("gossip_reader: Unsupported gossip_store version!");
             return plugin.shutdown();
         }
-        debug!("gossip_reader: gossip_store version is good");
+        log::debug!("gossip_reader: gossip_store version is good");
     }
 
     let mut channel_anns = plugin.state().gossip_store_anns.lock();
@@ -84,10 +83,11 @@ pub async fn read_gossip_store(plugin: Plugin<PluginState>, offset: &mut u64) ->
             }
             Err(e) => {
                 // EOF or read error
-                debug!(
+                log::debug!(
                     "gossip_reader: header error at {}:{} (not an actual error if \
                         buffer could not be filled)",
-                    offset, e
+                    offset,
+                    e
                 );
                 break;
             }
@@ -162,7 +162,7 @@ pub async fn read_gossip_store(plugin: Plugin<PluginState>, offset: &mut u64) ->
                     channel_amts.insert(scid, u64::from_be_bytes(satoshis));
                     last_scid = None;
                 } else {
-                    warn!("gossip_reader: Malformed gossip_store: 4101 without 256")
+                    log::warn!("gossip_reader: Malformed gossip_store: 4101 without 256")
                 }
             }
             4103 => {
@@ -209,11 +209,11 @@ pub async fn read_gossip_store(plugin: Plugin<PluginState>, offset: &mut u64) ->
             }
         }
     }
-    debug!(
+    log::debug!(
         "gossip_reader: gossip_store read in: {}ms",
         now.elapsed().as_millis()
     );
-    debug!(
+    log::debug!(
         "gossip_reader: found updates:{} announcements:{} amounts:{} deletes/dying:{}",
         channel_updates.len(),
         channel_anns.len(),
@@ -315,7 +315,7 @@ pub async fn read_gossip_store(plugin: Plugin<PluginState>, offset: &mut u64) ->
         })
     }
 
-    debug!(
+    log::debug!(
         "gossip_reader: post_processing_time: {}ms",
         post_now.elapsed().as_millis()
     );

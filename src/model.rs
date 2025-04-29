@@ -12,7 +12,6 @@ use cln_rpc::{
     model::responses::ListpeerchannelsChannels,
     primitives::{Amount, PublicKey, ShortChannelId},
 };
-use log::{info, warn};
 use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use sling::{DirectedChannel, Job};
@@ -107,7 +106,7 @@ impl PluginState {
         match content {
             Ok(file) => excepts_tostring = serde_json::from_str(&file).unwrap_or(Vec::new()),
             Err(e) => {
-                warn!(
+                log::warn!(
                     "Could not open {}: {}. First time using sling? Creating new file.",
                     excepts_file.to_str().unwrap(),
                     e.to_string()
@@ -122,7 +121,7 @@ impl PluginState {
                 Ok(id) => {
                     excepts.insert(id);
                 }
-                Err(_e) => warn!(
+                Err(_e) => log::warn!(
                     "excepts file contains invalid short_channel_id/node_id: {}",
                     except
                 ),
@@ -411,7 +410,7 @@ impl LnGraph {
                 }
             }
         }
-        info!("Reset liquidity belief on {} channels!", count);
+        log::info!("Reset liquidity belief on {} channels!", count);
     }
     pub fn get_channel(
         &self,
