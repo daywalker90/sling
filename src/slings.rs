@@ -562,17 +562,6 @@ async fn health_check(
         }
     };
 
-    if !check_private_alias(plugin, &channel, config, task, job, other_peer) {
-        log::info!(
-            "{}/{}: private channel without alias. Taking a break...",
-            task.chan_id,
-            task.task_id
-        );
-        channel_jobstate_update(job_states.clone(), task, &JobMessage::NoAlias, true, false)?;
-        my_sleep(600, job_states.clone(), task).await;
-        return Ok(Some(true));
-    }
-
     if job.is_balanced(&channel, &task.chan_id)
         || match job.sat_direction {
             SatDirection::Pull => Amount::msat(&channel.receivable_msat.unwrap()) < job.amount_msat,
@@ -657,35 +646,6 @@ async fn health_check(
             }
         }
     }
-}
-
-fn check_private_alias(
-    plugin: &Plugin<PluginState>,
-    channel: &ListpeerchannelsChannels,
-    config: &Config,
-    task: &Task,
-    job: &Job,
-    other_peer: PublicKey,
-) -> bool {
-    let graph = plugin.state().graph.lock();
-    if let Some(private) = channel.private {
-        if private
-            && graph
-                .get_channel(
-                    match job.sat_direction {
-                        SatDirection::Pull => &other_peer,
-                        SatDirection::Push => &config.pubkey,
-                    },
-                    &task.chan_id,
-                )
-                .unwrap()
-                .scid_alias
-                .is_none()
-        {
-            return false;
-        }
-    }
-    true
 }
 
 #[allow(clippy::too_many_arguments)]

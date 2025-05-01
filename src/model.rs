@@ -297,7 +297,6 @@ pub enum JobMessage {
     Stopped,
     Error,
     NoJob,
-    NoAlias,
 }
 impl Display for JobMessage {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
@@ -319,7 +318,6 @@ impl Display for JobMessage {
             JobMessage::Stopped => write!(f, "Stopped"),
             JobMessage::Error => write!(f, "Error"),
             JobMessage::NoJob => write!(f, "NoJob"),
-            JobMessage::NoAlias => write!(f, "NoAlias"),
         }
     }
 }

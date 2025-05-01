@@ -312,25 +312,7 @@ pub fn is_channel_normal(channel: &ListpeerchannelsChannels) -> Result<(), Error
         ));
     }
 
-    if let Some(private) = channel.private {
-        if private {
-            let aliases = channel
-                .alias
-                .as_ref()
-                .ok_or_else(|| anyhow!("Missing aliases for private channel"))?;
-            if aliases.local.is_none() {
-                return Err(anyhow!("Missing local channel alias for private channel"));
-            }
-            if aliases.remote.is_none() {
-                return Err(anyhow!("Missing remote alias for private channel"));
-            }
-            Ok(())
-        } else {
-            Ok(())
-        }
-    } else {
-        Ok(())
-    }
+    Ok(())
 }
 
 pub fn get_normal_channel_from_listpeerchannels(
