@@ -55,7 +55,7 @@ pub async fn refresh_joblists(p: Plugin<PluginState>) -> Result<(), Error> {
     p.state()
         .job_state
         .lock()
-        .retain(|k, _v| jobs.contains_key(k));
+        .retain(|k, v| jobs.contains_key(k) || v.iter().any(|js| js.is_once()));
 
     for (chan_id, job) in jobs {
         match job.sat_direction {
@@ -120,6 +120,9 @@ pub async fn write_job(
             .iter()
             .any(|j| j.is_active())
     {
+        if jobstates.get(&chan_id).unwrap().iter().any(|j| j.is_once()) {
+            return Err(anyhow!("Once-job is currently running for this channel"));
+        }
         slingstop(
             p.clone(),
             serde_json::Value::Array(vec![serde_json::Value::String(chan_id.to_string())]),

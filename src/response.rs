@@ -13,7 +13,7 @@ use cln_rpc::{
         },
         responses::SendpayResponse,
     },
-    primitives::{Amount, Sha256, ShortChannelId, ShortChannelIdDir},
+    primitives::{Amount, Sha256, ShortChannelIdDir},
     ClnRpc,
 };
 use sling::{Job, SatDirection};
@@ -34,7 +34,7 @@ pub async fn waitsendpay_response(
     job: &Job,
     route: &[SendpayRoute],
     success_route: &mut Option<Vec<SendpayRoute>>,
-) -> Result<Option<ShortChannelId>, Error> {
+) -> Result<u64, Error> {
     let mut rpc = ClnRpc::new(&config.rpc_path).await?;
     match rpc
         .call_typed(&WaitsendpayRequest {
@@ -71,7 +71,7 @@ pub async fn waitsendpay_response(
             .write_to_file(task.chan_id, &config.sling_dir)
             .await?;
             *success_route = Some(route.to_vec());
-            Ok(None)
+            Ok(o.amount_msat.unwrap().msat())
         }
         Err(err) => {
             *success_route = None;
@@ -147,7 +147,7 @@ pub async fn waitsendpay_response(
                 }
                 .write_to_file(task.chan_id, &config.sling_dir)
                 .await?;
-                Ok(None)
+                Ok(0)
             } else if let Some(d) = err.data {
                 let ws_error = serde_json::from_value::<WaitsendpayErrorData>(d)?;
 
@@ -281,7 +281,7 @@ pub async fn waitsendpay_response(
                         }
                     }
                 }
-                Ok(Some(ws_error.erring_channel))
+                Ok(0)
             } else {
                 return Err(anyhow!(
                     "{}/{}: UNEXPECTED waitsendpay failure: {} after: {}",
