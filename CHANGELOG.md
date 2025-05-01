@@ -1,4 +1,9 @@
-# Changelog,
+# Changelog
+
+## [3.0.5] - 2025-05-01
+
+### Changed
+- no longer require scid aliases for private channels
 
 ## [3.0.4] - 2025-04-29
 
