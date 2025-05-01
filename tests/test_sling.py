@@ -71,7 +71,7 @@ def test_setconfig_options(node_factory, get_plugin):  # noqa: F811
     with pytest.raises(
         RpcError, match="out of range integral type conversion attempted"
     ):
-        node.rpc.setconfig("sling-paralleljobs", 1000)
+        node.rpc.setconfig("sling-paralleljobs", 100_000)
     node.rpc.setconfig("sling-paralleljobs", 50)
 
     with pytest.raises(
@@ -278,17 +278,27 @@ def test_maxhops_2(node_factory, bitcoind, get_plugin):  # noqa: F811
             "amount": 100_000,
             "maxppm": 1000,
             "outppm": 1000,
+            "target": 0.2,
         },
     )
     l1.rpc.call("sling-go", [])
     l1.daemon.wait_for_log(r"already balanced. Taking a break")
+
     wait_for(
-        lambda: l1.rpc.listpeerchannels(l2.info["id"])["channels"][0]["to_us_msat"]
-        >= 400_000_000
+        lambda: next(
+            channel
+            for channel in l1.rpc.listpeerchannels(l2.info["id"])["channels"]
+            if channel["opener"] == "remote"
+        )["to_us_msat"]
+        >= 200_000_000
     )
-    wait_for(
-        lambda: l1.rpc.listpeerchannels(l2.info["id"])["channels"][0]["to_us_msat"]
-        <= 600_000_000
+    assert (
+        next(
+            channel
+            for channel in l1.rpc.listpeerchannels(l2.info["id"])["channels"]
+            if channel["opener"] == "remote"
+        )["to_us_msat"]
+        == 200_000_000
     )
 
 
@@ -442,6 +452,7 @@ def test_stats(node_factory, bitcoind, get_plugin):  # noqa: F811
             "amount": 100_000,
             "maxppm": 1000,
             "outppm": 1000,
+            "target": 0.2,
         },
     )
     l1.rpc.call("sling-go", [])
@@ -457,6 +468,11 @@ def test_stats(node_factory, bitcoind, get_plugin):  # noqa: F811
         cl1
         == stats_chan["successes_in_time_window"]["top_5_channel_partners"][0]["scid"]
     )
+    assert (
+        stats_chan["successes_in_time_window"]["top_5_channel_partners"][0]["sats"]
+        == 200_000
+    )
+    assert stats_chan["successes_in_time_window"]["total_amount_sats"] == 200_000
 
 
 def test_private_channel_receive(node_factory, bitcoind, get_plugin):  # noqa: F811
@@ -596,7 +612,7 @@ def test_private_channel_node(node_factory, bitcoind, get_plugin):  # noqa: F811
             "amount": 100_000,
             "maxppm": 1000,
             "outppm": 0,
-            "target": 0.5,
+            "target": 0.3,
             "depleteuptoamount": 0,
         },
     )
