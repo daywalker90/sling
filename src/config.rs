@@ -286,7 +286,7 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
             )?)?
         }
         n if n.eq(OPT_PARALLELJOBS) => {
-            config.paralleljobs = u8::try_from(options_value_to_u64(
+            config.paralleljobs = u16::try_from(options_value_to_u64(
                 OPT_PARALLELJOBS,
                 value.as_i64().unwrap(),
                 1,

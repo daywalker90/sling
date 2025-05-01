@@ -11,7 +11,7 @@ use std::cmp::{max, min};
 
 use std::collections::HashMap;
 
-use tokio::time::Instant;
+use tokio::time::{self, Instant};
 
 use crate::dijkstra::dijkstra;
 use crate::model::{
@@ -24,10 +24,11 @@ use crate::util::{
 };
 use crate::{channel_jobstate_update, get_remote_feeppm_effective, wait_for_gossip, LnGraph};
 
-pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Result<(), Error> {
+pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Result<u64, Error> {
     wait_for_gossip(plugin, task).await?;
 
     let mut success_route: Option<Vec<SendpayRoute>> = None;
+    let mut rebalanced_msat = 0;
     'outer: loop {
         let now = Instant::now();
         let should_stop = plugin
@@ -225,7 +226,16 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
         )
         .await
         {
-            Ok(o) => o,
+            Ok(o) => {
+                rebalanced_msat += o;
+                if let Some(()) = job.once {
+                    break 'outer;
+                }
+                time::sleep(std::time::Duration::from_secs(
+                    config.refresh_peers_interval,
+                ))
+                .await;
+            }
             Err(e) => {
                 channel_jobstate_update(
                     plugin.state().job_state.clone(),
@@ -243,7 +253,7 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
         tk.remove(&task.task_id);
     };
 
-    Ok(())
+    Ok(rebalanced_msat)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -682,6 +692,10 @@ fn build_candidatelist(
             );
             continue;
         };
+
+        if scid == task.chan_id {
+            continue;
+        }
 
         if let Some(c) = custom_candidates {
             if c.iter().any(|c| *c == scid) {

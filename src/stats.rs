@@ -1,4 +1,5 @@
 use std::cmp::max;
+use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, path::Path, str::FromStr};
 
@@ -66,8 +67,10 @@ pub async fn slingstats(
         refresh_joblists(plugin.clone()).await?;
         let pull_jobs = plugin.state().pull_jobs.lock().clone();
         let push_jobs = plugin.state().push_jobs.lock().clone();
-        let mut all_jobs: Vec<ShortChannelId> =
+        let mut all_jobs: HashSet<ShortChannelId> =
             pull_jobs.into_iter().chain(push_jobs.into_iter()).collect();
+        let job_states = plugin.state().job_state.lock().clone();
+        all_jobs = all_jobs.into_iter().chain(job_states.into_keys()).collect();
 
         let scid_peer_map = get_all_normal_channels_from_listpeerchannels(&peer_channels);
 
@@ -84,7 +87,6 @@ pub async fn slingstats(
                 );
             }
         }
-        all_jobs.retain(|c| normal_channels_alias.contains_key(c));
         for scid in &all_jobs {
             match SuccessReb::read_from_file(&sling_dir, scid).await {
                 Ok(o) => {

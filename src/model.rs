@@ -48,7 +48,7 @@ pub struct PluginState {
     pub excepts_chans: Arc<Mutex<HashSet<ShortChannelId>>>,
     pub excepts_peers: Arc<Mutex<HashSet<PublicKey>>>,
     pub tempbans: Arc<Mutex<HashMap<ShortChannelId, u64>>>,
-    pub parrallel_bans: Arc<Mutex<HashMap<ShortChannelId, HashMap<u8, DirectedChannel>>>>,
+    pub parrallel_bans: Arc<Mutex<HashMap<ShortChannelId, HashMap<u16, DirectedChannel>>>>,
     pub job_state: Arc<Mutex<HashMap<ShortChannelId, Vec<JobState>>>>,
     pub blockheight: Arc<Mutex<u32>>,
     pub gossip_store_anns: Arc<Mutex<HashMap<ShortChannelId, ChannelAnnouncement>>>,
@@ -134,7 +134,7 @@ impl PluginState {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Copy)]
 pub struct Task {
     pub chan_id: ShortChannelId,
-    pub task_id: u8,
+    pub task_id: u16,
 }
 
 #[derive(Clone, Debug)]
@@ -151,7 +151,7 @@ pub struct Config {
     pub depleteuptoamount: u64,
     pub maxhops: u8,
     pub candidates_min_age: u32,
-    pub paralleljobs: u8,
+    pub paralleljobs: u16,
     pub timeoutpay: u16,
     pub max_htlc_count: u64,
     pub stats_delete_failures_age: u64,
@@ -201,15 +201,17 @@ pub struct JobState {
     latest_state: JobMessage,
     active: bool,
     should_stop: bool,
-    id: u8,
+    id: u16,
+    once: bool,
 }
 impl JobState {
-    pub fn new(latest_state: JobMessage, id: u8) -> Self {
+    pub fn new(latest_state: JobMessage, id: u16, once: bool) -> Self {
         JobState {
             latest_state,
             active: true,
             should_stop: false,
             id,
+            once,
         }
     }
     pub fn missing() -> Self {
@@ -218,6 +220,7 @@ impl JobState {
             active: false,
             should_stop: false,
             id: 0,
+            once: false,
         }
     }
 
@@ -239,8 +242,11 @@ impl JobState {
     fn set_active(&mut self, active: bool) {
         self.active = active;
     }
-    pub fn id(&self) -> u8 {
+    pub fn id(&self) -> u16 {
         self.id
+    }
+    pub fn is_once(&self) -> bool {
+        self.once
     }
 }
 
