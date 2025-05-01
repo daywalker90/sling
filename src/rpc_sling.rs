@@ -1,17 +1,23 @@
-use std::{cmp::Ordering, collections::BTreeMap, path::Path, str::FromStr, time::Duration};
+use std::{
+    cmp::Ordering, collections::BTreeMap, path::Path, str::FromStr, sync::Arc, time::Duration,
+};
 
 use anyhow::anyhow;
 use bitcoin::secp256k1::PublicKey;
 use cln_plugin::{Error, Plugin};
 use cln_rpc::primitives::ShortChannelId;
+use parking_lot::Mutex;
 use serde_json::json;
 use sling::Job;
 use tokio::{fs, time};
 
 use crate::{
-    channel_jobstate_update, get_normal_channel_from_listpeerchannels, parse::parse_job, read_jobs,
-    refresh_joblists, slings::sling, write_excepts, write_job, JobMessage, JobState, PluginState,
-    Task, EXCEPTS_CHANS_FILE_NAME, EXCEPTS_PEERS_FILE_NAME, JOB_FILE_NAME, PLUGIN_NAME,
+    channel_jobstate_update, get_normal_channel_from_listpeerchannels,
+    parse::{parse_job, parse_once_job},
+    read_jobs, refresh_joblists,
+    slings::sling,
+    write_excepts, write_job, JobMessage, JobState, PluginState, Task, EXCEPTS_CHANS_FILE_NAME,
+    EXCEPTS_PEERS_FILE_NAME, JOB_FILE_NAME, PLUGIN_NAME,
 };
 
 pub async fn slingjob(
@@ -106,12 +112,16 @@ pub async fn slinggo(
                     log::debug!("{}/{}: Spawning job.", chan_id, i);
                     match job_states.get_mut(&chan_id) {
                         Some(jts) => match jts.iter_mut().find(|jt| jt.id() == i) {
-                            Some(jobstate) => *jobstate = JobState::new(JobMessage::Starting, i),
-                            None => jts.push(JobState::new(JobMessage::Starting, i)),
+                            Some(jobstate) => {
+                                *jobstate = JobState::new(JobMessage::Starting, i, false)
+                            }
+                            None => jts.push(JobState::new(JobMessage::Starting, i, false)),
                         },
                         None => {
-                            job_states
-                                .insert(chan_id, vec![JobState::new(JobMessage::Starting, i)]);
+                            job_states.insert(
+                                chan_id,
+                                vec![JobState::new(JobMessage::Starting, i, false)],
+                            );
                         }
                     }
                     tokio::spawn(async move {
@@ -120,7 +130,7 @@ pub async fn slinggo(
                             task_id: i,
                         };
                         match sling(&job_clone, &task, &plugin).await {
-                            Ok(()) => log::info!("{}/{}: Spawned job exited.", chan_id, i),
+                            Ok(_o) => log::info!("{}/{}: Spawned job exited.", chan_id, i),
                             Err(e) => {
                                 log::warn!("{}/{}: Error in job: {}", chan_id, e, i);
                                 match channel_jobstate_update(
@@ -174,9 +184,9 @@ pub async fn slingstop(
                     serde_json::Value::String(stop_id) => {
                         let scid = ShortChannelId::from_str(stop_id)?;
                         {
-                            let mut job_states = p.state().job_state.lock().clone();
+                            let job_states = p.state().job_state.lock().clone();
                             if job_states.contains_key(&scid) {
-                                let jobstate = job_states.get_mut(&scid).unwrap();
+                                let jobstate = job_states.get(&scid).unwrap();
                                 stopped_count = jobstate.len();
                                 for jt in jobstate {
                                     channel_jobstate_update(
@@ -263,6 +273,165 @@ pub async fn slingstop(
     }
     // write_graph(p.clone()).await?;
     Ok(json!({ "stopped_count": stopped_count }))
+}
+
+pub async fn slingonce(
+    p: Plugin<PluginState>,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, Error> {
+    let (chan_id, job) = parse_once_job(args).await?;
+
+    let peer_channels = p.state().peer_channels.lock().clone();
+    let our_listpeers_channel = get_normal_channel_from_listpeerchannels(&peer_channels, &chan_id)?;
+
+    match job.sat_direction {
+        sling::SatDirection::Pull => {
+            if our_listpeers_channel
+                .receivable_msat
+                .ok_or_else(|| anyhow!("Missing receivable_msat field for channel"))?
+                .msat()
+                < job.total_amount_msat.unwrap()
+            {
+                return Err(anyhow!(
+                    "Channel {} has not enough capacity to pull {}msat",
+                    chan_id,
+                    job.total_amount_msat.unwrap()
+                ));
+            }
+        }
+        sling::SatDirection::Push => {
+            if our_listpeers_channel
+                .spendable_msat
+                .ok_or_else(|| anyhow!("Missing spendable_msat field for channel"))?
+                .msat()
+                < job.total_amount_msat.unwrap()
+            {
+                return Err(anyhow!(
+                    "Channel {} has not enough capacity to push {}msat",
+                    chan_id,
+                    job.total_amount_msat.unwrap()
+                ));
+            }
+        }
+    }
+
+    let sling_dir = Path::new(&p.configuration().lightning_dir).join(PLUGIN_NAME);
+    let jobs = read_jobs(&sling_dir, &p).await?;
+    if jobs.contains_key(&chan_id) {
+        return Err(anyhow!("There is already a job for that scid!"));
+    }
+
+    let config = p.state().config.lock().clone();
+
+    let parallel_jobs = match job.paralleljobs {
+        Some(pj) => pj,
+        None => config.paralleljobs,
+    };
+
+    let p_clone = p.clone();
+
+    tokio::spawn(async move {
+        let total_rebalanced = Arc::new(Mutex::new(0));
+        for i in 1..=parallel_jobs {
+            let plugin = p_clone.clone();
+            let job_clone = job.clone();
+            let total_rebalanced = total_rebalanced.clone();
+            tokio::spawn(async move {
+                {
+                    let mut job_states = plugin.state().job_state.lock();
+                    if !job_states.contains_key(&chan_id)
+                        || match job_states
+                            .get(&chan_id)
+                            .unwrap()
+                            .iter()
+                            .find(|jt| jt.id() == i)
+                        {
+                            Some(jobstate) => !jobstate.is_active(),
+                            None => true,
+                        }
+                    {
+                        log::debug!("{}/{}: Spawning once-job.", chan_id, i);
+                        match job_states.get_mut(&chan_id) {
+                            Some(jts) => match jts.iter_mut().find(|jt| jt.id() == i) {
+                                Some(jobstate) => {
+                                    *jobstate = JobState::new(JobMessage::Starting, i, true)
+                                }
+                                None => jts.push(JobState::new(JobMessage::Starting, i, true)),
+                            },
+                            None => {
+                                job_states.insert(
+                                    chan_id,
+                                    vec![JobState::new(JobMessage::Starting, i, true)],
+                                );
+                            }
+                        }
+                    } else {
+                        log::warn!("There is already a job for that scid running!");
+                        return;
+                    }
+                }
+                let task = Task {
+                    chan_id,
+                    task_id: i,
+                };
+                loop {
+                    {
+                        let mut total_rebalanced = total_rebalanced.lock();
+                        if *total_rebalanced + job.amount_msat > job.total_amount_msat.unwrap() {
+                            log::debug!("{}/{}: Done rebalancing.", chan_id, i);
+                            match channel_jobstate_update(
+                                plugin.state().job_state.clone(),
+                                &task,
+                                &JobMessage::Balanced,
+                                false,
+                                false,
+                            ) {
+                                Ok(_) => (),
+                                Err(e) => {
+                                    log::warn!("{}/{}: Error updating jobstate: {}", chan_id, i, e)
+                                }
+                            };
+                            break;
+                        } else {
+                            *total_rebalanced += job.amount_msat;
+                        }
+                    }
+                    match sling(&job_clone, &task, &plugin).await {
+                        Ok(o) => {
+                            log::debug!("{}/{}: Spawned once-job exited.", chan_id, i);
+                            if o == 0 {
+                                *total_rebalanced.lock() -= job.amount_msat;
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!("{}/{}: Error in once-job: {}", chan_id, e, i);
+                            match channel_jobstate_update(
+                                plugin.state().job_state.clone(),
+                                &task,
+                                &JobMessage::Error,
+                                false,
+                                true,
+                            ) {
+                                Ok(_) => (),
+                                Err(e) => {
+                                    log::warn!("{}/{}: Error updating jobstate: {}", chan_id, i, e)
+                                }
+                            };
+                            *total_rebalanced.lock() -= job.amount_msat;
+                        }
+                    };
+                    plugin
+                        .state()
+                        .parrallel_bans
+                        .lock()
+                        .retain(|_, task_bans| !task_bans.is_empty());
+
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            });
+        }
+    });
+    Ok(json!({ "result": "started" }))
 }
 
 pub async fn slingjobsettings(

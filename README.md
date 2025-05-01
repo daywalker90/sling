@@ -97,6 +97,7 @@ Note: Release binaries are built using ``cross`` and the ``optimized`` profile.
 * ``sling-jobsettings`` provide a ShortChannelId (or nothing for all channels) to list the currently saved settings for the job(s)
 * ``sling-go`` start all jobs that are not already running, or the job specified by a ShortChannelId
 * ``sling-stop`` gracefully stop all running jobs or the job specified by a ShortChannelId, jobs take up to ``sling-timeoutpay`` to actually stop
+* ``sling-once`` immediately start a one time rebalance
 * ``sling-stats`` with no arguments this shows a status overview for all jobs, you can use an optional boolean argument to set the output to json: ``sling-stats true``. Otherwise you can provide a ShortChannelId to get more detailed stats for that specific job, which is always in json format.
 * ``sling-deletejob`` gracefully stops and removes all jobs by providing the keyword ``all`` or a single job by providing a ShortChannelId. Does *not* remove raw stats from disk.
 * ``sling-except-chan`` add or remove ShortChannelIds to completely avoid or alternatively list all current exceptions with keyword ``list``.
@@ -120,7 +121,7 @@ You can completely leave out optional (those in ``()``) arguments, with one exce
 * ``candidates``: a list of our scid's to use for rebalancing this channel. E.g.: ``'["704776x2087x5","702776x1087x2"]'`` You can still combine this with ``outppm``
 * ``depleteuptopercent``: how much % to leave the candidates with on the local side of the channel as a floating point between 0 and <1. Default is ``0.2``. Also see [Depleteformula](#depleteformula). You can set this globally, see [Options](#options).
 * ``depleteuptoamount``: how many sats to leave the candidates with on the local side of the channel. Default is ``2000000``sats. Also see [Depleteformula](#depleteformula). You can set this globally, see [Options](#options).
-* ``paralleljobs``: How many routes to take in parallel for this job. Default is ``1``. You can set this globally, see [Options](#options).
+* ``paralleljobs``: How many routes to take in parallel for this job. If you know that the route will be minimum length you should keep this at ``1``. Default is ``1``. You can set this globally, see [Options](#options).
 
 Easy example: "Pull sats to our side on ``704776x2087x3`` in amounts of 100000 sats while paying max 300ppm and only using candidates where we charge 0ppm, use defaults (see [Options](#options)) for the rest of the parameters":
 
@@ -148,7 +149,7 @@ You can completely leave out optional (those in ``()``) arguments, with one exce
 * ``candidates``: a list of our scid's to use for rebalancing this channel. E.g.: ``'["704776x2087x5","702776x1087x2"]'`` You can still combine this with ``outppm``
 * ``depleteuptopercent``: how much % to leave the candidates with on the remote side of the channel as a floating point between 0 and <1. Default is ``0.2``. Also see [Depleteformula](#depleteformula). You can set this globally, see [Options](#options).
 * ``depleteuptoamount``: how many sats to leave the candidates with on the remote side of the channel. Default is ``2000000``sats. Also see [Depleteformula](#depleteformula). You can set this globally, see [Options](#options).
-* ``paralleljobs``: How many routes to take in parallel for this job. Default is ``1``.  You can set this globally, see [Options](#options).
+* ``paralleljobs``: How many routes to take in parallel for this job. If you know that the route will be minimum length you should keep this at ``1``. Default is ``1``.  You can set this globally, see [Options](#options).
 
 Easy example: "Push sats to their side on ``704776x2087x3`` in amounts of 100000 sats while paying max 300ppm and only using candidates where we charge >=600ppm, use defaults (see [Options](#options)) for the rest of the parameters":
 
@@ -157,6 +158,23 @@ Easy example: "Push sats to their side on ``704776x2087x3`` in amounts of 100000
 Advanced example: "Push sats to their side on ``704776x2087x3`` in amounts of 100000 sats while paying max 300ppm. Idle when 0.8*capacity_of_704776x2087x3 is on their side, use max 6 hops and only these other channels i have as partners: ``704776x2087x5``, ``702776x1087x2``. Use defaults for the rest of the parameters and (because we omitted ``outppm``) ignore the ppm i charge on my candidates":
 
 ``sling-job -k scid=704776x2087x3 direction=push amount=100000 maxppm=300 target=0.8 maxhops=6 candidates='["704776x2087x5","702776x1087x2"]'``
+
+# One time rebalance with exact amount
+If you just want to rebalance one time instead of continuously use the ``sling-once`` command. It is similar to ``sling-job``. You don't need to run ``sling-go`` or ``sling-stop`` for this command and some arguments are different. It will immediately start and then stop once the ``total_amount`` is rebalanced. A plugin restart will forget about all running ``sling-once`` commands!
+
+``sling-once -k scid direction amount maxppm total_amount (outppm)(maxhops) (candidates) (depleteuptopercent) (depleteuptoamount) (paralleljobs)``
+
+* ``scid``: the ShortChannelId to push sats out of e.g. ``704776x2087x3``
+* ``direction``: set this to ``push`` to make it clear to push the sats out of the channel declared by ``scid``
+* ``amount``: the amount in sats used per rebalance operation (not to be confused with the total amount you want to rebalance: ``total_amount``)
+* ``maxppm``: the max *effective* ppm to use for the rebalances
+* ``total_amount``: total amount of sats you want to rebalance, must be a multiple of ``amount``
+* ``outppm``: while building the list of channels to push into, choose only the ones where we *effectively* charge >= ``outppm``
+* ``maxhops``: maximum number of hops allowed in a route. A hop is a node that is not us. Default is ``8``
+* ``candidates``: a list of our scid's to use for rebalancing this channel. E.g.: ``'["704776x2087x5","702776x1087x2"]'`` You can still combine this with ``outppm``
+* ``depleteuptopercent``: how much % to leave the candidates with on the remote side of the channel as a floating point between 0 and <1. Default is ``0.2``. Also see [Depleteformula](#depleteformula). You can set this globally, see [Options](#options).
+* ``depleteuptoamount``: how many sats to leave the candidates with on the remote side of the channel. Default is ``2000000``sats. Also see [Depleteformula](#depleteformula). You can set this globally, see [Options](#options).
+* ``paralleljobs``: How many routes to take in parallel for this job. If you know that the route will be minimum length you should keep this at ``1``. Default is ``1``.  You can set this globally, see [Options](#options).
 
 # Depleteformula
 Formula is ``min(depleteuptopercent * channel_capacity, depleteuptoamount)``. If you don't set one or both, the global default will be used for one or both respectively instead. You can change the global defaults here: [Options](#options)

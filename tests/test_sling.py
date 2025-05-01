@@ -717,6 +717,189 @@ def test_private_candidates(node_factory, bitcoind, get_plugin):  # noqa: F811
         assert chan_partner["scid"] == l2_chan_aliases[0]
 
 
+def test_once(node_factory, bitcoind, get_plugin):  # noqa: F811
+    l1, l2, l3 = node_factory.get_nodes(
+        3,
+        opts=[
+            {
+                "plugin": get_plugin,
+                "sling-refresh-gossmap-interval": 1,
+                "sling-depleteuptopercent": 0.0,
+                "log-level": "debug",
+            },
+            {"log-level": "debug"},
+            {"log-level": "debug"},
+        ],
+    )
+    l1.fundwallet(10_000_000)
+    l2.fundwallet(10_000_000)
+    l3.fundwallet(10_000_000)
+    l1.rpc.fundchannel(l2.info["id"] + "@localhost:" + str(l2.port), 1_000_000)
+    l3.rpc.fundchannel(l1.info["id"] + "@localhost:" + str(l1.port), 1_000_000)
+    l2.rpc.fundchannel(
+        l3.info["id"] + "@localhost:" + str(l3.port),
+        2_000_000,
+        push_msat=1_000_000_000,
+    )
+    bitcoind.generate_block(1)
+    sync_blockheight(bitcoind, [l1, l2, l3])
+    l2.rpc.fundchannel(
+        l3.info["id"] + "@localhost:" + str(l3.port),
+        2_000_000,
+        push_msat=1_000_000_000,
+    )
+    bitcoind.generate_block(1)
+    sync_blockheight(bitcoind, [l1, l2, l3])
+    l2.rpc.fundchannel(
+        l3.info["id"] + "@localhost:" + str(l3.port),
+        2_000_000,
+        push_msat=1_000_000_000,
+    )
+    bitcoind.generate_block(1)
+    sync_blockheight(bitcoind, [l1, l2, l3])
+    l2.rpc.fundchannel(
+        l3.info["id"] + "@localhost:" + str(l3.port),
+        2_000_000,
+        push_msat=1_000_000_000,
+    )
+    bitcoind.generate_block(6)
+    sync_blockheight(bitcoind, [l1, l2, l3])
+
+    wait_for(lambda: len(l1.rpc.listpeerchannels()["channels"]) == 2)
+    l1.daemon.wait_for_log(r"12 public channels")
+    chans = l1.rpc.listpeerchannels()["channels"]
+    for chan in chans:
+        if chan["spendable_msat"] == 0:
+            scid_l3 = chan["short_channel_id"]
+        elif chan["receivable_msat"] == 0:
+            _scid_l2 = chan["short_channel_id"]
+
+    l1.rpc.call(
+        "sling-job",
+        {
+            "scid": scid_l3,
+            "direction": "pull",
+            "amount": 100_000,
+            "maxppm": 1000,
+            "outppm": 1000,
+            "target": 0.1,
+        },
+    )
+
+    l1.rpc.call("sling-go", [])
+    l1.daemon.wait_for_log(r"Rebalance SUCCESSFULL after")
+    l1.daemon.wait_for_log(r"already balanced. Taking a break")
+    stats = l1.rpc.call("sling-stats", [scid_l3])["successes_in_time_window"]
+    assert stats["total_amount_sats"] == 100_000
+    stats = l1.rpc.call("sling-stats", [True])
+    assert len(stats) == 1
+    assert stats[0]["status"] == ["1:Balanced"]
+
+    with pytest.raises(RpcError, match="There is already a job for that scid!"):
+        l1.rpc.call(
+            "sling-once",
+            {
+                "scid": scid_l3,
+                "direction": "pull",
+                "amount": 100_000,
+                "maxppm": 1000,
+                "outppm": 1000,
+                "total_amount": 300_000,
+                "paralleljobs": 3,
+            },
+        )
+
+    l1.rpc.call("sling-deletejob", [scid_l3])
+
+    stats = l1.rpc.call("sling-stats", [True])
+    assert len(stats) == 0
+
+    l1.rpc.call(
+        "sling-once",
+        {
+            "scid": scid_l3,
+            "direction": "pull",
+            "amount": 25_000,
+            "maxppm": 1000,
+            "outppm": 1000,
+            "total_amount": 300_000,
+            "paralleljobs": 1,
+        },
+    )
+
+    with pytest.raises(
+        RpcError, match="Once-job is currently running for this channel"
+    ):
+        l1.rpc.call(
+            "sling-job",
+            {
+                "scid": scid_l3,
+                "direction": "pull",
+                "amount": 100_000,
+                "maxppm": 1000,
+                "outppm": 1000,
+            },
+        )
+
+    l1.rpc.call("sling-stop", [scid_l3])
+    l1.daemon.wait_for_log(r"Stopping job...")
+    l1.daemon.wait_for_log(r"Spawned once-job exited")
+
+    assert (
+        l1.rpc.call("sling-stats", [scid_l3])["successes_in_time_window"][
+            "total_amount_sats"
+        ]
+        == 125_000
+    )
+
+    l1.rpc.call(
+        "sling-once",
+        {
+            "scid": scid_l3,
+            "direction": "pull",
+            "amount": 25_000,
+            "maxppm": 1000,
+            "outppm": 1000,
+            "total_amount": 100_000,
+            "paralleljobs": 4,
+        },
+    )
+
+    wait_for(
+        lambda: l1.rpc.call("sling-stats", [scid_l3])["successes_in_time_window"][
+            "total_amount_sats"
+        ]
+        == 225_000
+    )
+
+    stats = l1.rpc.call("sling-stats", [True])
+    assert len(stats) == 1
+    assert stats[0]["status"] == [
+        "1:Balanced",
+        "2:Balanced",
+        "3:Balanced",
+        "4:Balanced",
+    ]
+
+    l1.rpc.call(
+        "sling-job",
+        {
+            "scid": scid_l3,
+            "direction": "pull",
+            "amount": 100_000,
+            "maxppm": 1000,
+            "outppm": 1000,
+            "target": 0.4,
+        },
+    )
+
+    l1.rpc.call("sling-go", [])
+    l1.daemon.wait_for_log(r"Rebalance SUCCESSFULL after")
+    l1.daemon.wait_for_log(r"already balanced. Taking a break")
+    stats = l1.rpc.call("sling-stats", [scid_l3])["successes_in_time_window"]
+    assert stats["total_amount_sats"] == 425_000
+
+
 def test_gossip(node_factory, bitcoind, get_plugin):  # noqa: F811
     #       l2
     # l1 <      > l4

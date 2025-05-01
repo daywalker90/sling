@@ -190,6 +190,11 @@ async fn main() -> Result<(), anyhow::Error> {
             slingstop,
         )
         .rpcmethod(
+            &(PLUGIN_NAME.to_string() + "-once"),
+            "run sling rebalacnce once",
+            slingonce,
+        )
+        .rpcmethod(
             &(PLUGIN_NAME.to_string() + "-stats"),
             "show stats on channel(s)",
             slingstats,

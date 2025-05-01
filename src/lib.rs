@@ -88,7 +88,11 @@ pub struct Job {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub depleteuptoamount: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub paralleljobs: Option<u8>,
+    pub paralleljobs: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub once: Option<()>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_amount_msat: Option<u64>,
 }
 
 impl Job {
@@ -98,7 +102,9 @@ impl Job {
         chan_id: &ShortChannelId,
     ) -> bool {
         let target_cap = self.target_cap(channel);
-        log::debug!("{}: target: {}sats", chan_id, target_cap / 1_000);
+        if self.once.is_none() {
+            log::debug!("{}: target: {}sats", chan_id, target_cap / 1_000);
+        }
 
         let channel_msat = Amount::msat(&channel.total_msat.unwrap());
         let to_us_msat = Amount::msat(&channel.to_us_msat.unwrap());
@@ -112,6 +118,9 @@ impl Job {
         let target = self.target.unwrap_or(0.5);
 
         let total_msat = Amount::msat(&channel.total_msat.unwrap());
+        if let Some(()) = self.once {
+            return total_msat;
+        }
         let their_reserve_msat = Amount::msat(&channel.their_reserve_msat.unwrap());
         let our_reserve_msat = Amount::msat(&channel.our_reserve_msat.unwrap());
 
