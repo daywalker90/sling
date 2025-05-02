@@ -24,7 +24,7 @@ use crate::model::JOB_FILE_NAME;
 use crate::model::PLUGIN_NAME;
 use crate::model::{JobMessage, JobState, LnGraph};
 use crate::slingstop;
-use crate::DirectedChannelState;
+use crate::ShortChannelIdDirState;
 use sling::Job;
 
 use crate::tasks::refresh_listpeerchannels;
@@ -271,7 +271,7 @@ pub fn get_total_htlc_count(channel: &ListpeerchannelsChannels) -> u64 {
     }
 }
 
-pub fn edge_cost(edge: &DirectedChannelState, amount: u64) -> u64 {
+pub fn edge_cost(edge: &ShortChannelIdDirState, amount: u64) -> u64 {
     // debug!(
     //     "edge cost for {} source:{} is {}",
     //     edge.short_channel_id.to_string(),

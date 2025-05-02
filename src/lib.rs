@@ -5,7 +5,7 @@ use cln_rpc::{
     model::responses::ListpeerchannelsChannels,
     primitives::{Amount, PublicKey, ShortChannelId},
 };
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq, Eq)]
@@ -32,40 +32,6 @@ impl fmt::Display for SatDirection {
             SatDirection::Pull => write!(f, "pull"),
             SatDirection::Push => write!(f, "push"),
         }
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct DirectedChannel {
-    pub short_channel_id: ShortChannelId,
-    pub direction: u32,
-}
-impl fmt::Display for DirectedChannel {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}/{}", self.short_channel_id, self.direction)
-    }
-}
-impl Serialize for DirectedChannel {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&format!("{}/{}", self.short_channel_id, self.direction))
-    }
-}
-impl<'de> Deserialize<'de> for DirectedChannel {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        use serde::de::Error;
-        let data = <&str>::deserialize(deserializer)?;
-        let mut parts = data.splitn(2, '/');
-        let short_channel_id = ShortChannelId::from_str(parts.next().unwrap())
-            .map_err(|_| Error::custom("Could not parse short_channel_id"))?;
-        let direction: u32 = parts
-            .next()
-            .ok_or_else(|| Error::custom("request must contain dash"))?
-            .parse()
-            .map_err(Error::custom)?;
-        Ok(Self {
-            short_channel_id,
-            direction,
-        })
     }
 }
 
