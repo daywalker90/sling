@@ -10,10 +10,9 @@ use std::{
 use anyhow::{anyhow, Error};
 use bitcoin::secp256k1::PublicKey;
 use cln_plugin::Plugin;
-use cln_rpc::primitives::{Amount, ShortChannelId};
-use sling::DirectedChannel;
+use cln_rpc::primitives::{Amount, ShortChannelId, ShortChannelIdDir};
 
-use crate::{DirectedChannelState, PluginState};
+use crate::{model::ShortChannelIdDirState, PluginState};
 
 #[derive(Debug, Clone)]
 pub struct ChannelUpdate {
@@ -57,7 +56,7 @@ pub async fn read_gossip_store(plugin: Plugin<PluginState>, offset: &mut u64) ->
     }
 
     let mut channel_anns = plugin.state().gossip_store_anns.lock();
-    let mut channel_updates: HashMap<DirectedChannel, ChannelUpdate> = HashMap::new();
+    let mut channel_updates: HashMap<ShortChannelIdDir, ChannelUpdate> = HashMap::new();
     let mut channel_amts = plugin.state().gossip_store_amts.lock();
     let mut channel_dels = Vec::new();
     let mut last_scid = None;
@@ -131,7 +130,7 @@ pub async fn read_gossip_store(plugin: Plugin<PluginState>, offset: &mut u64) ->
                 reader.read_exact(&mut update)?;
                 let (scid, chan_up) = parse_channel_update(&update)?;
                 channel_updates.insert(
-                    DirectedChannel {
+                    ShortChannelIdDir {
                         short_channel_id: scid,
                         direction: chan_up.direction,
                     },
@@ -146,7 +145,7 @@ pub async fn read_gossip_store(plugin: Plugin<PluginState>, offset: &mut u64) ->
                 reader.read_exact(&mut update)?;
                 let (scid, chan_up) = parse_channel_update(&update[4..])?;
                 channel_updates.insert(
-                    DirectedChannel {
+                    ShortChannelIdDir {
                         short_channel_id: scid,
                         direction: chan_up.direction,
                     },
@@ -173,11 +172,11 @@ pub async fn read_gossip_store(plugin: Plugin<PluginState>, offset: &mut u64) ->
                 let scid = extract_scid(&scid_bytes)?;
                 channel_dels.push(scid);
                 channel_anns.remove(&scid);
-                channel_updates.remove(&DirectedChannel {
+                channel_updates.remove(&ShortChannelIdDir {
                     short_channel_id: scid,
                     direction: 0,
                 });
-                channel_updates.remove(&DirectedChannel {
+                channel_updates.remove(&ShortChannelIdDir {
                     short_channel_id: scid,
                     direction: 1,
                 });
@@ -192,11 +191,11 @@ pub async fn read_gossip_store(plugin: Plugin<PluginState>, offset: &mut u64) ->
                 let scid = extract_scid(&scid_bytes[0..8])?;
                 channel_dels.push(scid);
                 channel_anns.remove(&scid);
-                channel_updates.remove(&DirectedChannel {
+                channel_updates.remove(&ShortChannelIdDir {
                     short_channel_id: scid,
                     direction: 0,
                 });
-                channel_updates.remove(&DirectedChannel {
+                channel_updates.remove(&ShortChannelIdDir {
                     short_channel_id: scid,
                     direction: 1,
                 });
@@ -238,11 +237,11 @@ pub async fn read_gossip_store(plugin: Plugin<PluginState>, offset: &mut u64) ->
     }
 
     for (ann_scid, chan_ann) in channel_anns.iter() {
-        let dir_chan_0 = DirectedChannel {
+        let dir_chan_0 = ShortChannelIdDir {
             short_channel_id: *ann_scid,
             direction: 0,
         };
-        let dir_chan_1 = DirectedChannel {
+        let dir_chan_1 = ShortChannelIdDir {
             short_channel_id: *ann_scid,
             direction: 1,
         };
@@ -254,7 +253,7 @@ pub async fn read_gossip_store(plugin: Plugin<PluginState>, offset: &mut u64) ->
                         chan_ann.source,
                         chan_ann.destination,
                     )?;
-                    let new_dir_chan_state = DirectedChannelState {
+                    let new_dir_chan_state = ShortChannelIdDirState {
                         source,
                         destination,
                         active: chan_update.active,
@@ -289,10 +288,10 @@ pub async fn read_gossip_store(plugin: Plugin<PluginState>, offset: &mut u64) ->
     channel_anns.retain(|scid, chan_ann| {
         let has_channel = |node| {
             lngraph.graph.get(node).is_some_and(|channels| {
-                channels.contains_key(&DirectedChannel {
+                channels.contains_key(&ShortChannelIdDir {
                     short_channel_id: *scid,
                     direction: 0,
-                }) || channels.contains_key(&DirectedChannel {
+                }) || channels.contains_key(&ShortChannelIdDir {
                     short_channel_id: *scid,
                     direction: 1,
                 })

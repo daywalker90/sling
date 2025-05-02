@@ -6,7 +6,7 @@ use cln_rpc::model::requests::SendpayRoute;
 use cln_rpc::model::responses::ListpeerchannelsChannels;
 use cln_rpc::primitives::*;
 
-use sling::{DirectedChannel, Job, SatDirection};
+use sling::{Job, SatDirection};
 use std::cmp::{max, min};
 
 use std::collections::HashMap;
@@ -511,11 +511,11 @@ async fn next_route(
         let route_claim_chan = route[route.len() / 2].channel;
         let route_claim_peer = route[(route.len() / 2) - 1].id;
         if let Some(source_node) = graph.graph.get(&route_claim_peer) {
-            let dir_chan_0 = DirectedChannel {
+            let dir_chan_0 = ShortChannelIdDir {
                 short_channel_id: route_claim_chan,
                 direction: 0,
             };
-            let dir_chan_1 = DirectedChannel {
+            let dir_chan_1 = ShortChannelIdDir {
                 short_channel_id: route_claim_chan,
                 direction: 1,
             };

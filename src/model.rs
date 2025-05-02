@@ -10,11 +10,11 @@ use std::{
 use anyhow::{anyhow, Error};
 use cln_rpc::{
     model::responses::ListpeerchannelsChannels,
-    primitives::{Amount, PublicKey, ShortChannelId},
+    primitives::{Amount, PublicKey, ShortChannelId, ShortChannelIdDir},
 };
 use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
-use sling::{DirectedChannel, Job};
+use sling::Job;
 use tabled::Tabled;
 use tokio::{
     fs::{self, File, OpenOptions},
@@ -48,7 +48,7 @@ pub struct PluginState {
     pub excepts_chans: Arc<Mutex<HashSet<ShortChannelId>>>,
     pub excepts_peers: Arc<Mutex<HashSet<PublicKey>>>,
     pub tempbans: Arc<Mutex<HashMap<ShortChannelId, u64>>>,
-    pub parrallel_bans: Arc<Mutex<HashMap<ShortChannelId, HashMap<u16, DirectedChannel>>>>,
+    pub parrallel_bans: Arc<Mutex<HashMap<ShortChannelId, HashMap<u16, ShortChannelIdDir>>>>,
     pub job_state: Arc<Mutex<HashMap<ShortChannelId, Vec<JobState>>>>,
     pub blockheight: Arc<Mutex<u32>>,
     pub gossip_store_anns: Arc<Mutex<HashMap<ShortChannelId, ChannelAnnouncement>>>,
@@ -331,7 +331,7 @@ impl Display for JobMessage {
 #[derive(Debug, Clone, Copy)]
 pub struct DijkstraNode<'a> {
     pub score: u64,
-    pub channel_state: &'a DirectedChannelState,
+    pub channel_state: &'a ShortChannelIdDirState,
     pub short_channel_id: ShortChannelId,
     pub destination: PublicKey,
     pub hops: u8,
@@ -348,7 +348,7 @@ impl PartialEq for DijkstraNode<'_> {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct DirectedChannelState {
+pub struct ShortChannelIdDirState {
     pub source: PublicKey,
     pub destination: PublicKey,
     pub active: bool,
@@ -365,7 +365,7 @@ pub struct DirectedChannelState {
     pub liquidity_age: u64,
     pub private: bool,
 }
-impl DirectedChannelState {
+impl ShortChannelIdDirState {
     pub fn update(&mut self, channel_update: &ChannelUpdate) {
         self.active = channel_update.active;
         self.last_update = channel_update.last_update;
@@ -391,7 +391,7 @@ pub struct ExcludeGraph {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LnGraph {
-    pub graph: HashMap<PublicKey, HashMap<DirectedChannel, DirectedChannelState>>,
+    pub graph: HashMap<PublicKey, HashMap<ShortChannelIdDir, ShortChannelIdDirState>>,
 }
 impl LnGraph {
     pub fn new() -> Self {
@@ -420,14 +420,14 @@ impl LnGraph {
         &self,
         source: &PublicKey,
         scid: &ShortChannelId,
-    ) -> Result<&DirectedChannelState, Error> {
+    ) -> Result<&ShortChannelIdDirState, Error> {
         if let Some(node_channels) = self.graph.get(source) {
-            if let Some(dir_0) = node_channels.get(&DirectedChannel {
+            if let Some(dir_0) = node_channels.get(&ShortChannelIdDir {
                 short_channel_id: *scid,
                 direction: 0,
             }) {
                 Ok(dir_0)
-            } else if let Some(dir_1) = node_channels.get(&DirectedChannel {
+            } else if let Some(dir_1) = node_channels.get(&ShortChannelIdDir {
                 short_channel_id: *scid,
                 direction: 1,
             }) {
@@ -447,8 +447,8 @@ impl LnGraph {
         job: &Job,
         candidatelist: &[ShortChannelId],
         tempbans: &HashMap<ShortChannelId, u64>,
-        parallel_bans: &[DirectedChannel],
-    ) -> Vec<(&DirectedChannel, &DirectedChannelState)> {
+        parallel_bans: &[ShortChannelIdDir],
+    ) -> Vec<(&ShortChannelIdDir, &ShortChannelIdDirState)> {
         if let Some(node_channels) = self.graph.get(&keypair.other_pubkey) {
             let twow_ago = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -493,9 +493,9 @@ impl LnGraph {
                             true
                         }
                 })
-                .collect::<Vec<(&DirectedChannel, &DirectedChannelState)>>()
+                .collect::<Vec<(&ShortChannelIdDir, &ShortChannelIdDirState)>>()
         } else {
-            Vec::<(&DirectedChannel, &DirectedChannelState)>::new()
+            Vec::<(&ShortChannelIdDir, &ShortChannelIdDirState)>::new()
         }
     }
 }
