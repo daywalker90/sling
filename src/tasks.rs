@@ -1,5 +1,7 @@
 use std::{
     collections::HashMap,
+    fs::File,
+    io::BufReader,
     path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -70,7 +72,10 @@ pub async fn refresh_listpeerchannels(plugin: &Plugin<PluginState>) -> Result<()
 
     let now = Instant::now();
     *plugin.state().peer_channels.lock() = rpc
-        .call_typed(&ListpeerchannelsRequest { id: None })
+        .call_typed(&ListpeerchannelsRequest {
+            id: None,
+            short_channel_id: None,
+        })
         .await?
         .channels
         .into_iter()
@@ -83,13 +88,19 @@ pub async fn refresh_listpeerchannels(plugin: &Plugin<PluginState>) -> Result<()
 pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
     let my_pubkey;
     let sling_dir;
-    let mut offset = 0;
+    // let mut offset = 0;
+    let mut is_startup = true;
     {
         let config = plugin.state().config.lock();
         my_pubkey = config.pubkey;
         sling_dir = config.sling_dir.clone();
     }
     *plugin.state().graph.lock() = read_graph(&sling_dir).await?;
+
+    let gossip_file =
+        File::open(Path::new(&plugin.configuration().lightning_dir).join("gossip_store"))?;
+
+    let mut reader = BufReader::new(gossip_file);
 
     loop {
         let interval;
@@ -101,7 +112,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
             }
             {
                 log::debug!("Getting all channels in gossip_store...");
-                read_gossip_store(plugin.clone(), &mut offset).await?;
+                read_gossip_store(plugin.clone(), &mut reader, &mut is_startup).await?;
                 log::debug!(
                     "Reading gossip store done after {}ms!",
                     now.elapsed().as_millis()

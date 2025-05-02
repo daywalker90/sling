@@ -1,9 +1,7 @@
 use std::{
     collections::HashMap,
     fs::File,
-    io::{BufReader, Read, Seek, SeekFrom},
-    path::Path,
-    str::FromStr,
+    io::{BufReader, Read},
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -12,11 +10,14 @@ use bitcoin::secp256k1::PublicKey;
 use cln_plugin::Plugin;
 use cln_rpc::primitives::{Amount, ShortChannelId, ShortChannelIdDir};
 
-use crate::{model::ShortChannelIdDirState, PluginState};
+use crate::{
+    model::{LnGraph, ShortChannelIdDirState},
+    PluginState,
+};
 
 #[derive(Debug, Clone)]
 pub struct ChannelUpdate {
-    pub direction: u32,
+    // pub direction: u32,
     // pub message_flags: u8,
     // pub channel_flags: u8,
     pub active: bool,
@@ -35,198 +36,94 @@ pub struct ChannelAnnouncement {
     // pub features: String,
 }
 
-pub async fn read_gossip_store(plugin: Plugin<PluginState>, offset: &mut u64) -> Result<(), Error> {
-    let now = Instant::now();
-    log::debug!("gossip_reader: offset:{}", offset);
-    let is_start_up = *offset == 0;
+const CHUNK_SIZE: usize = 10 * 1024 * 1024;
 
-    let file = File::open(Path::new(&plugin.configuration().lightning_dir).join("gossip_store"))?;
-    let mut reader = BufReader::new(file);
-
-    if is_start_up {
-        // Read and check the version
-        log::debug!("gossip_reader: checking gossip_store version...");
-        let mut version = [0u8; 1];
-        reader.read_exact(&mut version)?;
-        if (u8::from_be_bytes(version) & 0b1110_0000) != 0b0000_0000 {
-            log::warn!("gossip_reader: Unsupported gossip_store version!");
-            return plugin.shutdown();
-        }
-        log::debug!("gossip_reader: gossip_store version is good");
-    }
-
+pub async fn read_gossip_store(
+    plugin: Plugin<PluginState>,
+    reader: &mut BufReader<File>,
+    is_start_up: &mut bool,
+) -> Result<(), Error> {
     let mut channel_anns = plugin.state().gossip_store_anns.lock();
-    let mut channel_updates: HashMap<ShortChannelIdDir, ChannelUpdate> = HashMap::new();
     let mut channel_amts = plugin.state().gossip_store_amts.lock();
-    let mut channel_dels = Vec::new();
-    let mut last_scid = None;
+    let mut lngraph = plugin.state().graph.lock();
 
-    reader.seek(SeekFrom::Current(*offset as i64))?;
-    loop {
-        *offset = reader.stream_position()?;
-        // Read the record header + type
-        let mut header_type = [0u8; 14];
+    let mut offset = 0;
 
-        let flags;
-        let len;
-        // let crc;
-        // let timestamp;
-        let msg_type;
-        match reader.read_exact(&mut header_type) {
-            Ok(_) => {
-                flags = u16::from_be_bytes(header_type[0..2].try_into()?);
-                len = u16::from_be_bytes(header_type[2..4].try_into()?);
-                // crc = u32::from_be_bytes(header_type[4..8].try_into()?);
-                // timestamp = u32::from_be_bytes(header_type[8..12].try_into()?);
-                msg_type = u16::from_be_bytes(header_type[12..14].try_into()?);
-            }
-            Err(e) => {
-                // EOF or read error
-                log::debug!(
-                    "gossip_reader: header error at {}:{} (not an actual error if \
-                        buffer could not be filled)",
-                    offset,
-                    e
-                );
-                break;
-            }
-        };
+    read_gossip_file(
+        is_start_up,
+        reader,
+        &mut lngraph,
+        &mut offset,
+        &mut channel_anns,
+        &mut channel_amts,
+    )?;
 
-        // Check if the record is marked as deleted
-        if flags & 0x8000 != 0 {
-            reader.seek(SeekFrom::Current((len - 2) as i64))?;
-            continue;
+    Ok(())
+}
+
+fn read_gossip_file(
+    is_start_up: &mut bool,
+    reader: &mut BufReader<File>,
+    lngraph: &mut LnGraph,
+    offset: &mut usize,
+    channel_anns: &mut HashMap<ShortChannelId, ChannelAnnouncement>,
+    channel_amts: &mut HashMap<ShortChannelId, u64>,
+) -> Result<(), anyhow::Error> {
+    let now = Instant::now();
+
+    if *is_start_up {
+        // Read and check the version
+        let mut gossip_ver_buffer = vec![0u8; 1];
+        reader.read_exact(&mut gossip_ver_buffer)?;
+        log::debug!("gossip_gossip_file: checking gossip_store version...");
+        if (gossip_ver_buffer[0] & 0b1110_0000) != 0b0000_0000 {
+            log::warn!("gossip_gossip_file: Unsupported gossip_store version!");
+            return Err(anyhow!(
+                "gossip_gossip_file: Unsupported gossip_store version!"
+            ));
         }
-        // Check if the record is marked as dying
-        if flags & 0x0800 != 0 {
-            reader.seek(SeekFrom::Current((len - 2) as i64))?;
-            continue;
-        }
-
-        match msg_type {
-            256 => {
-                // public channel_announcement
-                let mut ann = vec![0u8; len as usize - 2];
-                reader.read_exact(&mut ann)?;
-                let (scid, chan_ann) = parse_channel_announcement(&ann)?;
-                last_scid = Some(scid);
-                channel_anns.insert(scid, chan_ann);
-            }
-            4104 => {
-                // private_channel_announcement
-                //  `gossip_store_private_channel` (4104)
-                //   - `amount_sat`: u64
-                //   - `len`: u16
-                //   - `msg_type + announcement`: u16 + u8[len-2]
-                let mut ann = vec![0u8; len as usize - 2];
-                reader.read_exact(&mut ann)?;
-                let (scid, chan_ann) = parse_channel_announcement(&ann[12..])?;
-                channel_amts.insert(scid, u64::from_be_bytes(ann[0..8].try_into()?));
-                channel_anns.insert(scid, chan_ann);
-            }
-            258 => {
-                // channel_update
-                let mut update = vec![0u8; len as usize - 2];
-                reader.read_exact(&mut update)?;
-                let (scid, chan_up) = parse_channel_update(&update)?;
-                channel_updates.insert(
-                    ShortChannelIdDir {
-                        short_channel_id: scid,
-                        direction: chan_up.direction,
-                    },
-                    chan_up,
-                );
-            }
-            4102 => {
-                //   - `gossip_store_private_update` (4102)
-                //   - `len`: u16
-                //   - `msg_type + update`: u16 + u8[len-2]
-                let mut update = vec![0u8; len as usize - 2];
-                reader.read_exact(&mut update)?;
-                let (scid, chan_up) = parse_channel_update(&update[4..])?;
-                channel_updates.insert(
-                    ShortChannelIdDir {
-                        short_channel_id: scid,
-                        direction: chan_up.direction,
-                    },
-                    chan_up,
-                );
-            }
-            4101 => {
-                // gossip_store_channel_amount
-                //  - `satoshis`: u64
-                let mut satoshis = [0u8; 8];
-                reader.read_exact(&mut satoshis)?;
-                if let Some(scid) = last_scid {
-                    channel_amts.insert(scid, u64::from_be_bytes(satoshis));
-                    last_scid = None;
-                } else {
-                    log::warn!("gossip_reader: Malformed gossip_store: 4101 without 256")
-                }
-            }
-            4103 => {
-                // 4103 gossip_store_delete_chan
-                //  - `scid`: u64
-                let mut scid_bytes = vec![0u8; 8];
-                reader.read_exact(&mut scid_bytes)?;
-                let scid = extract_scid(&scid_bytes)?;
-                channel_dels.push(scid);
-                channel_anns.remove(&scid);
-                channel_updates.remove(&ShortChannelIdDir {
-                    short_channel_id: scid,
-                    direction: 0,
-                });
-                channel_updates.remove(&ShortChannelIdDir {
-                    short_channel_id: scid,
-                    direction: 1,
-                });
-                channel_amts.remove(&scid);
-            }
-            4106 => {
-                // 4106 WIRE_GOSSIP_STORE_CHAN_DYING
-                //  - `scid`: u64
-                //  - `blockheight`: u32
-                let mut scid_bytes = vec![0u8; 12];
-                reader.read_exact(&mut scid_bytes)?;
-                let scid = extract_scid(&scid_bytes[0..8])?;
-                channel_dels.push(scid);
-                channel_anns.remove(&scid);
-                channel_updates.remove(&ShortChannelIdDir {
-                    short_channel_id: scid,
-                    direction: 0,
-                });
-                channel_updates.remove(&ShortChannelIdDir {
-                    short_channel_id: scid,
-                    direction: 1,
-                });
-                channel_amts.remove(&scid);
-            }
-            _e => {
-                // Unknown message type
-                // debug!("unknown: {}", e);
-                reader.seek(SeekFrom::Current(len as i64 - 2))?;
-            }
-        }
+        log::debug!("gossip_gossip_file: gossip_store version is good");
     }
-    log::debug!(
-        "gossip_reader: gossip_store read in: {}ms",
-        now.elapsed().as_millis()
-    );
-    log::debug!(
-        "gossip_reader: found updates:{} announcements:{} amounts:{} deletes/dying:{}",
-        channel_updates.len(),
-        channel_anns.len(),
-        channel_amts.len(),
-        channel_dels.len()
-    );
 
+    let mut gossip_file = vec![0u8; CHUNK_SIZE];
+    let mut channel_updates: HashMap<ShortChannelIdDir, ChannelUpdate> = HashMap::new();
+    let mut channel_dels: Vec<ShortChannelId> = Vec::new();
+
+    loop {
+        let mut bytes_read = 0;
+
+        // Read up to CHUNK_SIZE bytes
+        while bytes_read < CHUNK_SIZE {
+            match reader.read(&mut gossip_file[bytes_read..]) {
+                Ok(0) => break, // EOF reached
+                Ok(n) => bytes_read += n,
+                Err(e) => return Err(e).map_err(|e| anyhow!("Error reading gossip file: {}", e)),
+            }
+        }
+
+        if bytes_read == 0 {
+            break;
+        }
+
+        read_gossip_file_chunk(
+            &now,
+            &gossip_file[..bytes_read],
+            offset,
+            channel_anns,
+            channel_amts,
+            &mut channel_updates,
+            &mut channel_dels,
+        )?;
+        if *offset < CHUNK_SIZE {
+            reader.seek_relative(*offset as i64 - bytes_read as i64)?;
+        }
+        *offset = 0;
+    }
     let post_now = Instant::now();
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
-
-    let mut lngraph = plugin.state().graph.lock();
 
     for node_channels in lngraph.graph.values_mut() {
         for (dir_chan, dir_chan_state) in node_channels {
@@ -248,11 +145,8 @@ pub async fn read_gossip_store(plugin: Plugin<PluginState>, offset: &mut u64) ->
         for dir_chan in [dir_chan_0, dir_chan_1] {
             if let Some(chan_update) = channel_updates.get(&dir_chan) {
                 if let Some(chan_amt) = channel_amts.get(ann_scid) {
-                    let (source, destination) = get_node_order(
-                        chan_update.direction,
-                        chan_ann.source,
-                        chan_ann.destination,
-                    )?;
+                    let (source, destination) =
+                        get_node_order(dir_chan.direction, chan_ann.source, chan_ann.destination)?;
                     let new_dir_chan_state = ShortChannelIdDirState {
                         source,
                         destination,
@@ -305,7 +199,7 @@ pub async fn read_gossip_store(plugin: Plugin<PluginState>, offset: &mut u64) ->
 
     for channels in lngraph.graph.values_mut() {
         channels.retain(|dir_chan, _| {
-            if is_start_up {
+            if *is_start_up {
                 !channel_dels.contains(&dir_chan.short_channel_id)
                     && channel_updates.contains_key(dir_chan)
             } else {
@@ -314,10 +208,164 @@ pub async fn read_gossip_store(plugin: Plugin<PluginState>, offset: &mut u64) ->
         })
     }
 
+    *is_start_up = false;
+
     log::debug!(
-        "gossip_reader: post_processing_time: {}ms",
+        "gossip_gossip_file: post_processing_time: {}ms",
         post_now.elapsed().as_millis()
     );
+    Ok(())
+}
+
+fn read_gossip_file_chunk(
+    now: &Instant,
+    gossip_file: &[u8],
+    offset: &mut usize,
+    channel_anns: &mut HashMap<ShortChannelId, ChannelAnnouncement>,
+    channel_amts: &mut HashMap<ShortChannelId, u64>,
+    channel_updates: &mut HashMap<ShortChannelIdDir, ChannelUpdate>,
+    channel_dels: &mut Vec<ShortChannelId>,
+) -> Result<(), anyhow::Error> {
+    log::debug!("gossip_gossip_file: offset:{}", offset);
+
+    let mut last_scid = None;
+
+    while *offset + 14 < gossip_file.len() {
+        // Read the record header + type
+        let flags = u16::from_be_bytes(gossip_file[*offset..*offset + 2].try_into()?);
+        *offset += 2;
+        let len = u16::from_be_bytes(gossip_file[*offset..*offset + 2].try_into()?) as usize;
+        *offset += 10;
+        if *offset + len > gossip_file.len() {
+            *offset -= 12;
+            break;
+        }
+        // let crc;
+        // let timestamp;
+        let msg_type = u16::from_be_bytes(gossip_file[*offset..*offset + 2].try_into()?);
+        *offset += 2;
+
+        // Check if the record is marked as deleted
+        if flags & 0x8000 != 0 {
+            *offset += len - 2;
+            continue;
+        }
+        // Check if the record is marked as dying
+        // if flags & 0x0800 != 0 {
+        //     *offset += len - 2;
+        //     continue;
+        // }
+
+        match msg_type {
+            256 => {
+                // public channel_announcement
+                let (scid, chan_ann) =
+                    parse_channel_announcement(&gossip_file[*offset..*offset + len - 2])?;
+                *offset += len - 2;
+                last_scid = Some(scid);
+                channel_anns.insert(scid, chan_ann);
+            }
+            4104 => {
+                // private_channel_announcement
+                //  `gossip_store_private_channel` (4104)
+                //   - `amount_sat`: u64
+                //   - `len`: u16
+                //   - `msg_type + announcement`: u16 + u8[len-2]
+
+                let (scid, chan_ann) =
+                    parse_channel_announcement(&gossip_file[*offset + 12..*offset + 10 + len])?;
+                channel_amts.insert(
+                    scid,
+                    u64::from_be_bytes(gossip_file[*offset..*offset + 8].try_into()?),
+                );
+                *offset += len + 10;
+                channel_anns.insert(scid, chan_ann);
+            }
+            258 => {
+                // channel_update
+                let (scid_dir, chan_up) =
+                    parse_channel_update(&gossip_file[*offset..*offset + len - 2])?;
+                *offset += len - 2;
+                channel_updates.insert(scid_dir, chan_up);
+            }
+            4102 => {
+                //   - `gossip_store_private_update` (4102)
+                //   - `len`: u16
+                //   - `msg_type + update`: u16 + u8[len-2]
+                let (scid_dir, chan_up) =
+                    parse_channel_update(&gossip_file[*offset + 4..*offset + 2 + len])?;
+                *offset += len + 2;
+                channel_updates.insert(scid_dir, chan_up);
+            }
+            4101 => {
+                // gossip_store_channel_amount
+                //  - `satoshis`: u64
+                if let Some(scid) = last_scid {
+                    channel_amts.insert(
+                        scid,
+                        u64::from_be_bytes(gossip_file[*offset..*offset + 8].try_into()?),
+                    );
+                    last_scid = None;
+                } else {
+                    log::warn!("gossip_gossip_file: Malformed gossip_store: 4101 without 256")
+                }
+                *offset += 8;
+            }
+            4103 => {
+                // 4103 gossip_store_delete_chan
+                //  - `scid`: u64
+                let scid = extract_scid(&gossip_file[*offset..*offset + 8])?;
+                *offset += 8;
+                channel_dels.push(scid);
+                channel_anns.remove(&scid);
+                channel_updates.remove(&ShortChannelIdDir {
+                    short_channel_id: scid,
+                    direction: 0,
+                });
+                channel_updates.remove(&ShortChannelIdDir {
+                    short_channel_id: scid,
+                    direction: 1,
+                });
+                channel_amts.remove(&scid);
+            }
+            4106 => {
+                // 4106 WIRE_GOSSIP_STORE_CHAN_DYING
+                //  - `scid`: u64
+                //  - `blockheight`: u32
+                let scid = extract_scid(&gossip_file[*offset..*offset + 8])?;
+                // skip blockheight aswell (+4)
+                *offset += 12;
+                channel_dels.push(scid);
+                channel_anns.remove(&scid);
+                channel_updates.remove(&ShortChannelIdDir {
+                    short_channel_id: scid,
+                    direction: 0,
+                });
+                channel_updates.remove(&ShortChannelIdDir {
+                    short_channel_id: scid,
+                    direction: 1,
+                });
+                channel_amts.remove(&scid);
+            }
+            _e => {
+                // Unknown message type
+                // debug!("unknown: {}", e);
+                *offset += len - 2;
+            }
+        }
+    }
+    log::debug!(
+        "gossip_gossip_file: gossip_store read in: {}ms",
+        now.elapsed().as_millis()
+    );
+    log::debug!(
+        "gossip_gossip_file: found updates:{} announcements:{} amounts:{} deletes/dying:{}",
+        channel_updates.len(),
+        channel_anns.len(),
+        channel_amts.len(),
+        channel_dels.len()
+    );
+
     Ok(())
 }
 
@@ -343,19 +391,19 @@ fn get_node_order(
     }
 }
 
-fn extract_scid(buf: &[u8]) -> Result<ShortChannelId, Error> {
-    let block = (u32::from(buf[0]) << 16) | (u32::from(buf[1]) << 8) | u32::from(buf[2]);
-    let tx = (u32::from(buf[3]) << 16) | (u32::from(buf[4]) << 8) | u32::from(buf[5]);
-    let txout = (u16::from(buf[6]) << 8) | u16::from(buf[7]);
-    ShortChannelId::from_str(&format!("{}x{}x{}", block, tx, txout))
+fn extract_scid(gossip_file: &[u8]) -> Result<ShortChannelId, anyhow::Error> {
+    let scid = u64::from_be_bytes(gossip_file.try_into()?);
+    Ok(ShortChannelId::from(scid))
 }
 
-fn parse_channel_update(inpu: &[u8]) -> Result<(ShortChannelId, ChannelUpdate), Error> {
+fn parse_channel_update(inpu: &[u8]) -> Result<(ShortChannelIdDir, ChannelUpdate), Error> {
     let scid = extract_scid(&inpu[96..104])?;
     Ok((
-        scid,
-        ChannelUpdate {
+        ShortChannelIdDir {
+            short_channel_id: scid,
             direction: (inpu[109] & 0b0000_0001) as u32,
+        },
+        ChannelUpdate {
             // message_flags: inpu[108],
             // channel_flags: inpu[109],
             active: ((inpu[109] & 0b0000_0010) >> 1) != 1,
@@ -388,4 +436,98 @@ fn parse_channel_announcement(inpu: &[u8]) -> Result<(ShortChannelId, ChannelAnn
             // features: String::new(),
         },
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::fs::File;
+    use std::io::{BufReader, Read};
+    use std::path::Path;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    use crate::gossip::read_gossip_file;
+    use crate::model::LnGraph;
+
+    // Read current RSS from /proc/self/statm (Linux-specific)
+    fn get_current_rss() -> Option<u64> {
+        let mut file = File::open("/proc/self/statm").ok()?;
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).ok()?;
+        let fields: Vec<&str> = contents.split_whitespace().collect();
+        let resident_pages: u64 = fields.get(1)?.parse().ok()?;
+        Some(resident_pages * 4096) // Convert pages to bytes (4KB page size)
+    }
+    #[test]
+    fn test_gossip_file_reader() {
+        let iterations = 1;
+        let mut vec_times = Vec::new();
+        let mut vec_rss = Vec::new();
+
+        for i in 0..iterations {
+            let peak_rss = Arc::new(AtomicU64::new(0));
+            let sampling_active = Arc::new(std::sync::atomic::AtomicBool::new(true));
+
+            // Spawn a thread to sample RSS
+            let peak_rss_clone = Arc::clone(&peak_rss);
+            let sampling_active_clone = Arc::clone(&sampling_active);
+            let sampling_handle = thread::spawn(move || {
+                while sampling_active_clone.load(Ordering::Relaxed) {
+                    if let Some(rss) = get_current_rss() {
+                        peak_rss_clone.fetch_max(rss, Ordering::Relaxed);
+                    }
+                    thread::sleep(Duration::from_millis(1)); // Sample every 1ms
+                }
+            });
+
+            let gossip_file = File::open(Path::new("gossip_store")).expect("Failed to open file");
+            let mut reader = BufReader::new(gossip_file);
+            let mut is_start_up = true;
+            let mut offset = 0;
+            let mut channel_anns = HashMap::new();
+            let mut channel_amts = HashMap::new();
+            let mut lngraph = LnGraph::new();
+            let now = Instant::now();
+            read_gossip_file(
+                &mut is_start_up,
+                &mut reader,
+                &mut lngraph,
+                &mut offset,
+                &mut channel_anns,
+                &mut channel_amts,
+            )
+            .expect("read_gossip_file failed");
+            let elapsed = now.elapsed().as_millis();
+            // Signal the sampling thread to stop
+            sampling_active.store(false, Ordering::Relaxed);
+
+            // Wait for the sampling thread to finish
+            sampling_handle.join().expect("Sampling thread panicked");
+
+            // Calculate peak RAM used
+            let peak_rss = peak_rss.load(Ordering::Relaxed);
+            println!(
+                "Iteration {}: chans:{} nodes:{} anns:{} amts:{} time: {}ms RAM: {}MB",
+                i + 1,
+                lngraph.graph.values().map(|v| v.len()).sum::<usize>(),
+                lngraph.graph.len(),
+                channel_anns.len(),
+                channel_amts.len(),
+                elapsed,
+                peak_rss / (1024 * 1024)
+            );
+            vec_times.push(elapsed);
+            vec_rss.push(peak_rss);
+        }
+        let vec_avg = vec_times.iter().sum::<u128>() / iterations as u128;
+        let rss_avg = vec_rss.iter().sum::<u64>() / iterations as u64;
+        println!(
+            "average: time {}ms, RAM: {}MB",
+            vec_avg,
+            rss_avg / (1024 * 1024)
+        );
+    }
 }

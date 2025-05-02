@@ -13,10 +13,10 @@ serde_json = "1.0"
 
 tokio = { version = "1", features = ["fs","sync","rt-multi-thread"] }
 
-cln-rpc = "0.4"
-# cln-rpc = { path="../lightning/cln-rpc/", version = "^0.3" }
-cln-plugin = "0.4"
-# cln-plugin = { path="../lightning/plugins/", version = "^0.3" }
+# cln-rpc = "0.4"
+cln-rpc = { path="../lightning/cln-rpc/", version = "^0.4" }
+# cln-plugin = "0.4"
+cln-plugin = { path="../lightning/plugins/", version = "^0.4" }
 
 tabled = "0.19"
 num-format = "0.4"

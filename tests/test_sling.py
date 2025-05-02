@@ -10,6 +10,8 @@ from pyln.testing.fixtures import *  # noqa: F403
 from pyln.testing.utils import only_one, sync_blockheight, wait_for
 from util import get_plugin  # noqa: F401
 
+LOGGER = logging.getLogger(__name__)
+
 
 def test_basic(node_factory, get_plugin):  # noqa: F811
     node = node_factory.get_node(options={"plugin": get_plugin, "log-level": "debug"})
@@ -410,7 +412,6 @@ def test_pull_and_push(node_factory, bitcoind, get_plugin):  # noqa: F811
 
 
 def test_stats(node_factory, bitcoind, get_plugin):  # noqa: F811
-    LOGGER = logging.getLogger(__name__)
     l1, l2 = node_factory.get_nodes(
         2,
         opts=[
@@ -890,6 +891,7 @@ def test_once(node_factory, bitcoind, get_plugin):  # noqa: F811
 
     stats = l1.rpc.call("sling-stats", [True])
     assert len(stats) == 1
+    LOGGER.info(stats[0]["status"])
     assert stats[0]["status"] == [
         "1:Balanced",
         "2:Balanced",
@@ -1057,7 +1059,6 @@ def test_gossip(node_factory, bitcoind, get_plugin):  # noqa: F811
 
 
 def test_splice(node_factory, bitcoind, get_plugin):  # noqa: F811
-    LOGGER = logging.getLogger(__name__)
     l1, l2, l3 = node_factory.line_graph(
         3,
         fundamount=1_000_000,
