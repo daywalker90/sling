@@ -8,11 +8,10 @@ use anyhow::Error;
 use cln_plugin::Plugin;
 use cln_rpc::{
     model::requests::{ListnodesRequest, ListpeerchannelsRequest},
-    primitives::{Amount, ChannelState, ShortChannelId},
+    primitives::{Amount, ChannelState, ShortChannelId, ShortChannelIdDir},
     ClnRpc,
 };
 
-use sling::DirectedChannel;
 use tokio::{
     fs::OpenOptions,
     io::AsyncWriteExt,
@@ -149,7 +148,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                         // get private channel gossip from gossip_store
                         // but we don't get the alias there
                         if let Some(dir_chans) = lngraph.graph.get_mut(&my_pubkey) {
-                            let dir_chan = DirectedChannel {
+                            let dir_chan = ShortChannelIdDir {
                                 short_channel_id: chan.short_channel_id.unwrap(),
                                 direction: chan.direction.unwrap(),
                             };
@@ -159,7 +158,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                             }
                         }
                         if let Some(dir_chans) = lngraph.graph.get_mut(&chan.peer_id) {
-                            let dir_chan = DirectedChannel {
+                            let dir_chan = ShortChannelIdDir {
                                 short_channel_id: chan.short_channel_id.unwrap(),
                                 direction: chan.direction.unwrap() ^ 1,
                             };
@@ -174,11 +173,11 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                         || chan.state == ChannelState::CHANNELD_AWAITING_SPLICE
                     {
                         lngraph.graph.entry(my_pubkey).or_default().insert(
-                            DirectedChannel {
+                            ShortChannelIdDir {
                                 short_channel_id: chan.short_channel_id.unwrap(),
                                 direction: chan.direction.unwrap(),
                             },
-                            DirectedChannelState {
+                            ShortChannelIdDirState {
                                 source: my_pubkey,
                                 destination: chan.peer_id,
                                 scid_alias: local_alias,
@@ -199,11 +198,11 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
 
                         if let Some(remote_updates) = &updates.remote {
                             lngraph.graph.entry(chan.peer_id).or_default().insert(
-                                DirectedChannel {
+                                ShortChannelIdDir {
                                     short_channel_id: chan.short_channel_id.unwrap(),
                                     direction: chan.direction.unwrap() ^ 1,
                                 },
-                                DirectedChannelState {
+                                ShortChannelIdDirState {
                                     source: chan.peer_id,
                                     destination: my_pubkey,
                                     scid_alias: remote_alias,
