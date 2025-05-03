@@ -464,7 +464,6 @@ impl LnGraph {
                     //     &dir_chan_state.destination.to_string()[..5],
                     // );
                     dir_chan_state.active
-                        && (!dir_chan_state.private || dir_chan_state.scid_alias.is_some())
                         && dir_chan_state.last_update >= (twow_ago as u32)
                         && !exclude_graph
                             .exclude_chans
