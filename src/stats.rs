@@ -114,12 +114,13 @@ pub async fn slingstats(
             let mut total_amount_msat = 0;
             let mut most_recent_completed_at = 0;
             let mut weighted_fee_ppm = 0;
-            let jobstate: Vec<String> = jobstates
+            let mut jobstate: Vec<String> = jobstates
                 .get(job)
                 .unwrap_or(&vec![JobState::missing()])
                 .iter()
                 .map(|jt| jt.id().to_string() + ":" + &jt.state().to_string())
                 .collect();
+            jobstate.sort();
             for success_reb in successes.get(&job).unwrap_or(&Vec::new()) {
                 if stats_delete_successes_age == 0
                     || success_reb.completed_at >= now - stats_delete_successes_age * 24 * 60 * 60
