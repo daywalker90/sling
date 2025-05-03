@@ -81,7 +81,7 @@ pub async fn refresh_listpeerchannels(plugin: &Plugin<PluginState>) -> Result<()
         .into_iter()
         .filter_map(|channel| channel.short_channel_id.map(|id| (id, channel)))
         .collect();
-    log::debug!("Peerchannels refreshed in {}ms", now.elapsed().as_millis());
+    log::trace!("Peerchannels refreshed in {}ms", now.elapsed().as_millis());
     Ok(())
 }
 
