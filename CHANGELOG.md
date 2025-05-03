@@ -7,6 +7,7 @@
 
 ### Changed
 - optimized gossip file reader to be 10x faster with similar memory usage
+- make use of the new trace level logging
 
 ## [3.0.6] - 2025-05-03
 
