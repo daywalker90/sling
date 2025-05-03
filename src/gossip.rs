@@ -106,7 +106,6 @@ fn read_gossip_file(
         }
 
         read_gossip_file_chunk(
-            &now,
             &gossip_file[..bytes_read],
             offset,
             channel_anns,
@@ -119,6 +118,18 @@ fn read_gossip_file(
         }
         *offset = 0;
     }
+    log::debug!(
+        "gossip_gossip_file: gossip_store read in: {}ms",
+        now.elapsed().as_millis()
+    );
+    log::debug!(
+        "gossip_gossip_file: found updates:{} announcements:{} amounts:{} deletes/dying:{}",
+        channel_updates.len(),
+        channel_anns.len(),
+        channel_amts.len(),
+        channel_dels.len()
+    );
+
     let post_now = Instant::now();
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -218,7 +229,6 @@ fn read_gossip_file(
 }
 
 fn read_gossip_file_chunk(
-    now: &Instant,
     gossip_file: &[u8],
     offset: &mut usize,
     channel_anns: &mut HashMap<ShortChannelId, ChannelAnnouncement>,
@@ -226,7 +236,7 @@ fn read_gossip_file_chunk(
     channel_updates: &mut HashMap<ShortChannelIdDir, ChannelUpdate>,
     channel_dels: &mut Vec<ShortChannelId>,
 ) -> Result<(), anyhow::Error> {
-    log::debug!("gossip_gossip_file: offset:{}", offset);
+    log::trace!("gossip_gossip_file: offset:{}", offset);
 
     let mut last_scid = None;
 
@@ -251,10 +261,10 @@ fn read_gossip_file_chunk(
             continue;
         }
         // Check if the record is marked as dying
-        // if flags & 0x0800 != 0 {
-        //     *offset += len - 2;
-        //     continue;
-        // }
+        if flags & 0x0800 != 0 {
+            *offset += len - 2;
+            continue;
+        }
 
         match msg_type {
             256 => {
@@ -354,17 +364,6 @@ fn read_gossip_file_chunk(
             }
         }
     }
-    log::debug!(
-        "gossip_gossip_file: gossip_store read in: {}ms",
-        now.elapsed().as_millis()
-    );
-    log::debug!(
-        "gossip_gossip_file: found updates:{} announcements:{} amounts:{} deletes/dying:{}",
-        channel_updates.len(),
-        channel_anns.len(),
-        channel_amts.len(),
-        channel_dels.len()
-    );
 
     Ok(())
 }
