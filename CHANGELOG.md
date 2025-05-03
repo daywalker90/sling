@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.0.0] - Unreleased
+
+### Added
+- `sling-once`: new command to rebalance a specific amount once
+
+### Changed
+- optimized gossip file reader to be 10x faster with similar memory usage
+
 ## [3.0.6] - 2025-05-03
 
 ### Fixed
