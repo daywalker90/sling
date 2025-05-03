@@ -1,5 +1,10 @@
 # Changelog
 
+## [3.0.6] - 2025-05-03
+
+### Fixed
+- no longer require scid aliases for private channels during route calculation aswell
+
 ## [3.0.5] - 2025-05-01
 
 ### Changed
