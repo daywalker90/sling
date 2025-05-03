@@ -684,7 +684,7 @@ fn build_candidatelist(
         let scid = if let Some(scid) = channel.short_channel_id {
             scid
         } else {
-            log::debug!(
+            log::trace!(
                 "{}/{}: build_candidatelist: channel with {} has no short_channel_id",
                 task.chan_id,
                 task.task_id,
@@ -699,7 +699,7 @@ fn build_candidatelist(
 
         if let Some(c) = custom_candidates {
             if c.iter().any(|c| *c == scid) {
-                log::debug!(
+                log::trace!(
                     "{}/{}: build_candidatelist: found custom candidate {}",
                     task.chan_id,
                     task.task_id,
@@ -711,7 +711,7 @@ fn build_candidatelist(
         };
 
         if let Err(e) = is_channel_normal(channel) {
-            log::debug!(
+            log::trace!(
                 "{}/{}: build_candidatelist: {} is not normal: {}",
                 task.chan_id,
                 task.task_id,
@@ -722,7 +722,7 @@ fn build_candidatelist(
         }
 
         if !channel.peer_connected {
-            log::debug!(
+            log::trace!(
                 "{}/{}: build_candidatelist: {} is not connected",
                 task.chan_id,
                 task.task_id,
@@ -732,7 +732,7 @@ fn build_candidatelist(
         }
 
         if scid.block() > blockheight - config.candidates_min_age {
-            log::debug!(
+            log::trace!(
                 "{}/{}: build_candidatelist: {} is too new: {}>{}",
                 task.chan_id,
                 task.task_id,
@@ -752,7 +752,7 @@ fn build_candidatelist(
         ) {
             Ok(o) => o,
             Err(e) => {
-                log::debug!(
+                log::trace!(
                     "{}/{}: build_candidatelist: could not get remote feeppm for {}: {}",
                     task.chan_id,
                     task.task_id,
@@ -781,7 +781,7 @@ fn build_candidatelist(
                     ),
                 );
                 if to_us_msat <= liquidity_target {
-                    log::debug!(
+                    log::trace!(
                         "{}/{}: build_candidatelist: {} does not have enough liquidity: {}<={}",
                         task.chan_id,
                         task.task_id,
@@ -793,7 +793,7 @@ fn build_candidatelist(
                 }
                 if let Some(outppm) = job.outppm {
                     if chan_out_ppm > outppm {
-                        log::debug!(
+                        log::trace!(
                             "{}/{}: build_candidatelist: {} outppm is too high: {}>{}",
                             task.chan_id,
                             task.task_id,
@@ -814,7 +814,7 @@ fn build_candidatelist(
                     ),
                 );
                 if total_msat - to_us_msat <= liquidity_target {
-                    log::debug!(
+                    log::trace!(
                         "{}/{}: build_candidatelist: {} does not have enough liquidity: {}<={}",
                         task.chan_id,
                         task.task_id,
@@ -826,7 +826,7 @@ fn build_candidatelist(
                 }
                 if let Some(outppm) = job.outppm {
                     if chan_out_ppm < outppm {
-                        log::debug!(
+                        log::trace!(
                             "{}/{}: build_candidatelist: {} outppm is too low: {}<{}",
                             task.chan_id,
                             task.task_id,
@@ -838,7 +838,7 @@ fn build_candidatelist(
                     }
                 }
                 if chan_in_ppm > (job.maxppm as u64) {
-                    log::debug!(
+                    log::trace!(
                         "{}/{}: build_candidatelist: {} inppm is too high: {}>{}",
                         task.chan_id,
                         task.task_id,
@@ -852,7 +852,7 @@ fn build_candidatelist(
         };
 
         if tempbans.contains_key(&scid) {
-            log::debug!(
+            log::trace!(
                 "{}/{}: build_candidatelist: {} is temporarily banned",
                 task.chan_id,
                 task.task_id,
@@ -862,7 +862,7 @@ fn build_candidatelist(
         }
 
         if get_total_htlc_count(channel) > config.max_htlc_count {
-            log::debug!(
+            log::trace!(
                 "{}/{}: build_candidatelist: {} has too many pending htlcs",
                 task.chan_id,
                 task.task_id,
