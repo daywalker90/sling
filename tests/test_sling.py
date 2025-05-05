@@ -930,20 +930,24 @@ def test_gossip(node_factory, bitcoind, get_plugin):  # noqa: F811
                 "plugin": get_plugin,
                 "sling-refresh-gossmap-interval": 1,
                 "may_reconnect": True,
+                "log-level": "debug",
             },
             {
                 "may_reconnect": True,
+                "log-level": "debug",
             },
             {
                 "may_reconnect": True,
+                "log-level": "debug",
             },
             {
                 "may_reconnect": True,
+                "log-level": "debug",
             },
         ],
     )
     nodes = [l1, l2, l3, l4]
-    sling_graph = os.path.join(l1.info["lightning-dir"], "sling", "graph.json")
+
     l1.fundwallet(10_000_000)
     l2.fundwallet(10_000_000)
     l3.fundwallet(10_000_000)
@@ -994,19 +998,8 @@ def test_gossip(node_factory, bitcoind, get_plugin):  # noqa: F811
     l1.daemon.wait_for_log(r"4 private channels")
     l1.daemon.wait_for_log(r"8 public channels")
 
-    assert os.path.getsize(sling_graph) == 0
-
-    l1.restart()
-    l1.rpc.connect(l2.info["id"] + "@localhost:" + str(l2.port))
-    l1.rpc.connect(l3.info["id"] + "@localhost:" + str(l3.port))
-    l1.rpc.connect(l4.info["id"] + "@localhost:" + str(l4.port))
-
-    assert os.path.getsize(sling_graph) > 0
-    l1.daemon.wait_for_log(r"4 private channels")
-    l1.daemon.wait_for_log(r"8 public channels")
-
     l1.rpc.close(scid_l1_l4_1)
-    bitcoind.generate_block(1, wait_for_mempool=1)
+    bitcoind.generate_block(6, wait_for_mempool=1)
     sync_blockheight(bitcoind, nodes)
 
     l1.daemon.wait_for_log(r"4 private channels")
@@ -1027,6 +1020,19 @@ def test_gossip(node_factory, bitcoind, get_plugin):  # noqa: F811
     l1.daemon.wait_for_log(r"Rebalance SUCCESSFULL after")
     l1.rpc.call("sling-stop", [])
     assert not l1.daemon.is_in_log(f"sling: {scid_l1_l4_1}")
+
+    sling_liquidity = os.path.join(l1.info["lightning-dir"], "sling", "liquidity.json")
+    assert os.path.getsize(sling_liquidity) == 0
+
+    l1.restart()
+    l1.rpc.connect(l2.info["id"] + "@localhost:" + str(l2.port))
+    l1.rpc.connect(l3.info["id"] + "@localhost:" + str(l3.port))
+    l1.rpc.connect(l4.info["id"] + "@localhost:" + str(l4.port))
+
+    assert os.path.getsize(sling_liquidity) > 0
+    assert len(l1.rpc.call("listchannels", {})["channels"]) == 6
+    l1.daemon.wait_for_log(r"4 private channels")
+    l1.daemon.wait_for_log(r"6 public channels")
 
     l2.rpc.close(scid_l2_l4)
     bitcoind.generate_block(1, wait_for_mempool=1)
@@ -1100,7 +1106,7 @@ def test_splice(node_factory, bitcoind, get_plugin):  # noqa: F811
     bitcoind.generate_block(1, wait_for_mempool=result["txid"])
     sync_blockheight(bitcoind, [l1, l2])
 
-    l1.daemon.wait_for_log(r"deletes/dying:1")
+    l1.daemon.wait_for_log(r"2 public channels")
 
     bitcoind.generate_block(5)
     sync_blockheight(bitcoind, [l1, l2])

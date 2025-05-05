@@ -86,16 +86,9 @@ pub async fn refresh_listpeerchannels(plugin: &Plugin<PluginState>) -> Result<()
 }
 
 pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
-    let my_pubkey;
-    let sling_dir;
+    let my_pubkey = plugin.state().config.lock().pubkey;
     // let mut offset = 0;
     let mut is_startup = true;
-    {
-        let config = plugin.state().config.lock();
-        my_pubkey = config.pubkey;
-        sling_dir = config.sling_dir.clone();
-    }
-    *plugin.state().graph.lock() = read_graph(&sling_dir).await?;
 
     let gossip_file =
         File::open(Path::new(&plugin.configuration().lightning_dir).join("gossip_store"))?;
@@ -121,12 +114,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                 let mut lngraph = plugin.state().graph.lock();
                 log::debug!(
                     "{} public channels in sling graph after {}ms!",
-                    lngraph
-                        .graph
-                        .values()
-                        .flatten()
-                        .filter(|(_, y)| !y.private)
-                        .count(),
+                    lngraph.public_channel_count(),
                     now.elapsed().as_millis()
                 );
 
@@ -158,32 +146,29 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                         // pre 24.02 versions don't have this and
                         // get private channel gossip from gossip_store
                         // but we don't get the alias there
-                        if let Some(dir_chans) = lngraph.graph.get_mut(&my_pubkey) {
-                            let dir_chan = ShortChannelIdDir {
-                                short_channel_id: chan.short_channel_id.unwrap(),
-                                direction: chan.direction.unwrap(),
-                            };
-                            if let Some(dir_chan_state) = dir_chans.get_mut(&dir_chan) {
-                                dir_chan_state.scid_alias = local_alias;
-                                dir_chan_state.private = true;
-                            }
+                        let dir_chan_a = ShortChannelIdDir {
+                            short_channel_id: chan.short_channel_id.unwrap(),
+                            direction: chan.direction.unwrap(),
+                        };
+                        if let Some(dir_chan_state) = lngraph.get_state_mut_direction(dir_chan_a) {
+                            dir_chan_state.scid_alias = local_alias;
+                            dir_chan_state.private = true;
                         }
-                        if let Some(dir_chans) = lngraph.graph.get_mut(&chan.peer_id) {
-                            let dir_chan = ShortChannelIdDir {
-                                short_channel_id: chan.short_channel_id.unwrap(),
-                                direction: chan.direction.unwrap() ^ 1,
-                            };
-                            if let Some(dir_chan_state) = dir_chans.get_mut(&dir_chan) {
-                                dir_chan_state.scid_alias = remote_alias;
-                                dir_chan_state.private = true;
-                            }
+                        let dir_chan_b = ShortChannelIdDir {
+                            short_channel_id: chan.short_channel_id.unwrap(),
+                            direction: chan.direction.unwrap() ^ 1,
+                        };
+                        if let Some(dir_chan_state) = lngraph.get_state_mut_direction(dir_chan_b) {
+                            dir_chan_state.scid_alias = remote_alias;
+                            dir_chan_state.private = true;
                         }
+
                         continue;
                     };
                     if chan.state == ChannelState::CHANNELD_NORMAL
                         || chan.state == ChannelState::CHANNELD_AWAITING_SPLICE
                     {
-                        lngraph.graph.entry(my_pubkey).or_default().insert(
+                        lngraph.insert(
                             ShortChannelIdDir {
                                 short_channel_id: chan.short_channel_id.unwrap(),
                                 direction: chan.direction.unwrap(),
@@ -197,18 +182,15 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                                     as u32,
                                 htlc_maximum_msat: updates.local.htlc_maximum_msat,
                                 htlc_minimum_msat: updates.local.htlc_minimum_msat,
-                                amount_msat: chan.total_msat.unwrap(),
                                 delay: updates.local.cltv_expiry_delta,
                                 active: chan.peer_connected,
                                 last_update: timestamp as u32,
-                                liquidity: chan.spendable_msat.unwrap().msat(),
-                                liquidity_age: timestamp,
                                 private: true,
                             },
                         );
 
                         if let Some(remote_updates) = &updates.remote {
-                            lngraph.graph.entry(chan.peer_id).or_default().insert(
+                            lngraph.insert(
                                 ShortChannelIdDir {
                                     short_channel_id: chan.short_channel_id.unwrap(),
                                     direction: chan.direction.unwrap() ^ 1,
@@ -224,12 +206,9 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                                         as u32,
                                     htlc_maximum_msat: remote_updates.htlc_maximum_msat,
                                     htlc_minimum_msat: remote_updates.htlc_minimum_msat,
-                                    amount_msat: chan.total_msat.unwrap(),
                                     delay: remote_updates.cltv_expiry_delta,
                                     active: chan.peer_connected,
                                     last_update: timestamp as u32,
-                                    liquidity: chan.receivable_msat.unwrap().msat(),
-                                    liquidity_age: timestamp,
                                     private: true,
                                 },
                             );
@@ -242,30 +221,22 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                         }
                     }
                 }
-                for channels in lngraph.graph.values_mut() {
-                    channels.retain(|k, v| {
-                        !v.private
-                            || if let Some(c) = local_channels.get(&k.short_channel_id) {
-                                c.state == ChannelState::CHANNELD_NORMAL
-                                    || c.state == ChannelState::CHANNELD_AWAITING_SPLICE
-                            } else {
-                                false
-                            }
-                    })
-                }
+
+                lngraph.retain(|k, v| {
+                    !v.private
+                        || if let Some(c) = local_channels.get(&k.short_channel_id) {
+                            c.state == ChannelState::CHANNELD_NORMAL
+                                || c.state == ChannelState::CHANNELD_AWAITING_SPLICE
+                        } else {
+                            false
+                        }
+                });
 
                 log::debug!(
                     "{} private channels in sling graph after {}ms!",
-                    lngraph
-                        .graph
-                        .values()
-                        .flatten()
-                        .filter(|(_, y)| y.private)
-                        .count(),
+                    lngraph.private_channel_count(),
                     now.elapsed().as_millis()
                 );
-
-                lngraph.graph.retain(|_, v| !v.is_empty());
             }
             log::debug!("Refreshed graph in {}ms!", now.elapsed().as_millis());
         }
@@ -278,8 +249,17 @@ pub async fn refresh_liquidity(plugin: Plugin<PluginState>) -> Result<(), Error>
         {
             let interval = plugin.state().config.lock().reset_liquidity_interval;
             let now = Instant::now();
-            plugin.state().graph.lock().refresh_liquidity(interval);
-            log::info!("Refreshed Liquidity in {}ms!", now.elapsed().as_millis());
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            let mut liquidity = plugin.state().liquidity.lock();
+            liquidity.retain(|_, v| v.liquidity_age > timestamp - interval * 60);
+            log::info!(
+                "Refreshed {} liquidity beliefs in {}ms!",
+                liquidity.len(),
+                now.elapsed().as_millis()
+            );
         }
         time::sleep(Duration::from_secs(120)).await;
     }

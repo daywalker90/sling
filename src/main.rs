@@ -240,6 +240,8 @@ async fn main() -> Result<(), anyhow::Error> {
     };
     if let Ok(plugin) = confplugin.start(state).await {
         log::debug!("{:?}", plugin.configuration());
+        let config = plugin.state().config.lock().clone();
+        *plugin.state().liquidity.lock() = read_liquidity(&config.sling_dir).await?;
         let peersclone = plugin.clone();
         tokio::spawn(async move {
             match tasks::refresh_listpeerchannels_loop(peersclone).await {
