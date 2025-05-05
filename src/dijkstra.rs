@@ -1,4 +1,4 @@
-use crate::model::{DijkstraNode, ExcludeGraph, LnGraph, PublicKeyPair};
+use crate::model::{DijkstraNode, ExcludeGraph, Liquidity, LnGraph, PublicKeyPair};
 use crate::util::{edge_cost, fee_total_msat_precise};
 use anyhow::Error;
 use cln_rpc::model::requests::SendpayRoute;
@@ -24,8 +24,9 @@ pub fn dijkstra(
     last_delay: u32,
     tempbans: &HashMap<ShortChannelId, u64>,
     parallel_bans: &[ShortChannelIdDir],
+    liquidity: &HashMap<ShortChannelIdDir, Liquidity>,
 ) -> Result<Vec<SendpayRoute>, Error> {
-    let mut visited = HashSet::with_capacity(lngraph.graph.len());
+    let mut visited = HashSet::with_capacity(lngraph.node_count());
     let mut scores = HashMap::new();
     let mut predecessor = HashMap::new();
     let mut visit_next = BinaryHeap::new();
@@ -65,6 +66,7 @@ pub fn dijkstra(
             candidatelist,
             tempbans,
             parallel_bans,
+            liquidity,
         ) {
             let next = edge.destination;
             if visited.contains(&next) {

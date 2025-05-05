@@ -20,8 +20,8 @@ use sling::{Job, SatDirection};
 use tokio::time::Instant;
 
 use crate::{
-    errors::WaitsendpayErrorData, feeppm_effective_from_amts, my_sleep, Config, FailureReb,
-    PluginState, SuccessReb, Task,
+    errors::WaitsendpayErrorData, feeppm_effective_from_amts, model::Liquidity, my_sleep,
+    util::get_direction_from_nodes, Config, FailureReb, PluginState, SuccessReb, Task,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -100,36 +100,41 @@ pub async fn waitsendpay_response(
                     now.elapsed().as_secs(),
                     err.message,
                 );
-                let temp_ban_route = &route[..route.len() - 1];
-                let mut source = temp_ban_route.first().unwrap().id;
-                for hop in temp_ban_route {
-                    if hop.channel == temp_ban_route.first().unwrap().channel {
-                        source = hop.id;
-                    } else {
-                        plugin
-                            .state()
-                            .graph
-                            .lock()
-                            .graph
-                            .get_mut(&source)
-                            .unwrap()
-                            .iter_mut()
-                            .find_map(|(dir_chan, x)| {
-                                if dir_chan.short_channel_id == hop.channel
-                                    && x.destination != config.pubkey
-                                    && x.source != config.pubkey
-                                {
-                                    x.liquidity = 0;
-                                    x.liquidity_age = SystemTime::now()
-                                        .duration_since(UNIX_EPOCH)
-                                        .unwrap()
-                                        .as_secs();
-                                    Some(x)
-                                } else {
-                                    None
-                                }
-                            });
+
+                for (i, hop) in route[..route.len() - 1].iter().enumerate() {
+                    let source = route[i].id;
+                    let destination = route[i + 1].id;
+                    let direction = get_direction_from_nodes(source, destination)?;
+                    if source == config.pubkey {
+                        continue;
                     }
+                    if destination == config.pubkey {
+                        continue;
+                    }
+                    let dir_chan = ShortChannelIdDir {
+                        short_channel_id: hop.channel,
+                        direction,
+                    };
+
+                    let mut liquidity = plugin.state().liquidity.lock();
+                    if let Some(liq) = liquidity.get_mut(&dir_chan) {
+                        liq.liquidity_msat = 0;
+                        liq.liquidity_age = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs();
+                    } else {
+                        liquidity.insert(
+                            dir_chan,
+                            Liquidity {
+                                liquidity_msat: 0,
+                                liquidity_age: SystemTime::now()
+                                    .duration_since(UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_secs(),
+                            },
+                        );
+                    };
                 }
                 FailureReb {
                     amount_msat: job.amount_msat,
@@ -238,34 +243,37 @@ pub async fn waitsendpay_response(
                     }
                 } else {
                     log::debug!(
-                        "{}/{}: Adjusting liquidity for {}.",
+                        "{}/{}: Adjusting liquidity for {}/{}.",
                         task.chan_id,
                         task.task_id,
-                        ws_error.erring_channel
+                        ws_error.erring_channel,
+                        ws_error.erring_direction
                     );
-                    plugin
-                        .state()
-                        .graph
-                        .lock()
-                        .graph
-                        .get_mut(&ws_error.erring_node)
-                        .unwrap()
-                        .iter_mut()
-                        .find_map(|(dir_chan, x)| {
-                            if dir_chan.short_channel_id == ws_error.erring_channel
-                                && x.destination != config.pubkey
-                                && x.source != config.pubkey
-                            {
-                                x.liquidity = ws_error.amount_msat.unwrap().msat() - 1;
-                                x.liquidity_age = SystemTime::now()
-                                    .duration_since(UNIX_EPOCH)
-                                    .unwrap()
-                                    .as_secs();
-                                Some(x)
-                            } else {
-                                None
-                            }
-                        });
+                    let dir_chan = ShortChannelIdDir {
+                        short_channel_id: ws_error.erring_channel,
+                        direction: ws_error.erring_direction as u32,
+                    };
+                    {
+                        let mut liquidity = plugin.state().liquidity.lock();
+                        if let Some(liq) = liquidity.get_mut(&dir_chan) {
+                            liq.liquidity_msat = ws_error.amount_msat.unwrap().msat() - 1;
+                            liq.liquidity_age = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs();
+                        } else {
+                            liquidity.insert(
+                                dir_chan,
+                                Liquidity {
+                                    liquidity_msat: ws_error.amount_msat.unwrap().msat() - 1,
+                                    liquidity_age: SystemTime::now()
+                                        .duration_since(UNIX_EPOCH)
+                                        .unwrap()
+                                        .as_secs(),
+                                },
+                            );
+                        };
+                    }
                     if config.at_or_above_24_11 {
                         for lay in &config.inform_layers {
                             rpc.call_typed(&AskreneinformchannelRequest {

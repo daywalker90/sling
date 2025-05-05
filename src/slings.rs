@@ -416,10 +416,11 @@ async fn next_route(
                 Some(h) => h + 1,
                 None => config.maxhops + 1,
             };
+            let liquidity = plugin.state().liquidity.lock();
             match job.sat_direction {
                 SatDirection::Pull => {
-                    let slingchan_inc =
-                        match graph.get_channel(&keypair.other_pubkey, &task.chan_id) {
+                    let (_scid_dir, slingchan_inc) =
+                        match graph.get_state_no_direction(&keypair.other_pubkey, &task.chan_id) {
                             Ok(in_chan) => in_chan,
                             Err(_) => {
                                 log::warn!(
@@ -459,27 +460,29 @@ async fn next_route(
                         config.cltv_delta,
                         tempbans,
                         &task_bans,
+                        &liquidity,
                     )?;
                 }
                 SatDirection::Push => {
-                    let slingchan_out = match graph.get_channel(&keypair.my_pubkey, &task.chan_id) {
-                        Ok(out_chan) => out_chan,
-                        Err(_) => {
-                            log::warn!(
-                                "{}/{}: channel not found in graph!",
-                                task.chan_id,
-                                task.task_id
-                            );
-                            channel_jobstate_update(
-                                plugin.state().job_state.clone(),
-                                task,
-                                &JobMessage::ChanNotInGraph,
-                                true,
-                                false,
-                            )?;
-                            return Err(anyhow!("channel not found in graph!"));
-                        }
-                    };
+                    let (_scid_dir, slingchan_out) =
+                        match graph.get_state_no_direction(&keypair.my_pubkey, &task.chan_id) {
+                            Ok(out_chan) => out_chan,
+                            Err(_) => {
+                                log::warn!(
+                                    "{}/{}: channel not found in graph!",
+                                    task.chan_id,
+                                    task.task_id
+                                );
+                                channel_jobstate_update(
+                                    plugin.state().job_state.clone(),
+                                    task,
+                                    &JobMessage::ChanNotInGraph,
+                                    true,
+                                    false,
+                                )?;
+                                return Err(anyhow!("channel not found in graph!"));
+                            }
+                        };
                     route = dijkstra(
                         &keypair.my_pubkey,
                         &graph,
@@ -502,6 +505,7 @@ async fn next_route(
                         config.cltv_delta,
                         tempbans,
                         &task_bans,
+                        &liquidity,
                     )?;
                 }
             }
@@ -510,28 +514,17 @@ async fn next_route(
     if route.len() >= 3 {
         let route_claim_chan = route[route.len() / 2].channel;
         let route_claim_peer = route[(route.len() / 2) - 1].id;
-        if let Some(source_node) = graph.graph.get(&route_claim_peer) {
-            let dir_chan_0 = ShortChannelIdDir {
-                short_channel_id: route_claim_chan,
-                direction: 0,
-            };
-            let dir_chan_1 = ShortChannelIdDir {
-                short_channel_id: route_claim_chan,
-                direction: 1,
-            };
-            for dir_chan in [dir_chan_0, dir_chan_1] {
-                if let Some(dir_chan_state_0) = source_node.get(&dir_chan) {
-                    if dir_chan_state_0.source != config.pubkey
-                        && dir_chan_state_0.destination != config.pubkey
-                    {
-                        parallel_bans
-                            .entry(task.chan_id)
-                            .or_default()
-                            .insert(task.task_id, dir_chan);
-                    } else if let Some(tk) = parallel_bans.get_mut(&task.chan_id) {
-                        tk.remove(&task.task_id);
-                    }
-                }
+        if let Ok((dir_chan, dir_chan_state)) =
+            graph.get_state_no_direction(&route_claim_peer, &route_claim_chan)
+        {
+            if dir_chan_state.source != config.pubkey && dir_chan_state.destination != config.pubkey
+            {
+                parallel_bans
+                    .entry(task.chan_id)
+                    .or_default()
+                    .insert(task.task_id, dir_chan);
+            } else if let Some(tk) = parallel_bans.get_mut(&task.chan_id) {
+                tk.remove(&task.task_id);
             }
         };
         // for (i, ban) in parallel_bans.entry(task.chan_id).or_default().iter() {
