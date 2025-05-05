@@ -5,6 +5,7 @@ use cln_rpc::primitives::Amount;
 use cln_rpc::primitives::ChannelState;
 use cln_rpc::primitives::PublicKey;
 use cln_rpc::primitives::Sha256;
+use cln_rpc::primitives::ShortChannelIdDir;
 use parking_lot::Mutex;
 use rand::Rng;
 use sling::SatDirection;
@@ -17,10 +18,11 @@ use std::time::Duration;
 use std::{collections::HashMap, path::Path};
 
 use crate::channel_jobstate_update;
+use crate::model::Liquidity;
 use crate::model::PluginState;
 use crate::model::Task;
-use crate::model::GRAPH_FILE_NAME;
 use crate::model::JOB_FILE_NAME;
+use crate::model::LIQUIDITY_FILE_NAME;
 use crate::model::PLUGIN_NAME;
 use crate::model::{JobMessage, JobState, LnGraph};
 use crate::slingstop;
@@ -204,40 +206,42 @@ pub async fn write_excepts<T: ToString>(
     Ok(())
 }
 
-pub async fn read_graph(sling_dir: &PathBuf) -> Result<LnGraph, Error> {
-    let graphfile = sling_dir.join(GRAPH_FILE_NAME);
-    let graphfilecontent = fs::read_to_string(graphfile.clone()).await;
-    let graph: LnGraph;
+pub async fn read_liquidity(
+    sling_dir: &PathBuf,
+) -> Result<HashMap<ShortChannelIdDir, Liquidity>, Error> {
+    let liquidity_file = sling_dir.join(LIQUIDITY_FILE_NAME);
+    let liquidity_file_content = fs::read_to_string(liquidity_file.clone()).await;
+    let liquidity: HashMap<ShortChannelIdDir, Liquidity>;
 
     create_sling_dir(sling_dir).await?;
-    match graphfilecontent {
+    match liquidity_file_content {
         Ok(file) => {
-            graph = match serde_json::from_str(&file) {
+            liquidity = match serde_json::from_str(&file) {
                 Ok(o) => o,
                 Err(e) => {
-                    log::warn!("could not read graph: {}", e);
-                    LnGraph::new()
+                    log::warn!("could not read liquidity: {}", e);
+                    HashMap::new()
                 }
             }
         }
         Err(e) => {
             log::warn!(
                 "Could not open {}: {}. First time using sling? Creating new file.",
-                graphfile.to_str().unwrap(),
+                liquidity_file.to_str().unwrap(),
                 e
             );
-            File::create(graphfile.clone()).await?;
-            graph = LnGraph::new();
+            File::create(liquidity_file.clone()).await?;
+            liquidity = HashMap::new();
         }
     };
 
-    Ok(graph)
+    Ok(liquidity)
 }
-pub async fn write_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
-    let graph_string = serde_json::to_string(&*plugin.state().graph.lock())?;
+pub async fn write_liquidity(plugin: Plugin<PluginState>) -> Result<(), Error> {
+    let graph_string = serde_json::to_string(&*plugin.state().liquidity.lock())?;
     let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
     let now = Instant::now();
-    fs::write(sling_dir.join(GRAPH_FILE_NAME), graph_string).await?;
+    fs::write(sling_dir.join(LIQUIDITY_FILE_NAME), graph_string).await?;
     log::debug!("Wrote graph to disk in {}ms", now.elapsed().as_millis());
     Ok(())
 }
@@ -391,7 +395,7 @@ pub async fn wait_for_gossip(plugin: &Plugin<PluginState>, task: &Task) -> Resul
         {
             let graph = plugin.state().graph.lock();
 
-            if graph.graph.is_empty() {
+            if graph.is_empty() {
                 log::info!(
                     "{}/{}: graph is still empty. Sleeping...",
                     task.chan_id,
@@ -437,10 +441,11 @@ pub fn get_remote_feeppm_effective(
         );
         Ok(chan_in_ppm)
     } else {
-        let chan_from_peer = match graph.get_channel(&channel.peer_id, &scid) {
-            Ok(chan) => chan,
-            Err(_) => return Err(anyhow!("No gossip for {} in graph", scid)),
-        };
+        let (_scid_dir, chan_from_peer) =
+            match graph.get_state_no_direction(&channel.peer_id, &scid) {
+                Ok(chan) => chan,
+                Err(_) => return Err(anyhow!("No gossip for {} in graph", scid)),
+            };
         let chan_in_ppm = feeppm_effective(
             chan_from_peer.fee_per_millionth,
             chan_from_peer.base_fee_millisatoshi,
@@ -448,6 +453,19 @@ pub fn get_remote_feeppm_effective(
         );
         Ok(chan_in_ppm)
     }
+}
+
+pub fn get_direction_from_nodes(
+    source: PublicKey,
+    destination: PublicKey,
+) -> Result<u32, anyhow::Error> {
+    if source < destination {
+        return Ok(0);
+    }
+    if source > destination {
+        return Ok(1);
+    }
+    Err(anyhow!("Nodes are equal"))
 }
 
 pub fn at_or_above_version(my_version: &str, min_version: &str) -> Result<bool, Error> {
