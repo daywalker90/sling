@@ -4,7 +4,6 @@ use std::{
     path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{anyhow, Error};
@@ -604,8 +603,8 @@ pub struct LnGraph {
 impl LnGraph {
     pub fn new() -> Self {
         LnGraph {
-            channels: HashMap::new(),
-            graph: HashMap::new(),
+            channels: HashMap::with_capacity(70000),
+            graph: HashMap::with_capacity(7000),
         }
     }
 
@@ -732,6 +731,7 @@ impl LnGraph {
     #[allow(clippy::too_many_arguments)]
     pub fn edges(
         &self,
+        two_weeks_ago: u32,
         keypair: &PublicKeyPair,
         exclude_graph: &ExcludeGraph,
         job: &Job,
@@ -742,15 +742,10 @@ impl LnGraph {
     ) -> Vec<(&ShortChannelIdDir, &ShortChannelIdDirState)> {
         let mut result = Vec::new();
         if let Some(node_channels) = self.graph.get(&keypair.other_pubkey) {
-            let twow_ago = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs()
-                - 60 * 60 * 24 * 14;
             for dir_chan in node_channels {
                 if let Some(dir_chan_state) = self.channels.get(dir_chan) {
                     if dir_chan_state.active
-                        && dir_chan_state.last_update >= (twow_ago as u32)
+                        && dir_chan_state.last_update >= two_weeks_ago
                         && !exclude_graph
                             .exclude_chans
                             .contains(&dir_chan.short_channel_id)

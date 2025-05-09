@@ -13,7 +13,7 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::model::{DijkstraNode, ExcludeGraph, IncompleteChannels, LnGraph, PublicKeyPair};
 
@@ -329,9 +329,15 @@ fn test_dijkstra_speed() {
         exclude_chans: HashSet::new(),
         exclude_peers: HashSet::new(),
     };
+    let two_weeks_ago = (SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        - 60 * 60 * 24 * 14) as u32;
 
     let candidatelist: Vec<ShortChannelId> = graph
         .edges(
+            two_weeks_ago,
             &PublicKeyPair {
                 my_pubkey: PublicKey::from_str(
                     "0322d0e43b3d92d30ed187f4e101a9a9605c3ee5fc9721e6dac3ce3d7732fbb13e",
