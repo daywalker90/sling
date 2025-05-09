@@ -6,6 +6,7 @@ use cln_rpc::primitives::*;
 use sling::{Job, SatDirection};
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::BinaryHeap;
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
@@ -26,6 +27,12 @@ pub fn dijkstra(
     parallel_bans: &[ShortChannelIdDir],
     liquidity: &HashMap<ShortChannelIdDir, Liquidity>,
 ) -> Result<Vec<SendpayRoute>, Error> {
+    let two_weeks_ago = (SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        - 60 * 60 * 24 * 14) as u32;
+
     let mut visited = HashSet::with_capacity(lngraph.node_count());
     let mut scores = HashMap::new();
     let mut predecessor = HashMap::new();
@@ -57,6 +64,7 @@ pub fn dijkstra(
             continue;
         }
         for (scid, edge) in lngraph.edges(
+            two_weeks_ago,
             &PublicKeyPair {
                 my_pubkey: *my_pubkey,
                 other_pubkey: node,
