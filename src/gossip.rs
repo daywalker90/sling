@@ -58,7 +58,7 @@ pub async fn read_gossip_store(
     Ok(())
 }
 
-fn read_gossip_file(
+pub fn read_gossip_file(
     is_start_up: &mut bool,
     reader: &mut BufReader<File>,
     graph: &mut LnGraph,
@@ -407,104 +407,4 @@ fn parse_channel_announcement(inpu: &[u8]) -> Result<(ShortChannelId, ChannelAnn
             // features: String::new(),
         },
     ))
-}
-
-#[cfg(test)]
-mod tests {
-    use std::fs::File;
-    use std::io::{BufReader, Read, Write};
-    use std::path::Path;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::sync::Arc;
-    use std::thread;
-    use std::time::{Duration, Instant};
-
-    use crate::gossip::read_gossip_file;
-    use crate::model::{IncompleteChannels, LnGraph};
-
-    // Read current RSS from /proc/self/statm (Linux-specific)
-    fn get_current_rss() -> Option<u64> {
-        let mut file = File::open("/proc/self/statm").ok()?;
-        let mut contents = String::new();
-        file.read_to_string(&mut contents).ok()?;
-        let fields: Vec<&str> = contents.split_whitespace().collect();
-        let resident_pages: u64 = fields.get(1)?.parse().ok()?;
-        Some(resident_pages * 4096) // Convert pages to bytes (4KB page size)
-    }
-    #[test]
-    fn test_gossip_file_reader() {
-        let iterations = 5;
-        let mut vec_times = Vec::new();
-        let mut vec_rss = Vec::new();
-
-        for i in 0..iterations {
-            let peak_rss = Arc::new(AtomicU64::new(0));
-            let sampling_active = Arc::new(std::sync::atomic::AtomicBool::new(true));
-
-            // Spawn a thread to sample RSS
-            let peak_rss_clone = Arc::clone(&peak_rss);
-            let sampling_active_clone = Arc::clone(&sampling_active);
-            let sampling_handle = thread::spawn(move || {
-                while sampling_active_clone.load(Ordering::Relaxed) {
-                    if let Some(rss) = get_current_rss() {
-                        peak_rss_clone.fetch_max(rss, Ordering::Relaxed);
-                    }
-                    thread::sleep(Duration::from_millis(1)); // Sample every 1ms
-                }
-            });
-
-            let gossip_file = File::open(Path::new("gossip_store")).expect("Failed to open file");
-            let mut reader = BufReader::new(gossip_file);
-            let mut is_start_up = true;
-            let mut offset = 0;
-            let mut graph = LnGraph::new();
-            let mut incomplete_channels = IncompleteChannels::new();
-
-            let now = Instant::now();
-            read_gossip_file(
-                &mut is_start_up,
-                &mut reader,
-                &mut graph,
-                &mut incomplete_channels,
-                &mut offset,
-            )
-            .expect("read_gossip_file failed");
-            let elapsed = now.elapsed().as_millis();
-
-            // Signal the sampling thread to stop
-            sampling_active.store(false, Ordering::Relaxed);
-
-            // Wait for the sampling thread to finish
-            sampling_handle.join().expect("Sampling thread panicked");
-
-            // Calculate peak RAM used
-            let peak_rss = peak_rss.load(Ordering::Relaxed);
-            println!(
-                "Iteration {}: chans:{} nodes:{} incomplete_chans:{} time: {}ms RAM: {}MB",
-                i + 1,
-                graph.public_channel_count(),
-                graph.node_count(),
-                incomplete_channels.len(),
-                elapsed,
-                peak_rss / (1024 * 1024)
-            );
-            vec_times.push(elapsed);
-            vec_rss.push(peak_rss);
-            File::create(Path::new("graph_refactor.json"))
-                .unwrap()
-                .write_all(&serde_json::to_vec_pretty(&graph).unwrap())
-                .unwrap();
-            File::create(Path::new("incomplete_graph_refactor.json"))
-                .unwrap()
-                .write_all(&serde_json::to_vec_pretty(&incomplete_channels).unwrap())
-                .unwrap();
-        }
-        let vec_avg = vec_times.iter().sum::<u128>() / iterations as u128;
-        let rss_avg = vec_rss.iter().sum::<u64>() / iterations as u64;
-        println!(
-            "average: time {}ms, RAM: {}MB",
-            vec_avg,
-            rss_avg / (1024 * 1024)
-        );
-    }
 }
