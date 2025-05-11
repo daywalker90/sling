@@ -14,7 +14,11 @@ LOGGER = logging.getLogger(__name__)
 
 
 def test_basic(node_factory, get_plugin):  # noqa: F811
-    node = node_factory.get_node(options={"plugin": get_plugin, "log-level": "debug"})
+    node = node_factory.get_node(
+        options={
+            "plugin": get_plugin,
+        }
+    )
     result = node.rpc.call("sling-version")
     assert result is not None
     assert isinstance(result, dict) is True
@@ -25,7 +29,6 @@ def test_options(node_factory, get_plugin):  # noqa: F811
     node = node_factory.get_node(
         options={
             "plugin": get_plugin,
-            "log-level": "debug",
             "sling-refresh-peers-interval": 2,
             "sling-refresh-aliasmap-interval": 3,
             "sling-refresh-gossmap-interval": 599,
@@ -62,7 +65,11 @@ def test_options(node_factory, get_plugin):  # noqa: F811
 
 
 def test_setconfig_options(node_factory, get_plugin):  # noqa: F811
-    node = node_factory.get_node(options={"plugin": get_plugin, "log-level": "debug"})
+    node = node_factory.get_node(
+        options={
+            "plugin": get_plugin,
+        }
+    )
 
     node.rpc.setconfig("sling-refresh-gossmap-interval", 1)
 
@@ -87,7 +94,6 @@ def test_option_errors(node_factory, get_plugin):  # noqa: F811
         options={
             "plugin": get_plugin,
             "sling-refresh-peers-interval": 0,
-            "log-level": "debug",
         }
     )
     assert node.daemon.is_in_log(
@@ -247,9 +253,8 @@ def test_maxhops_2(node_factory, bitcoind, get_plugin):  # noqa: F811
                 "plugin": get_plugin,
                 "sling-maxhops": 2,
                 "sling-refresh-gossmap-interval": 1,
-                "log-level": "debug",
             },
-            {"log-level": "debug"},
+            {},
         ],
     )
     l1.fundwallet(10_000_000)
@@ -311,10 +316,9 @@ def test_pull_and_push(node_factory, bitcoind, get_plugin):  # noqa: F811
             {
                 "plugin": get_plugin,
                 "sling-refresh-gossmap-interval": 1,
-                "log-level": "debug",
             },
-            {"log-level": "debug"},
-            {"log-level": "debug"},
+            {},
+            {},
         ],
     )
     l1.fundwallet(10_000_000)
@@ -483,9 +487,8 @@ def test_private_channel_receive(node_factory, bitcoind, get_plugin):  # noqa: F
             {
                 "plugin": get_plugin,
                 "sling-refresh-gossmap-interval": 1,
-                "log-level": "debug",
             },
-            {"log-level": "debug"},
+            {},
         ],
     )
     l1.fundwallet(10_000_000)
@@ -541,10 +544,9 @@ def test_private_channel_node(node_factory, bitcoind, get_plugin):  # noqa: F811
             {
                 "plugin": get_plugin,
                 "sling-refresh-gossmap-interval": 1,
-                "log-level": "debug",
             },
-            {"log-level": "debug"},
-            {"log-level": "debug"},
+            {},
+            {},
         ],
     )
     l1.fundwallet(10_000_000)
@@ -632,10 +634,9 @@ def test_private_candidates(node_factory, bitcoind, get_plugin):  # noqa: F811
             {
                 "plugin": get_plugin,
                 "sling-refresh-gossmap-interval": 1,
-                "log-level": "debug",
             },
-            {"log-level": "debug"},
-            {"log-level": "debug"},
+            {},
+            {},
         ],
     )
 
@@ -742,10 +743,9 @@ def test_once(node_factory, bitcoind, get_plugin):  # noqa: F811
                 "plugin": get_plugin,
                 "sling-refresh-gossmap-interval": 1,
                 "sling-depleteuptopercent": 0.0,
-                "log-level": "debug",
             },
-            {"log-level": "debug"},
-            {"log-level": "debug"},
+            {},
+            {},
         ],
     )
     l1.fundwallet(10_000_000)
@@ -862,6 +862,8 @@ def test_once(node_factory, bitcoind, get_plugin):  # noqa: F811
     l1.daemon.wait_for_log(r"Stopping job...")
     l1.daemon.wait_for_log(r"Spawned once-job exited")
 
+    wait_for(lambda: l1.rpc.call("sling-stats", [True])[0]["status"] == ["1:Stopped"])
+
     assert (
         l1.rpc.call("sling-stats", [scid_l3])["successes_in_time_window"][
             "total_amount_sats"
@@ -882,8 +884,30 @@ def test_once(node_factory, bitcoind, get_plugin):  # noqa: F811
         },
     )
 
+    start_time = time.time()
+    while time.time() < start_time + 10:
+        LOGGER.info(l1.rpc.call("sling-stats", [True])[0]["status"])
+        if l1.rpc.call("sling-stats", [True])[0]["status"] == [
+            "1:Balanced",
+            "2:Balanced",
+            "3:Balanced",
+            "4:Balanced",
+        ]:
+            break
+        time.sleep(1)
+
     wait_for(
-        lambda: l1.rpc.call("sling-stats", [scid_l3])["successes_in_time_window"][
+        lambda: l1.rpc.call("sling-stats", [True])[0]["status"]
+        == [
+            "1:Balanced",
+            "2:Balanced",
+            "3:Balanced",
+            "4:Balanced",
+        ]
+    )
+
+    assert (
+        l1.rpc.call("sling-stats", [scid_l3])["successes_in_time_window"][
             "total_amount_sats"
         ]
         == 225_000
@@ -930,19 +954,15 @@ def test_gossip(node_factory, bitcoind, get_plugin):  # noqa: F811
                 "plugin": get_plugin,
                 "sling-refresh-gossmap-interval": 1,
                 "may_reconnect": True,
-                "log-level": "debug",
             },
             {
                 "may_reconnect": True,
-                "log-level": "debug",
             },
             {
                 "may_reconnect": True,
-                "log-level": "debug",
             },
             {
                 "may_reconnect": True,
-                "log-level": "debug",
             },
         ],
     )
@@ -1081,7 +1101,7 @@ def test_splice(node_factory, bitcoind, get_plugin):  # noqa: F811
                 "experimental-splicing": None,
                 "log-level": "info",
             },
-            {"log-level": "debug"},
+            {},
         ],
     )
     l3.fundwallet(10_000_000)
@@ -1121,6 +1141,8 @@ def test_splice(node_factory, bitcoind, get_plugin):  # noqa: F811
     sync_blockheight(bitcoind, [l1, l2, l3])
 
     l1.daemon.wait_for_log(r"6 public channels")
+
+    wait_for(lambda: len(l1.rpc.listpeerchannels()["channels"]) == 2)
 
     chan_id = l1.rpc.listpeerchannels(l2.info["id"])["channels"][0]["short_channel_id"]
     LOGGER.info(chan_id)

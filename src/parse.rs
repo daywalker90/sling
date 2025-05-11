@@ -66,12 +66,14 @@ pub async fn parse_job(args: serde_json::Value) -> Result<(ShortChannelId, Job),
                 None => None,
             };
 
-            let target = match ar.get("target") {
-                Some(t) => Some(
-                    t.as_f64()
+            let mut job = Job::new(sat_direction, amount_msat, outppm, maxppm);
+
+            if let Some(target) = ar.get("target") {
+                job.add_target(
+                    target
+                        .as_f64()
                         .ok_or(anyhow!("target must be a floating point"))?,
-                ),
-                None => None,
+                );
             };
 
             let maxhops = match ar.get("maxhops") {
@@ -82,6 +84,7 @@ pub async fn parse_job(args: serde_json::Value) -> Result<(ShortChannelId, Job),
                 if h < 2 {
                     return Err(anyhow!("maxhops must be atleast 2"));
                 }
+                job.add_maxhops(h);
             }
 
             let depleteuptopercent = match ar.get("depleteuptopercent") {
@@ -95,15 +98,15 @@ pub async fn parse_job(args: serde_json::Value) -> Result<(ShortChannelId, Job),
                 if !(0.0..1.0).contains(&dp) {
                     return Err(anyhow!("depleteuptopercent must be between 0.0 and <1.0"));
                 }
+                job.add_depleteuptopercent(dp);
             }
 
-            let depleteuptoamount = match ar.get("depleteuptoamount") {
-                Some(h) => Some(
-                    h.as_u64()
+            if let Some(da) = ar.get("depleteuptoamount") {
+                job.add_depleteuptoamount(
+                    da.as_u64()
                         .ok_or(anyhow!("depleteuptoamount must be an integer"))?
                         * 1_000,
-                ),
-                None => None,
+                );
             };
 
             let paralleljobs = match ar.get("paralleljobs") {
@@ -118,6 +121,7 @@ pub async fn parse_job(args: serde_json::Value) -> Result<(ShortChannelId, Job),
                 if h < 1 {
                     return Err(anyhow!("paralleljobs must be atleast 1"));
                 }
+                job.add_paralleljobs(h);
             }
 
             let candidatelist = {
@@ -145,23 +149,11 @@ pub async fn parse_job(args: serde_json::Value) -> Result<(ShortChannelId, Job),
                 ));
             }
 
-            Ok((
-                chan_id,
-                Job {
-                    sat_direction,
-                    amount_msat,
-                    outppm,
-                    maxppm,
-                    candidatelist,
-                    target,
-                    maxhops,
-                    depleteuptopercent,
-                    depleteuptoamount,
-                    paralleljobs,
-                    once: None,
-                    total_amount_msat: None,
-                },
-            ))
+            if let Some(c) = candidatelist {
+                job.add_candidates(c);
+            }
+
+            Ok((chan_id, job))
         }
         other => Err(anyhow!("Expected an object! Got {} instead", other)),
     }
@@ -228,6 +220,8 @@ pub async fn parse_once_job(args: serde_json::Value) -> Result<(ShortChannelId, 
                 None => None,
             };
 
+            let mut job = Job::new(sat_direction, amount_msat, outppm, maxppm);
+
             let total_amount_msat = match ar.get("total_amount") {
                 Some(amt) => {
                     amt.as_u64()
@@ -239,7 +233,6 @@ pub async fn parse_once_job(args: serde_json::Value) -> Result<(ShortChannelId, 
             if total_amount_msat == 0 {
                 return Err(anyhow!("total_amount_msat must be greater than 0"));
             }
-
             if total_amount_msat % amount_msat != 0 {
                 return Err(anyhow!(
                     "total_amount must be a multiple of amount. total_amount: {}, amount: {}",
@@ -255,6 +248,7 @@ pub async fn parse_once_job(args: serde_json::Value) -> Result<(ShortChannelId, 
                     amount_msat / 1000
                 ));
             }
+            job.add_once_amount_msat(total_amount_msat);
 
             let maxhops = match ar.get("maxhops") {
                 Some(h) => Some(h.as_u64().ok_or(anyhow!("maxhops must be an integer"))? as u8),
@@ -264,6 +258,7 @@ pub async fn parse_once_job(args: serde_json::Value) -> Result<(ShortChannelId, 
                 if h < 2 {
                     return Err(anyhow!("maxhops must be atleast 2"));
                 }
+                job.add_maxhops(h);
             }
 
             let depleteuptopercent = match ar.get("depleteuptopercent") {
@@ -277,15 +272,15 @@ pub async fn parse_once_job(args: serde_json::Value) -> Result<(ShortChannelId, 
                 if !(0.0..1.0).contains(&dp) {
                     return Err(anyhow!("depleteuptopercent must be between 0.0 and <1.0"));
                 }
+                job.add_depleteuptopercent(dp);
             }
 
-            let depleteuptoamount = match ar.get("depleteuptoamount") {
-                Some(h) => Some(
-                    h.as_u64()
+            if let Some(da) = ar.get("depleteuptoamount") {
+                job.add_depleteuptoamount(
+                    da.as_u64()
                         .ok_or(anyhow!("depleteuptoamount must be an integer"))?
                         * 1_000,
-                ),
-                None => None,
+                );
             };
 
             let paralleljobs = match ar.get("paralleljobs") {
@@ -300,6 +295,7 @@ pub async fn parse_once_job(args: serde_json::Value) -> Result<(ShortChannelId, 
                 if h < 1 {
                     return Err(anyhow!("paralleljobs must be atleast 1"));
                 }
+                job.add_paralleljobs(h);
             }
 
             let candidatelist = {
@@ -326,24 +322,11 @@ pub async fn parse_once_job(args: serde_json::Value) -> Result<(ShortChannelId, 
                     "Atleast one of outppm and candidatelist need to be set."
                 ));
             }
+            if let Some(c) = candidatelist {
+                job.add_candidates(c);
+            }
 
-            Ok((
-                chan_id,
-                Job {
-                    sat_direction,
-                    amount_msat,
-                    outppm,
-                    maxppm,
-                    candidatelist,
-                    target: None,
-                    maxhops,
-                    depleteuptopercent,
-                    depleteuptoamount,
-                    paralleljobs,
-                    once: Some(()),
-                    total_amount_msat: Some(total_amount_msat),
-                },
-            ))
+            Ok((chan_id, job))
         }
         other => Err(anyhow!("Expected an object! Got {} instead", other)),
     }
