@@ -182,6 +182,7 @@ fn get_current_rss() -> Option<u64> {
 fn test_gossip_file_reader() {
     let iterations = 5;
     let mut vec_times = Vec::new();
+    let mut vec_after_times = Vec::new();
     let mut vec_rss = Vec::new();
 
     for i in 0..iterations {
@@ -217,6 +218,19 @@ fn test_gossip_file_reader() {
         )
         .expect("read_gossip_file failed");
         let elapsed = now.elapsed().as_millis();
+        vec_times.push(elapsed);
+
+        let now = Instant::now();
+        read_gossip_file(
+            &mut is_start_up,
+            &mut reader,
+            &mut graph,
+            &mut incomplete_channels,
+            &mut offset,
+        )
+        .expect("read_gossip_file failed");
+        let elapsed_after = now.elapsed().as_millis();
+        vec_after_times.push(elapsed_after);
 
         // Signal the sampling thread to stop
         sampling_active.store(false, Ordering::Relaxed);
@@ -227,15 +241,15 @@ fn test_gossip_file_reader() {
         // Calculate peak RAM used
         let peak_rss = peak_rss.load(Ordering::Relaxed);
         println!(
-            "Iteration {}: chans:{} nodes:{} incomplete_chans:{} time: {}ms RAM: {}MB",
+            "Iteration {}: chans:{} nodes:{} incomplete_chans:{} time: {}ms after: {}ms RAM: {}MB",
             i + 1,
             graph.public_channel_count(),
             graph.node_count(),
             incomplete_channels.len(),
             elapsed,
+            elapsed_after,
             peak_rss / (1024 * 1024)
         );
-        vec_times.push(elapsed);
         vec_rss.push(peak_rss);
         File::create(Path::new("graph_refactor.json"))
             .unwrap()
@@ -247,10 +261,12 @@ fn test_gossip_file_reader() {
             .unwrap();
     }
     let vec_avg = vec_times.iter().sum::<u128>() / iterations as u128;
+    let vec_after_avg = vec_after_times.iter().sum::<u128>() / iterations as u128;
     let rss_avg = vec_rss.iter().sum::<u64>() / iterations as u64;
     println!(
-        "average: time {}ms, RAM: {}MB",
+        "average: time {}ms, after {}ms, RAM: {}MB",
         vec_avg,
+        vec_after_avg,
         rss_avg / (1024 * 1024)
     );
 }
