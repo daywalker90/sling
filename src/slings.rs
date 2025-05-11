@@ -10,46 +10,43 @@ use sling::{Job, SatDirection};
 use std::cmp::{max, min};
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use tokio::time::{self, Instant};
 
 use crate::dijkstra::dijkstra;
-use crate::model::{
-    Config, DijkstraNode, ExcludeGraph, JobMessage, PluginState, PublicKeyPair, Task,
-};
+use crate::model::{Config, JobMessage, PluginState, TaskIdentifier};
 use crate::response::{sendpay_response, waitsendpay_response};
 use crate::util::{
     feeppm_effective, feeppm_effective_from_amts, get_normal_channel_from_listpeerchannels,
     get_preimage_paymend_hash_pair, get_total_htlc_count, is_channel_normal, my_sleep,
 };
-use crate::{channel_jobstate_update, get_remote_feeppm_effective, wait_for_gossip, LnGraph};
+use crate::{get_remote_feeppm_effective, wait_for_gossip, LnGraph};
 
-pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Result<u64, Error> {
-    wait_for_gossip(plugin, task).await?;
+pub async fn sling(
+    job: &Job,
+    task_ident: TaskIdentifier,
+    plugin: Plugin<PluginState>,
+) -> Result<u64, Error> {
+    wait_for_gossip(plugin.clone(), &task_ident).await?;
 
     let mut success_route: Option<Vec<SendpayRoute>> = None;
     let mut rebalanced_msat = 0;
     'outer: loop {
         let now = Instant::now();
-        let should_stop = plugin
-            .state()
-            .job_state
-            .lock()
-            .get(&task.chan_id)
-            .unwrap()
-            .iter()
-            .find(|jt| jt.id() == task.task_id)
-            .unwrap()
-            .should_stop();
-        if should_stop {
-            log::info!("{}/{}: Stopped job!", task.chan_id, task.task_id);
-            channel_jobstate_update(
-                plugin.state().job_state.clone(),
-                task,
-                &JobMessage::Stopped,
-                false,
-                true,
-            )?;
+        let task;
+        {
+            let tasks = plugin.state().tasks.lock();
+            task = tasks
+                .get_task(&task_ident)
+                .ok_or_else(|| anyhow!("no task found"))?
+                .clone();
+        }
+        if task.should_stop() {
+            log::info!("{}: Stopped job!", task_ident);
+            let mut tasks = plugin.state().tasks.lock();
+            tasks.set_state(&task_ident, JobMessage::Stopped);
+            tasks.set_active(&task_ident, false);
             break;
         }
 
@@ -57,18 +54,14 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
 
         let tempbans = plugin.state().tempbans.lock().clone();
         let peer_channels = plugin.state().peer_channels.lock().clone();
-        let other_peer = peer_channels
-            .get(&task.chan_id)
-            .ok_or(anyhow!("other_peer: channel not found"))?
-            .peer_id;
 
         if let Some(r) = health_check(
-            plugin,
+            plugin.clone(),
             &config,
             &peer_channels,
-            task,
+            &task_ident,
             job,
-            other_peer,
+            task.other_pubkey,
             &tempbans,
         )
         .await?
@@ -79,44 +72,36 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
             break 'outer;
         }
 
-        channel_jobstate_update(
-            plugin.state().job_state.clone(),
-            task,
-            &JobMessage::Rebalancing,
-            true,
-            false,
-        )?;
+        plugin
+            .state()
+            .tasks
+            .lock()
+            .set_state(&task_ident, JobMessage::Rebalancing);
 
         let route = {
             let nr = next_route(
-                plugin,
+                plugin.clone(),
                 &config,
                 &peer_channels,
                 job,
                 &tempbans,
-                task,
-                &PublicKeyPair {
-                    my_pubkey: config.pubkey,
-                    other_pubkey: other_peer,
-                },
+                &task_ident,
                 &mut success_route,
             )
             .await;
             if nr.is_err() || nr.as_ref().unwrap().is_empty() {
-                log::info!(
-                    "{}/{}: could not find a route. Sleeping...",
-                    task.chan_id,
-                    task.task_id
-                );
-                channel_jobstate_update(
-                    plugin.state().job_state.clone(),
-                    task,
-                    &JobMessage::NoRoute,
-                    true,
-                    false,
-                )?;
+                log::info!("{}: could not find a route. Sleeping...", task_ident);
+                plugin
+                    .state()
+                    .tasks
+                    .lock()
+                    .set_state(&task_ident, JobMessage::NoRoute);
+                if job.once_amount_msat.is_some() {
+                    time::sleep(Duration::from_secs(1)).await;
+                    break 'outer;
+                }
                 success_route = None;
-                my_sleep(600, plugin.state().job_state.clone(), task).await;
+                my_sleep(plugin.clone(), 600, &task_ident).await;
                 continue 'outer;
             }
             nr.unwrap()
@@ -127,28 +112,21 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
             Amount::msat(&route.last().unwrap().amount_msat),
         );
         log::info!(
-            "{}/{}: Found {}ppm route with {} hops. Total: {}ms",
-            task.chan_id,
-            task.task_id,
+            "{}: Found {}ppm route with {} hops. Total: {}ms",
+            task_ident,
             fee_ppm_effective,
             route.len() - 1,
             now.elapsed().as_millis()
         );
 
         if fee_ppm_effective > job.maxppm {
-            log::info!(
-                "{}/{}: route not cheap enough! Sleeping...",
-                task.chan_id,
-                task.task_id
-            );
-            channel_jobstate_update(
-                plugin.state().job_state.clone(),
-                task,
-                &JobMessage::TooExp,
-                true,
-                false,
-            )?;
-            my_sleep(600, plugin.state().job_state.clone(), task).await;
+            log::info!("{}: route not cheap enough! Sleeping...", task_ident);
+            plugin
+                .state()
+                .tasks
+                .lock()
+                .set_state(&task_ident, JobMessage::TooExp);
+            my_sleep(plugin.clone(), 600, &task_ident).await;
             success_route = None;
             continue 'outer;
         }
@@ -157,9 +135,8 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
             let alias_map = plugin.state().alias_peer_map.lock();
             for r in &route {
                 log::debug!(
-                    "{}/{}: route: {} {:4} {:17} {}",
-                    task.chan_id,
-                    task.task_id,
+                    "{}: route: {} {:4} {:17} {}",
+                    task_ident,
                     Amount::msat(&r.amount_msat),
                     r.delay,
                     r.channel.to_string(),
@@ -177,11 +154,11 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
         // );
 
         let send_response = match sendpay_response(
-            plugin,
+            plugin.clone(),
             &config,
             payment_hash,
             preimage,
-            task,
+            &task_ident,
             job,
             &route,
             &mut success_route,
@@ -196,29 +173,24 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
                 }
             }
             Err(e) => {
-                channel_jobstate_update(
-                    plugin.state().job_state.clone(),
-                    task,
-                    &JobMessage::Error,
-                    false,
-                    true,
-                )?;
+                let mut tasks = plugin.state().tasks.lock();
+                tasks.set_state(&task_ident, JobMessage::Error);
+                tasks.set_active(&task_ident, false);
                 log::warn!("{}", e);
                 break 'outer;
             }
         };
         log::info!(
-            "{}/{}: Sent on route. Total: {}ms",
-            task.chan_id,
-            task.task_id,
+            "{}: Sent on route. Total: {}ms",
+            task_ident,
             now.elapsed().as_millis()
         );
 
         match waitsendpay_response(
-            plugin,
+            plugin.clone(),
             &config,
             send_response.payment_hash,
-            task,
+            &task_ident,
             now,
             job,
             &route,
@@ -228,91 +200,61 @@ pub async fn sling(job: &Job, task: &Task, plugin: &Plugin<PluginState>) -> Resu
         {
             Ok(o) => {
                 rebalanced_msat += o;
-                if let Some(()) = job.once {
+                if job.once_amount_msat.is_some() {
                     break 'outer;
                 }
-                time::sleep(std::time::Duration::from_secs(
-                    config.refresh_peers_interval,
-                ))
-                .await;
+                time::sleep(Duration::from_secs(config.refresh_peers_interval)).await;
             }
             Err(e) => {
-                channel_jobstate_update(
-                    plugin.state().job_state.clone(),
-                    task,
-                    &JobMessage::Error,
-                    false,
-                    true,
-                )?;
+                let mut tasks = plugin.state().tasks.lock();
+                tasks.set_state(&task_ident, JobMessage::Error);
+                tasks.set_active(&task_ident, false);
                 log::warn!("{}", e);
                 break 'outer;
             }
         };
     }
-    if let Some(tk) = plugin.state().parrallel_bans.lock().get_mut(&task.chan_id) {
-        tk.remove(&task.task_id);
-    };
+    plugin
+        .state()
+        .tasks
+        .lock()
+        .get_task_mut(&task_ident)
+        .ok_or_else(|| anyhow!("no task found"))?
+        .parallel_ban = None;
 
     Ok(rebalanced_msat)
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn next_route(
-    plugin: &Plugin<PluginState>,
+    plugin: Plugin<PluginState>,
     config: &Config,
     peer_channels: &HashMap<ShortChannelId, ListpeerchannelsChannels>,
     job: &Job,
     tempbans: &HashMap<ShortChannelId, u64>,
-    task: &Task,
-    keypair: &PublicKeyPair,
+    task_ident: &TaskIdentifier,
     success_route: &mut Option<Vec<SendpayRoute>>,
 ) -> Result<Vec<SendpayRoute>, Error> {
     let graph = plugin.state().graph.lock();
-    #[allow(clippy::clone_on_copy)]
-    let blockheight = plugin.state().blockheight.lock().clone();
-    let candidatelist;
-    if let Some(c) = &job.candidatelist {
-        if !c.is_empty() {
-            candidatelist = build_candidatelist(
-                peer_channels,
-                task,
-                job,
-                &graph,
-                tempbans,
-                config,
-                Some(c),
-                blockheight,
-            )
-        } else {
-            candidatelist = build_candidatelist(
-                peer_channels,
-                task,
-                job,
-                &graph,
-                tempbans,
-                config,
-                None,
-                blockheight,
-            )
-        }
-    } else {
-        candidatelist = build_candidatelist(
-            peer_channels,
-            task,
-            job,
-            &graph,
-            tempbans,
-            config,
-            None,
-            blockheight,
-        )
-    }
+    build_candidatelist(
+        plugin.clone(),
+        peer_channels,
+        task_ident,
+        job,
+        &graph,
+        tempbans,
+        config,
+    )?;
+
+    let mut tasks = plugin.state().tasks.lock();
+    let mut task_bans = tasks.get_parallelbans(task_ident.get_chan_id())?;
+    let task = tasks
+        .get_task_mut(task_ident)
+        .ok_or_else(|| anyhow!("no task found"))?;
 
     log::debug!(
-        "{}/{}: Candidates: {}",
-        task.chan_id,
-        task.task_id,
-        candidatelist
+        "{}: Candidates: {}",
+        task_ident,
+        task.actual_candidates
             .iter()
             .map(|y| y.to_string())
             .collect::<Vec<String>>()
@@ -320,9 +262,8 @@ async fn next_route(
     );
     if !tempbans.is_empty() {
         log::debug!(
-            "{}/{}: Tempbans: {}",
-            task.chan_id,
-            task.task_id,
+            "{}: Tempbans: {}",
+            task_ident,
             plugin
                 .state()
                 .tempbans
@@ -334,26 +275,23 @@ async fn next_route(
                 .join(", ")
         );
     }
-    if candidatelist.is_empty() {
+    if task.actual_candidates.is_empty() {
         log::info!(
-            "{}/{}: No candidates found. Adjust out_ppm or wait for liquidity. Sleeping...",
-            task.chan_id,
-            task.task_id
+            "{}: No candidates found. Adjust out_ppm or wait for liquidity. Sleeping...",
+            task_ident,
         );
-        channel_jobstate_update(
-            plugin.state().job_state.clone(),
-            task,
-            &JobMessage::NoCandidates,
-            true,
-            false,
-        )?;
+        plugin
+            .state()
+            .tasks
+            .lock()
+            .set_state(task_ident, JobMessage::NoCandidates);
         return Err(anyhow!("No candidates found"));
     }
 
     let mut route = Vec::new();
     if let Some(prev_route) = success_route {
         if match job.sat_direction {
-            SatDirection::Pull => candidatelist.iter().any(|c| {
+            SatDirection::Pull => task.actual_candidates.iter().any(|c| {
                 c == &prev_route.first().unwrap().channel
                     || peer_channels
                         .get(c)
@@ -366,7 +304,7 @@ async fn next_route(
                         })
                         .unwrap_or(false)
             }),
-            SatDirection::Push => candidatelist.iter().any(|c| {
+            SatDirection::Push => task.actual_candidates.iter().any(|c| {
                 c == &prev_route.last().unwrap().channel
                     || peer_channels
                         .get(c)
@@ -386,128 +324,18 @@ async fn next_route(
         }
     }
 
-    let mut parallel_bans = plugin.state().parrallel_bans.lock();
-    // for (i, ban) in parallel_bans.entry(task.chan_id).or_default().iter() {
-    //     debug!(
-    //         "{}/{}: {}: Before bans: {}/{}",
-    //         task.chan_id, task.task_id, i, ban.short_channel_id, ban.direction
-    //     );
-    // }
-    let task_bans = if let Some(tk) = parallel_bans.get(&task.chan_id) {
-        tk.values().cloned().collect()
-    } else {
-        Vec::new()
-    };
-    match success_route {
-        Some(_) => (),
-        None => {
-            if let Some(tk) = parallel_bans.get_mut(&task.chan_id) {
-                tk.remove(&task.task_id);
-            };
-            let mut pull_jobs = plugin.state().pull_jobs.lock().clone();
-            let mut push_jobs = plugin.state().push_jobs.lock().clone();
-            let excepts = plugin.state().excepts_chans.lock().clone();
-            let excepts_peers = plugin.state().excepts_peers.lock().clone();
-            for except in &excepts {
-                pull_jobs.insert(*except);
-                push_jobs.insert(*except);
+    if success_route.is_none() {
+        if let Some(pb) = task.parallel_ban {
+            task_bans.remove(&pb);
+        }
+        task.parallel_ban = None;
+        let liquidity = plugin.state().liquidity.lock();
+        match job.sat_direction {
+            SatDirection::Pull => {
+                route = dijkstra(config, &graph, job, task, tempbans, &task_bans, &liquidity)?;
             }
-            let max_hops = match job.maxhops {
-                Some(h) => h + 1,
-                None => config.maxhops + 1,
-            };
-            let liquidity = plugin.state().liquidity.lock();
-            match job.sat_direction {
-                SatDirection::Pull => {
-                    let (_scid_dir, slingchan_inc) =
-                        match graph.get_state_no_direction(&keypair.other_pubkey, &task.chan_id) {
-                            Ok(in_chan) => in_chan,
-                            Err(_) => {
-                                log::warn!(
-                                    "{}/{}: channel not found in graph!",
-                                    task.chan_id,
-                                    task.task_id
-                                );
-                                channel_jobstate_update(
-                                    plugin.state().job_state.clone(),
-                                    task,
-                                    &JobMessage::ChanNotInGraph,
-                                    true,
-                                    false,
-                                )?;
-                                return Err(anyhow!("channel not found in graph"));
-                            }
-                        };
-                    route = dijkstra(
-                        &keypair.my_pubkey,
-                        &graph,
-                        &keypair.my_pubkey,
-                        &keypair.other_pubkey,
-                        &DijkstraNode {
-                            score: 0,
-                            destination: keypair.my_pubkey,
-                            channel_state: slingchan_inc,
-                            hops: 0,
-                            short_channel_id: task.chan_id,
-                        },
-                        job,
-                        &candidatelist,
-                        max_hops,
-                        &ExcludeGraph {
-                            exclude_chans: pull_jobs,
-                            exclude_peers: excepts_peers,
-                        },
-                        config.cltv_delta,
-                        tempbans,
-                        &task_bans,
-                        &liquidity,
-                    )?;
-                }
-                SatDirection::Push => {
-                    let (_scid_dir, slingchan_out) =
-                        match graph.get_state_no_direction(&keypair.my_pubkey, &task.chan_id) {
-                            Ok(out_chan) => out_chan,
-                            Err(_) => {
-                                log::warn!(
-                                    "{}/{}: channel not found in graph!",
-                                    task.chan_id,
-                                    task.task_id
-                                );
-                                channel_jobstate_update(
-                                    plugin.state().job_state.clone(),
-                                    task,
-                                    &JobMessage::ChanNotInGraph,
-                                    true,
-                                    false,
-                                )?;
-                                return Err(anyhow!("channel not found in graph!"));
-                            }
-                        };
-                    route = dijkstra(
-                        &keypair.my_pubkey,
-                        &graph,
-                        &keypair.other_pubkey,
-                        &keypair.my_pubkey,
-                        &DijkstraNode {
-                            score: 0,
-                            destination: keypair.other_pubkey,
-                            channel_state: slingchan_out,
-                            hops: 0,
-                            short_channel_id: task.chan_id,
-                        },
-                        job,
-                        &candidatelist,
-                        max_hops,
-                        &ExcludeGraph {
-                            exclude_chans: push_jobs,
-                            exclude_peers: excepts_peers,
-                        },
-                        config.cltv_delta,
-                        tempbans,
-                        &task_bans,
-                        &liquidity,
-                    )?;
-                }
+            SatDirection::Push => {
+                route = dijkstra(config, &graph, job, task, tempbans, &task_bans, &liquidity)?;
             }
         }
     }
@@ -519,183 +347,138 @@ async fn next_route(
         {
             if dir_chan_state.source != config.pubkey && dir_chan_state.destination != config.pubkey
             {
-                parallel_bans
-                    .entry(task.chan_id)
-                    .or_default()
-                    .insert(task.task_id, dir_chan);
-            } else if let Some(tk) = parallel_bans.get_mut(&task.chan_id) {
-                tk.remove(&task.task_id);
+                task.parallel_ban = Some(dir_chan);
+            } else {
+                task.parallel_ban = None;
             }
         };
-        // for (i, ban) in parallel_bans.entry(task.chan_id).or_default().iter() {
-        //     debug!(
-        //         "{}/{}: {}: After bans: {}/{}",
-        //         task.chan_id, task.task_id, i, ban.short_channel_id, ban.direction
-        //     );
-        // }
-    } else if let Some(tk) = parallel_bans.get_mut(&task.chan_id) {
-        tk.remove(&task.task_id);
+    } else {
+        task.parallel_ban = None;
     };
     Ok(route)
 }
 
 async fn health_check(
-    plugin: &Plugin<PluginState>,
+    plugin: Plugin<PluginState>,
     config: &Config,
     peer_channels: &HashMap<ShortChannelId, ListpeerchannelsChannels>,
-    task: &Task,
+    task_ident: &TaskIdentifier,
     job: &Job,
     other_peer: PublicKey,
     tempbans: &HashMap<ShortChannelId, u64>,
 ) -> Result<Option<bool>, Error> {
-    let job_states = plugin.state().job_state.clone();
+    let channel =
+        match get_normal_channel_from_listpeerchannels(peer_channels, &task_ident.get_chan_id()) {
+            Ok(o) => o,
+            Err(e) => {
+                log::warn!("{}: {}. Stopping Job.", task_ident, e);
+                let mut tasks = plugin.state().tasks.lock();
+                tasks.set_state(task_ident, JobMessage::ChanNotNormal);
+                tasks.set_active(task_ident, false);
+                return Ok(Some(false));
+            }
+        };
 
-    let channel = match get_normal_channel_from_listpeerchannels(peer_channels, &task.chan_id) {
-        Ok(o) => o,
-        Err(e) => {
-            log::warn!("{}/{}: {}. Stopping Job.", task.chan_id, task.task_id, e);
-            channel_jobstate_update(
-                job_states.clone(),
-                task,
-                &JobMessage::ChanNotNormal,
-                false,
-                true,
-            )?;
-            return Ok(Some(false));
-        }
-    };
-
-    if job.is_balanced(&channel, &task.chan_id)
+    if job.is_balanced(&channel, &task_ident.get_chan_id())
         || match job.sat_direction {
             SatDirection::Pull => Amount::msat(&channel.receivable_msat.unwrap()) < job.amount_msat,
             SatDirection::Push => Amount::msat(&channel.spendable_msat.unwrap()) < job.amount_msat,
         }
     {
-        log::info!(
-            "{}/{}: already balanced. Taking a break...",
-            task.chan_id,
-            task.task_id
-        );
-        channel_jobstate_update(job_states.clone(), task, &JobMessage::Balanced, true, false)?;
-        my_sleep(600, job_states.clone(), task).await;
+        log::info!("{}: already balanced. Taking a break...", task_ident);
+        plugin
+            .state()
+            .tasks
+            .lock()
+            .set_state(task_ident, JobMessage::Balanced);
+        my_sleep(plugin.clone(), 600, task_ident).await;
         Ok(Some(true))
     } else if get_total_htlc_count(&channel) > config.max_htlc_count {
         log::info!(
-            "{}/{}: already more than {} pending htlcs. Taking a break...",
-            task.chan_id,
-            task.task_id,
+            "{}: already more than {} pending htlcs. Taking a break...",
+            task_ident,
             config.max_htlc_count
         );
-        channel_jobstate_update(
-            job_states.clone(),
-            task,
-            &JobMessage::HTLCcapped,
-            true,
-            false,
-        )?;
-        my_sleep(10, job_states.clone(), task).await;
+        plugin
+            .state()
+            .tasks
+            .lock()
+            .set_state(task_ident, JobMessage::HTLCcapped);
+        my_sleep(plugin.clone(), 10, task_ident).await;
         Ok(Some(true))
     } else {
         match peer_channels.values().find(|x| x.peer_id == other_peer) {
             Some(p) => {
                 if !p.peer_connected {
-                    log::info!(
-                        "{}/{}: not connected. Taking a break...",
-                        task.chan_id,
-                        task.task_id
-                    );
-                    channel_jobstate_update(
-                        job_states.clone(),
-                        task,
-                        &JobMessage::Disconnected,
-                        true,
-                        false,
-                    )?;
-                    my_sleep(60, job_states.clone(), task).await;
+                    log::info!("{}: not connected. Taking a break...", task_ident);
+                    plugin
+                        .state()
+                        .tasks
+                        .lock()
+                        .set_state(task_ident, JobMessage::Disconnected);
+                    my_sleep(plugin.clone(), 60, task_ident).await;
                     Ok(Some(true))
-                } else if tempbans.contains_key(&task.chan_id) {
-                    log::info!(
-                        "{}/{}: Job peer not ready. Taking a break...",
-                        task.chan_id,
-                        task.task_id
-                    );
-                    channel_jobstate_update(
-                        job_states.clone(),
-                        task,
-                        &JobMessage::PeerNotReady,
-                        true,
-                        false,
-                    )?;
-                    my_sleep(20, job_states.clone(), task).await;
+                } else if tempbans.contains_key(&task_ident.get_chan_id()) {
+                    log::info!("{}: Job peer not ready. Taking a break...", task_ident);
+                    plugin
+                        .state()
+                        .tasks
+                        .lock()
+                        .set_state(task_ident, JobMessage::PeerNotReady);
+                    my_sleep(plugin.clone(), 20, task_ident).await;
                     Ok(Some(true))
                 } else {
                     Ok(None)
                 }
             }
             None => {
-                channel_jobstate_update(
-                    job_states.clone(),
-                    task,
-                    &JobMessage::PeerNotFound,
-                    false,
-                    true,
-                )?;
-                log::warn!(
-                    "{}/{}: peer not found. Stopping job.",
-                    task.chan_id,
-                    task.task_id
-                );
+                let mut tasks = plugin.state().tasks.lock();
+                tasks.set_state(task_ident, JobMessage::PeerNotFound);
+                tasks.set_active(task_ident, false);
+                log::warn!("{}: peer not found. Stopping job.", task_ident);
                 Ok(Some(false))
             }
         }
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn build_candidatelist(
+    plugin: Plugin<PluginState>,
     peer_channels: &HashMap<ShortChannelId, ListpeerchannelsChannels>,
-    task: &Task,
+    task_ident: &TaskIdentifier,
     job: &Job,
     graph: &LnGraph,
     tempbans: &HashMap<ShortChannelId, u64>,
     config: &Config,
-    custom_candidates: Option<&Vec<ShortChannelId>>,
-    blockheight: u32,
-) -> Vec<ShortChannelId> {
+) -> Result<(), Error> {
+    let blockheight = *plugin.state().blockheight.lock();
     let mut candidatelist = Vec::<ShortChannelId>::new();
+    let custom_candidates = job.get_candidates();
 
-    let depleteuptopercent = match job.depleteuptopercent {
-        Some(dp) => dp,
-        None => config.depleteuptopercent,
-    };
-    let depleteuptoamount = match job.depleteuptoamount {
-        Some(dp) => dp,
-        None => config.depleteuptoamount,
-    };
+    let depleteuptopercent = job.get_depleteuptopercent(config.depleteuptopercent);
+    let depleteuptoamount = job.get_deplteuptoamount(config.depleteuptoamount);
 
     for channel in peer_channels.values() {
         let scid = if let Some(scid) = channel.short_channel_id {
             scid
         } else {
             log::trace!(
-                "{}/{}: build_candidatelist: channel with {} has no short_channel_id",
-                task.chan_id,
-                task.task_id,
+                "{}: build_candidatelist: channel with {} has no short_channel_id",
+                task_ident,
                 channel.peer_id
             );
             continue;
         };
 
-        if scid == task.chan_id {
+        if scid == task_ident.get_chan_id() {
             continue;
         }
 
-        if let Some(c) = custom_candidates {
-            if c.iter().any(|c| *c == scid) {
+        if !custom_candidates.is_empty() {
+            if custom_candidates.contains(&scid) {
                 log::trace!(
-                    "{}/{}: build_candidatelist: found custom candidate {}",
-                    task.chan_id,
-                    task.task_id,
+                    "{}: build_candidatelist: found custom candidate {}",
+                    task_ident,
                     scid
                 );
             } else {
@@ -705,9 +488,8 @@ fn build_candidatelist(
 
         if let Err(e) = is_channel_normal(channel) {
             log::trace!(
-                "{}/{}: build_candidatelist: {} is not normal: {}",
-                task.chan_id,
-                task.task_id,
+                "{}: build_candidatelist: {} is not normal: {}",
+                task_ident,
                 scid,
                 e
             );
@@ -716,9 +498,8 @@ fn build_candidatelist(
 
         if !channel.peer_connected {
             log::trace!(
-                "{}/{}: build_candidatelist: {} is not connected",
-                task.chan_id,
-                task.task_id,
+                "{}: build_candidatelist: {} is not connected",
+                task_ident,
                 scid
             );
             continue;
@@ -726,9 +507,8 @@ fn build_candidatelist(
 
         if scid.block() > blockheight - config.candidates_min_age {
             log::trace!(
-                "{}/{}: build_candidatelist: {} is too new: {}>{}",
-                task.chan_id,
-                task.task_id,
+                "{}: build_candidatelist: {} is too new: {}>{}",
+                task_ident,
                 scid,
                 scid.block(),
                 blockheight - config.candidates_min_age
@@ -746,9 +526,8 @@ fn build_candidatelist(
             Ok(o) => o,
             Err(e) => {
                 log::trace!(
-                    "{}/{}: build_candidatelist: could not get remote feeppm for {}: {}",
-                    task.chan_id,
-                    task.task_id,
+                    "{}: build_candidatelist: could not get remote feeppm for {}: {}",
+                    task_ident,
                     scid,
                     e
                 );
@@ -775,9 +554,8 @@ fn build_candidatelist(
                 );
                 if to_us_msat <= liquidity_target {
                     log::trace!(
-                        "{}/{}: build_candidatelist: {} does not have enough liquidity: {}<={}",
-                        task.chan_id,
-                        task.task_id,
+                        "{}: build_candidatelist: {} does not have enough liquidity: {}<={}",
+                        task_ident,
                         scid,
                         to_us_msat,
                         liquidity_target
@@ -787,9 +565,8 @@ fn build_candidatelist(
                 if let Some(outppm) = job.outppm {
                     if chan_out_ppm > outppm {
                         log::trace!(
-                            "{}/{}: build_candidatelist: {} outppm is too high: {}>{}",
-                            task.chan_id,
-                            task.task_id,
+                            "{}: build_candidatelist: {} outppm is too high: {}>{}",
+                            task_ident,
                             scid,
                             chan_out_ppm,
                             outppm
@@ -808,9 +585,8 @@ fn build_candidatelist(
                 );
                 if total_msat - to_us_msat <= liquidity_target {
                     log::trace!(
-                        "{}/{}: build_candidatelist: {} does not have enough liquidity: {}<={}",
-                        task.chan_id,
-                        task.task_id,
+                        "{}: build_candidatelist: {} does not have enough liquidity: {}<={}",
+                        task_ident,
                         scid,
                         total_msat - to_us_msat,
                         liquidity_target
@@ -820,9 +596,8 @@ fn build_candidatelist(
                 if let Some(outppm) = job.outppm {
                     if chan_out_ppm < outppm {
                         log::trace!(
-                            "{}/{}: build_candidatelist: {} outppm is too low: {}<{}",
-                            task.chan_id,
-                            task.task_id,
+                            "{}: build_candidatelist: {} outppm is too low: {}<{}",
+                            task_ident,
                             scid,
                             chan_out_ppm,
                             outppm
@@ -832,9 +607,8 @@ fn build_candidatelist(
                 }
                 if chan_in_ppm > (job.maxppm as u64) {
                     log::trace!(
-                        "{}/{}: build_candidatelist: {} inppm is too high: {}>{}",
-                        task.chan_id,
-                        task.task_id,
+                        "{}: build_candidatelist: {} inppm is too high: {}>{}",
+                        task_ident,
                         scid,
                         chan_in_ppm,
                         job.maxppm
@@ -846,9 +620,8 @@ fn build_candidatelist(
 
         if tempbans.contains_key(&scid) {
             log::trace!(
-                "{}/{}: build_candidatelist: {} is temporarily banned",
-                task.chan_id,
-                task.task_id,
+                "{}: build_candidatelist: {} is temporarily banned",
+                task_ident,
                 scid
             );
             continue;
@@ -856,9 +629,8 @@ fn build_candidatelist(
 
         if get_total_htlc_count(channel) > config.max_htlc_count {
             log::trace!(
-                "{}/{}: build_candidatelist: {} has too many pending htlcs",
-                task.chan_id,
-                task.task_id,
+                "{}: build_candidatelist: {} has too many pending htlcs",
+                task_ident,
                 scid
             );
             continue;
@@ -867,5 +639,13 @@ fn build_candidatelist(
         candidatelist.push(scid);
     }
 
-    candidatelist
+    plugin
+        .state()
+        .tasks
+        .lock()
+        .get_task_mut(task_ident)
+        .ok_or_else(|| anyhow!("no task found"))?
+        .actual_candidates = candidatelist;
+
+    Ok(())
 }

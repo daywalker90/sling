@@ -12,52 +12,62 @@ use sling::Job;
 use tokio::{fs, time};
 
 use crate::{
-    channel_jobstate_update, get_normal_channel_from_listpeerchannels,
+    get_normal_channel_from_listpeerchannels,
+    model::TaskIdentifier,
     parse::{parse_job, parse_once_job},
-    read_jobs, refresh_joblists,
+    read_jobs,
     slings::sling,
-    write_excepts, write_job, JobMessage, JobState, PluginState, Task, EXCEPTS_CHANS_FILE_NAME,
+    tasks::refresh_listpeerchannels,
+    util::{read_except_chans, read_except_peers},
+    write_excepts, write_job, JobMessage, PluginState, Task, EXCEPTS_CHANS_FILE_NAME,
     EXCEPTS_PEERS_FILE_NAME, JOB_FILE_NAME, PLUGIN_NAME,
 };
 
 pub async fn slingjob(
-    p: Plugin<PluginState>,
-    v: serde_json::Value,
+    plugin: Plugin<PluginState>,
+    args: serde_json::Value,
 ) -> Result<serde_json::Value, Error> {
-    let sling_dir = Path::new(&p.configuration().lightning_dir).join(PLUGIN_NAME);
+    let _rpc_lock = plugin.state().rpc_lock.lock().await;
+    let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
 
-    let (chan_id, job) = parse_job(v).await?;
+    let (chan_id, job) = parse_job(args).await?;
 
-    let peer_channels = p.state().peer_channels.lock().clone();
+    let _res = refresh_listpeerchannels(plugin.clone()).await;
+    let peer_channels = plugin.state().peer_channels.lock().clone();
     let _our_listpeers_channel =
         get_normal_channel_from_listpeerchannels(&peer_channels, &chan_id)?;
 
-    write_job(p.clone(), sling_dir, chan_id, Some(job), false).await?;
+    {
+        let tasks = plugin.state().tasks.lock();
+        if let Some(t) = tasks.get_scid_tasks(&chan_id) {
+            if t.values().any(|ta| ta.is_once()) && tasks.is_any_active(&chan_id) {
+                return Err(anyhow!("Once-job is currently running for this channel"));
+            }
+        }
+    }
+
+    write_job(plugin.clone(), sling_dir, chan_id, Some(job), false).await?;
     Ok(json!({"result":"success"}))
 }
 
 pub async fn slinggo(
-    p: Plugin<PluginState>,
+    plugin: Plugin<PluginState>,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, Error> {
+    let _rpc_lock = plugin.state().rpc_lock.lock().await;
     let mut jobs = read_jobs(
-        &Path::new(&p.configuration().lightning_dir).join(PLUGIN_NAME),
-        &p,
+        &Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME),
+        plugin.clone(),
     )
     .await?;
     if jobs.is_empty() {
         return Err(anyhow!("No jobs found"));
     }
-    let joblists_clone = p.clone();
-    refresh_joblists(joblists_clone).await?;
-    // let peers = list_peers(&rpc_path).await?.peers;
 
     let mut spawn_count = 0;
+    let mut spawn_fail_count = 0;
 
-    let default_paralleljobs;
-    {
-        default_paralleljobs = p.state().config.lock().paralleljobs
-    }
+    let config = plugin.state().config.lock().clone();
 
     match args {
         serde_json::Value::Array(a) => match a.len().cmp(&(1_usize)) {
@@ -87,76 +97,77 @@ pub async fn slinggo(
         return Err(anyhow!("Shortchannelid not found in jobs"));
     }
 
+    let _res = refresh_listpeerchannels(plugin.clone()).await;
+    let peer_channels = plugin.state().peer_channels.lock().clone();
+
     for (chan_id, job) in jobs {
-        let parallel_jobs = match job.paralleljobs {
-            Some(pj) => pj,
-            None => default_paralleljobs,
-        };
+        let other_peer = peer_channels
+            .get(&chan_id)
+            .ok_or(anyhow!("other_peer: channel not found"))?
+            .peer_id;
+        let parallel_jobs = job.get_paralleljobs(config.paralleljobs);
+        {
+            let tasks = plugin.state().tasks.lock();
+            if let Some(t) = tasks.get_scid_tasks(&chan_id) {
+                if t.values().any(|ta| ta.is_once()) && tasks.is_any_active(&chan_id) {
+                    log::info!("Once-job is currently running for {}", chan_id);
+                    spawn_fail_count += parallel_jobs;
+                    continue;
+                }
+            }
+        }
         for i in 1..=parallel_jobs {
             {
-                let mut job_states = p.state().job_state.lock();
-                if !job_states.contains_key(&chan_id)
-                    || match job_states
-                        .get(&chan_id)
-                        .unwrap()
-                        .iter()
-                        .find(|jt| jt.id() == i)
-                    {
-                        Some(jobstate) => !jobstate.is_active(),
-                        None => true,
-                    }
-                {
-                    let plugin = p.clone();
+                let task_ident = TaskIdentifier::new(chan_id, i);
+                let mut tasks = plugin.state().tasks.lock();
+                let task = tasks.get_task_mut(&task_ident);
+
+                if task.is_none() || !task.as_ref().unwrap().is_active() {
+                    let plugin = plugin.clone();
                     let job_clone = job.clone();
                     spawn_count += 1;
                     log::debug!("{}/{}: Spawning job.", chan_id, i);
-                    match job_states.get_mut(&chan_id) {
-                        Some(jts) => match jts.iter_mut().find(|jt| jt.id() == i) {
-                            Some(jobstate) => {
-                                *jobstate = JobState::new(JobMessage::Starting, i, false)
-                            }
-                            None => jts.push(JobState::new(JobMessage::Starting, i, false)),
-                        },
+                    match task {
+                        Some(jts) => {
+                            jts.set_state(JobMessage::Starting);
+                            jts.set_active(true);
+                        }
                         None => {
-                            job_states.insert(
+                            tasks.insert_task(
                                 chan_id,
-                                vec![JobState::new(JobMessage::Starting, i, false)],
-                            );
+                                i,
+                                Task::new(
+                                    chan_id,
+                                    i,
+                                    JobMessage::Starting,
+                                    false,
+                                    config.pubkey,
+                                    other_peer,
+                                ),
+                            )?;
                         }
                     }
                     tokio::spawn(async move {
-                        let task = Task {
-                            chan_id,
-                            task_id: i,
-                        };
-                        match sling(&job_clone, &task, &plugin).await {
-                            Ok(_o) => log::info!("{}/{}: Spawned job exited.", chan_id, i),
+                        match sling(&job_clone, task_ident, plugin.clone()).await {
+                            Ok(_o) => {
+                                log::info!("{}/{}: Spawned job exited.", chan_id, i);
+                                let mut tasks = plugin.state().tasks.lock();
+                                let task = tasks.get_task_mut(&task_ident);
+                                if let Some(t) = task {
+                                    t.set_state(JobMessage::Stopped);
+                                    t.set_active(false);
+                                }
+                            }
                             Err(e) => {
-                                log::warn!("{}/{}: Error in job: {}", chan_id, e, i);
-                                match channel_jobstate_update(
-                                    plugin.state().job_state.clone(),
-                                    &task,
-                                    &JobMessage::Error,
-                                    false,
-                                    true,
-                                ) {
-                                    Ok(_) => (),
-                                    Err(e) => {
-                                        log::warn!(
-                                            "{}/{}: Error updating jobstate: {}",
-                                            chan_id,
-                                            i,
-                                            e
-                                        )
-                                    }
-                                };
+                                log::warn!("{}/{}: Error in job: {}", chan_id, i, e);
+                                let mut tasks = plugin.state().tasks.lock();
+                                let task = tasks.get_task_mut(&task_ident);
+                                if let Some(t) = task {
+                                    t.set_state(JobMessage::Error);
+                                    t.set_active(false);
+                                }
                             }
                         };
-                        plugin
-                            .state()
-                            .parrallel_bans
-                            .lock()
-                            .retain(|_, task_bans| !task_bans.is_empty());
                     });
                 }
             }
@@ -164,14 +175,22 @@ pub async fn slinggo(
         }
     }
 
-    Ok(json!({ "jobs_started": spawn_count }))
+    Ok(json!({ "tasks_started": spawn_count , "tasks_failed_start:": spawn_fail_count }))
 }
 
 pub async fn slingstop(
-    p: Plugin<PluginState>,
+    plugin: Plugin<PluginState>,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, Error> {
-    let stopped_count;
+    let _rpc_lock = plugin.state().rpc_lock.lock().await;
+
+    let stopped_count = stop_job(plugin.clone(), args).await?;
+
+    Ok(json!({ "stopped_count": stopped_count }))
+}
+
+async fn stop_job(plugin: Plugin<PluginState>, args: serde_json::Value) -> Result<usize, Error> {
+    let mut stopped_count: usize = 0;
     {
         match args {
             serde_json::Value::Array(a) => match a.len().cmp(&(1_usize)) {
@@ -184,22 +203,14 @@ pub async fn slingstop(
                     serde_json::Value::String(stop_id) => {
                         let scid = ShortChannelId::from_str(stop_id)?;
                         {
-                            let job_states = p.state().job_state.lock().clone();
-                            if job_states.contains_key(&scid) {
-                                let jobstate = job_states.get(&scid).unwrap();
-                                stopped_count = jobstate.len();
-                                for jt in jobstate {
-                                    channel_jobstate_update(
-                                        p.state().job_state.clone(),
-                                        &Task {
-                                            chan_id: scid,
-                                            task_id: jt.id(),
-                                        },
-                                        &JobMessage::Stopping,
-                                        true,
-                                        true,
-                                    )?;
-                                    log::debug!("{}/{}: Stopping job...", scid, jt.id());
+                            let mut tasks = plugin.state().tasks.lock();
+                            let task_map = tasks.get_scid_tasks_mut(&scid);
+                            if let Some(tm) = task_map {
+                                stopped_count += tm.len();
+                                for task in tm.values_mut() {
+                                    task.set_state(JobMessage::Stopping);
+                                    task.stop();
+                                    log::debug!("{}: Stopping job...", task.get_identifier());
                                 }
                             } else {
                                 return Err(anyhow!("{}: No job running", scid));
@@ -207,14 +218,8 @@ pub async fn slingstop(
                         }
                         loop {
                             {
-                                let job_states = p.state().job_state.lock();
-                                if job_states.get(&scid).is_none()
-                                    || job_states
-                                        .get(&scid)
-                                        .unwrap()
-                                        .iter()
-                                        .all(|j| !j.is_active())
-                                {
+                                let tasks = plugin.state().tasks.lock();
+                                if !tasks.is_any_active(&scid) {
                                     break;
                                 }
                             }
@@ -226,32 +231,25 @@ pub async fn slingstop(
                 Ordering::Less => {
                     let mut stopped_ids = Vec::new();
                     {
-                        let job_states = p.state().job_state.lock().clone();
-                        stopped_count = job_states.iter().fold(0, |acc, (_, vec)| acc + vec.len());
-                        for (chan_id, jobstate) in job_states.iter() {
+                        let mut tasks = plugin.state().tasks.lock();
+                        let all_tasks_states = tasks.get_all_tasks_mut();
+                        for (chan_id, task_map) in all_tasks_states {
+                            stopped_count += task_map.len();
                             stopped_ids.push(*chan_id);
-                            for jt in jobstate {
-                                channel_jobstate_update(
-                                    p.state().job_state.clone(),
-                                    &Task {
-                                        chan_id: *chan_id,
-                                        task_id: jt.id(),
-                                    },
-                                    &JobMessage::Stopping,
-                                    true,
-                                    true,
-                                )?;
-                                log::debug!("{}/{}: Stopping job...", chan_id, jt.id());
+                            for task in task_map.values_mut() {
+                                task.set_state(JobMessage::Stopping);
+                                task.stop();
+                                log::debug!("{}: Stopping job...", task.get_identifier());
                             }
                         }
                     }
                     loop {
                         {
-                            let mut job_states = p.state().job_state.lock();
-                            job_states.retain(|chan, _state| stopped_ids.contains(chan));
+                            let tasks = plugin.state().tasks.lock();
                             let mut all_stopped = true;
-                            for (_chan_id, jobstate) in job_states.iter() {
-                                if jobstate.iter().any(|j| j.is_active()) {
+                            for chan_id in stopped_ids.iter() {
+                                let active = tasks.is_any_active(chan_id);
+                                if active {
                                     all_stopped = false;
                                 }
                             }
@@ -271,18 +269,24 @@ pub async fn slingstop(
             }
         };
     }
-    // write_graph(p.clone()).await?;
-    Ok(json!({ "stopped_count": stopped_count }))
+    Ok(stopped_count)
 }
 
 pub async fn slingonce(
-    p: Plugin<PluginState>,
+    plugin: Plugin<PluginState>,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, Error> {
+    let _rpc_lock = plugin.state().rpc_lock.lock().await;
+
     let (chan_id, job) = parse_once_job(args).await?;
 
-    let peer_channels = p.state().peer_channels.lock().clone();
+    let _res = refresh_listpeerchannels(plugin.clone()).await;
+    let peer_channels = plugin.state().peer_channels.lock().clone();
     let our_listpeers_channel = get_normal_channel_from_listpeerchannels(&peer_channels, &chan_id)?;
+    let other_peer = peer_channels
+        .get(&chan_id)
+        .ok_or(anyhow!("other_peer: channel not found"))?
+        .peer_id;
 
     match job.sat_direction {
         sling::SatDirection::Pull => {
@@ -290,12 +294,12 @@ pub async fn slingonce(
                 .receivable_msat
                 .ok_or_else(|| anyhow!("Missing receivable_msat field for channel"))?
                 .msat()
-                < job.total_amount_msat.unwrap()
+                < job.once_amount_msat.unwrap()
             {
                 return Err(anyhow!(
                     "Channel {} has not enough capacity to pull {}msat",
                     chan_id,
-                    job.total_amount_msat.unwrap()
+                    job.once_amount_msat.unwrap()
                 ));
             }
         }
@@ -304,31 +308,44 @@ pub async fn slingonce(
                 .spendable_msat
                 .ok_or_else(|| anyhow!("Missing spendable_msat field for channel"))?
                 .msat()
-                < job.total_amount_msat.unwrap()
+                < job.once_amount_msat.unwrap()
             {
                 return Err(anyhow!(
                     "Channel {} has not enough capacity to push {}msat",
                     chan_id,
-                    job.total_amount_msat.unwrap()
+                    job.once_amount_msat.unwrap()
                 ));
             }
         }
     }
 
-    let sling_dir = Path::new(&p.configuration().lightning_dir).join(PLUGIN_NAME);
-    let jobs = read_jobs(&sling_dir, &p).await?;
+    let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
+    let jobs = read_jobs(&sling_dir, plugin.clone()).await?;
     if jobs.contains_key(&chan_id) {
         return Err(anyhow!("There is already a job for that scid!"));
     }
 
-    let config = p.state().config.lock().clone();
+    let config = plugin.state().config.lock().clone();
 
-    let parallel_jobs = match job.paralleljobs {
-        Some(pj) => pj,
-        None => config.paralleljobs,
-    };
+    let parallel_jobs = job.get_paralleljobs(config.paralleljobs);
 
-    let p_clone = p.clone();
+    for i in 1..=parallel_jobs {
+        let task_ident = TaskIdentifier::new(chan_id, i);
+        let mut tasks = plugin.state().tasks.lock();
+        let task = tasks.get_task_mut(&task_ident);
+        if let Some(t) = task {
+            if !t.is_once() {
+                return Err(anyhow!(
+                    "There is already a job for that scid! Please delete it first."
+                ));
+            }
+            if t.is_active() {
+                return Err(anyhow!("There is already a job for that scid running!"));
+            }
+        }
+    }
+
+    let p_clone = plugin.clone();
 
     tokio::spawn(async move {
         let total_rebalanced = Arc::new(Mutex::new(0));
@@ -337,94 +354,74 @@ pub async fn slingonce(
             let job_clone = job.clone();
             let total_rebalanced = total_rebalanced.clone();
             tokio::spawn(async move {
+                let task_ident = TaskIdentifier::new(chan_id, i);
                 {
-                    let mut job_states = plugin.state().job_state.lock();
-                    if !job_states.contains_key(&chan_id)
-                        || match job_states
-                            .get(&chan_id)
-                            .unwrap()
-                            .iter()
-                            .find(|jt| jt.id() == i)
-                        {
-                            Some(jobstate) => !jobstate.is_active(),
-                            None => true,
-                        }
-                    {
-                        log::debug!("{}/{}: Spawning once-job.", chan_id, i);
-                        match job_states.get_mut(&chan_id) {
-                            Some(jts) => match jts.iter_mut().find(|jt| jt.id() == i) {
-                                Some(jobstate) => {
-                                    *jobstate = JobState::new(JobMessage::Starting, i, true)
-                                }
-                                None => jts.push(JobState::new(JobMessage::Starting, i, true)),
-                            },
+                    let mut tasks = plugin.state().tasks.lock();
+                    let task = tasks.get_task_mut(&task_ident);
+                    if task.is_none() || !task.as_ref().unwrap().is_active() {
+                        match task {
+                            Some(jts) => {
+                                jts.set_state(JobMessage::Starting);
+                                jts.set_active(true);
+                            }
                             None => {
-                                job_states.insert(
+                                match tasks.insert_task(
                                     chan_id,
-                                    vec![JobState::new(JobMessage::Starting, i, true)],
-                                );
+                                    i,
+                                    Task::new(
+                                        chan_id,
+                                        i,
+                                        JobMessage::Starting,
+                                        true,
+                                        config.pubkey,
+                                        other_peer,
+                                    ),
+                                ) {
+                                    Ok(_) => {}
+                                    Err(e) => {
+                                        log::error!("Error inserting task: {}", e);
+                                        return;
+                                    }
+                                };
                             }
                         }
-                    } else {
-                        log::warn!("There is already a job for that scid running!");
-                        return;
                     }
                 }
-                let task = Task {
-                    chan_id,
-                    task_id: i,
-                };
                 loop {
                     {
+                        let mut tasks = plugin.state().tasks.lock();
+                        let task = tasks.get_task_mut(&task_ident).unwrap();
                         let mut total_rebalanced = total_rebalanced.lock();
-                        if *total_rebalanced + job.amount_msat > job.total_amount_msat.unwrap() {
+                        if task.should_stop() {
+                            log::debug!("{}/{}: Spawned once-job exited.", chan_id, i);
+                            task.set_state(JobMessage::Stopped);
+                            task.set_active(false);
+                            break;
+                        }
+                        if *total_rebalanced + job.amount_msat > job.once_amount_msat.unwrap() {
                             log::debug!("{}/{}: Done rebalancing.", chan_id, i);
-                            match channel_jobstate_update(
-                                plugin.state().job_state.clone(),
-                                &task,
-                                &JobMessage::Balanced,
-                                false,
-                                false,
-                            ) {
-                                Ok(_) => (),
-                                Err(e) => {
-                                    log::warn!("{}/{}: Error updating jobstate: {}", chan_id, i, e)
-                                }
-                            };
+                            task.set_state(JobMessage::Balanced);
+                            task.set_active(false);
                             break;
                         } else {
                             *total_rebalanced += job.amount_msat;
                         }
                     }
-                    match sling(&job_clone, &task, &plugin).await {
+                    log::debug!("{}/{}: Spawning once-job.", chan_id, i);
+                    match sling(&job_clone, task_ident, plugin.clone()).await {
                         Ok(o) => {
-                            log::debug!("{}/{}: Spawned once-job exited.", chan_id, i);
                             if o == 0 {
                                 *total_rebalanced.lock() -= job.amount_msat;
                             }
                         }
                         Err(e) => {
                             log::warn!("{}/{}: Error in once-job: {}", chan_id, e, i);
-                            match channel_jobstate_update(
-                                plugin.state().job_state.clone(),
-                                &task,
-                                &JobMessage::Error,
-                                false,
-                                true,
-                            ) {
-                                Ok(_) => (),
-                                Err(e) => {
-                                    log::warn!("{}/{}: Error updating jobstate: {}", chan_id, i, e)
-                                }
-                            };
+                            let mut tasks = plugin.state().tasks.lock();
+                            let task = tasks.get_task_mut(&task_ident).unwrap();
+                            task.set_state(JobMessage::Error);
                             *total_rebalanced.lock() -= job.amount_msat;
                         }
                     };
-                    plugin
-                        .state()
-                        .parrallel_bans
-                        .lock()
-                        .retain(|_, task_bans| !task_bans.is_empty());
 
                     tokio::time::sleep(Duration::from_millis(20)).await;
                 }
@@ -435,11 +432,12 @@ pub async fn slingonce(
 }
 
 pub async fn slingjobsettings(
-    p: Plugin<PluginState>,
+    plugin: Plugin<PluginState>,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, Error> {
-    let sling_dir = Path::new(&p.configuration().lightning_dir).join(PLUGIN_NAME);
-    let jobs = read_jobs(&sling_dir, &p).await?;
+    let _rpc_lock = plugin.state().rpc_lock.lock().await;
+    let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
+    let jobs = read_jobs(&sling_dir, plugin.clone()).await?;
     let mut json_jobs: BTreeMap<ShortChannelId, Job> = BTreeMap::new();
     match args {
         serde_json::Value::Array(a) => {
@@ -474,10 +472,11 @@ pub async fn slingjobsettings(
 }
 
 pub async fn slingdeletejob(
-    p: Plugin<PluginState>,
+    plugin: Plugin<PluginState>,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, Error> {
-    let sling_dir = Path::new(&p.configuration().lightning_dir).join(PLUGIN_NAME);
+    let _rpc_lock = plugin.state().rpc_lock.lock().await;
+    let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
     match args {
         serde_json::Value::Array(a) => {
             if a.len() != 1 {
@@ -488,14 +487,21 @@ pub async fn slingdeletejob(
                 match a.first().unwrap() {
                     serde_json::Value::String(i) => match i {
                         inp if inp.eq("all") => {
-                            slingstop(p.clone(), serde_json::Value::Array(vec![])).await?;
+                            stop_job(plugin.clone(), serde_json::Value::Array(vec![])).await?;
                             let jobfile = sling_dir.join(JOB_FILE_NAME);
                             fs::remove_file(jobfile).await?;
+                            plugin.state().tasks.lock().remove_all_tasks();
                             log::info!("Deleted all jobs");
                         }
                         _ => {
                             let scid = ShortChannelId::from_str(i)?;
-                            write_job(p, sling_dir, scid, None, true).await?;
+                            stop_job(
+                                plugin.clone(),
+                                serde_json::Value::Array(vec![serde_json::to_value(scid)?]),
+                            )
+                            .await?;
+                            write_job(plugin.clone(), sling_dir, scid, None, true).await?;
+                            plugin.state().tasks.lock().remove_task(&scid);
                         }
                     },
                     _ => return Err(anyhow!("invalid string for deleting job(s)")),
@@ -517,7 +523,8 @@ pub async fn slingexceptchan(
     plugin: Plugin<PluginState>,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, Error> {
-    let peer_channels = plugin.state().peer_channels.lock().clone();
+    let _rpc_lock = plugin.state().rpc_lock.lock().await;
+
     let input_array = match args {
         serde_json::Value::Array(a) => a,
         e => {
@@ -540,40 +547,43 @@ pub async fn slingexceptchan(
             ))
         }
     };
+    let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
+    let mut static_excepts = read_except_chans(&sling_dir).await?;
     if input_array.len() == 2 {
         let scid = match input_array.get(1).unwrap() {
             serde_json::Value::String(s) => ShortChannelId::from_str(s)?,
             o => return Err(anyhow!("not a vaild short_channel_id: {}", o)),
         };
         {
-            let mut excepts = plugin.state().excepts_chans.lock();
+            let jobs = read_jobs(&sling_dir, plugin.clone()).await?;
+            let mut config = plugin.state().config.lock();
+
             let mut contains = false;
-            for chan_id in excepts.iter() {
-                if chan_id == &scid {
-                    contains = true;
-                }
+            if config.exclude_chans_pull.contains(&scid)
+                || config.exclude_chans_push.contains(&scid)
+            {
+                contains = true;
             }
+
             match command {
                 opt if opt.eq("add") => {
                     if contains {
                         return Err(anyhow!("{} is already in excepts", scid));
                     }
-                    let pull_jobs = plugin.state().pull_jobs.lock().clone();
-                    let push_jobs = plugin.state().push_jobs.lock().clone();
-                    if peer_channels.contains_key(&scid) {
-                        if pull_jobs.contains(&scid) || push_jobs.contains(&scid) {
-                            return Err(anyhow!(
-                                "this channel has a job already and can't be an except too"
-                            ));
-                        }
-                        excepts.insert(scid);
-                    } else {
-                        excepts.insert(scid);
+                    if jobs.contains_key(&scid) {
+                        return Err(anyhow!(
+                            "this channel has a job already and can't be an except too"
+                        ));
                     }
+                    config.exclude_chans_pull.insert(scid);
+                    config.exclude_chans_push.insert(scid);
+                    static_excepts.insert(scid);
                 }
                 opt if opt.eq("remove") => {
                     if contains {
-                        excepts.retain(|&x| x != scid);
+                        config.exclude_chans_pull.remove(&scid);
+                        config.exclude_chans_push.remove(&scid);
+                        static_excepts.remove(&scid);
                     } else {
                         return Err(anyhow!(
                             "short_channel_id {} not in excepts, nothing to remove",
@@ -588,14 +598,11 @@ pub async fn slingexceptchan(
                 }
             }
         }
-        let excepts = plugin.state().excepts_chans.lock().clone();
-        let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
-        write_excepts(excepts, EXCEPTS_CHANS_FILE_NAME, &sling_dir).await?;
+        write_excepts(static_excepts, EXCEPTS_CHANS_FILE_NAME, &sling_dir).await?;
         Ok(json!({ "result": "success" }))
     } else {
-        let excepts = plugin.state().excepts_chans.lock();
         match command {
-            opt if opt.eq("list") => Ok(json!(excepts.clone())),
+            opt if opt.eq("list") => Ok(json!(static_excepts)),
             _ => Err(anyhow!(
                 "unknown commmand, did you misspell `list` or forgot the scid?"
             )),
@@ -607,7 +614,8 @@ pub async fn slingexceptpeer(
     plugin: Plugin<PluginState>,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, Error> {
-    let peer_channels = plugin.state().peer_channels.lock().clone();
+    let _rpc_lock = plugin.state().rpc_lock.lock().await;
+
     let array = match args {
         serde_json::Value::Array(a) => a,
         e => {
@@ -630,41 +638,42 @@ pub async fn slingexceptpeer(
             ))
         }
     };
+    let _res = refresh_listpeerchannels(plugin.clone()).await;
+    let peer_channels = plugin.state().peer_channels.lock().clone();
+    let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
+    let mut static_excepts = read_except_peers(&sling_dir).await?;
     if array.len() == 2 {
         let pubkey = match array.get(1).unwrap() {
             serde_json::Value::String(s) => PublicKey::from_str(s)?,
             o => return Err(anyhow!("invaild node_id: {}", o)),
         };
         {
-            let mut excepts_peers = plugin.state().excepts_peers.lock();
-            let contains = excepts_peers.contains(&pubkey);
+            let jobs = read_jobs(&sling_dir, plugin.clone()).await?;
+            let mut config = plugin.state().config.lock();
+            if config.pubkey == pubkey {
+                return Err(anyhow!("Can't exclude yourself"));
+            };
             match command {
                 opt if opt.eq("add") => {
-                    if contains {
+                    if config.exclude_peers.contains(&pubkey) {
                         return Err(anyhow!("{} is already in excepts", pubkey));
                     }
-                    let pull_jobs = plugin.state().pull_jobs.lock().clone();
-                    let push_jobs = plugin.state().push_jobs.lock().clone();
-                    let all_jobs: Vec<ShortChannelId> =
-                        pull_jobs.into_iter().chain(push_jobs.into_iter()).collect();
-                    let mut all_job_peers: Vec<PublicKey> = vec![];
-                    log::debug!("{:?}", all_jobs);
-                    for job in &all_jobs {
-                        match peer_channels.get(job) {
-                            Some(peer) => all_job_peers.push(peer.peer_id),
-                            None => return Err(anyhow!("peer not found")),
+                    for scid in jobs.keys() {
+                        if let Some(peer_chan) = peer_channels.get(scid) {
+                            if peer_chan.peer_id == pubkey {
+                                return Err(anyhow!(
+                                    "this peer has a job already and can't be an except too"
+                                ));
+                            }
                         };
                     }
-                    if all_job_peers.contains(&pubkey) {
-                        return Err(anyhow!(
-                            "this peer has a job already and can't be an except too"
-                        ));
-                    }
-                    excepts_peers.insert(pubkey);
+                    config.exclude_peers.insert(pubkey);
+                    static_excepts.insert(pubkey);
                 }
                 opt if opt.eq("remove") => {
-                    if contains {
-                        excepts_peers.retain(|&x| x != pubkey);
+                    if static_excepts.contains(&pubkey) {
+                        static_excepts.remove(&pubkey);
+                        config.exclude_peers.remove(&pubkey);
                     } else {
                         return Err(anyhow!(
                             "node_id {} not in excepts, nothing to remove",
@@ -679,14 +688,11 @@ pub async fn slingexceptpeer(
                 }
             }
         }
-        let excepts = plugin.state().excepts_peers.lock().clone();
-        let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
-        write_excepts::<PublicKey>(excepts, EXCEPTS_PEERS_FILE_NAME, &sling_dir).await?;
+        write_excepts::<PublicKey>(static_excepts, EXCEPTS_PEERS_FILE_NAME, &sling_dir).await?;
         Ok(json!({ "result": "success" }))
     } else {
-        let excepts = plugin.state().excepts_peers.lock();
         match command {
-            opt if opt.eq("list") => Ok(json!(excepts.clone())),
+            opt if opt.eq("list") => Ok(json!(static_excepts)),
             _ => Err(anyhow!(
                 "unknown commmand, use `list` or forgot the node_id?"
             )),

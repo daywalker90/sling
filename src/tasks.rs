@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     fs::File,
     io::BufReader,
     path::Path,
@@ -10,7 +9,7 @@ use anyhow::Error;
 use cln_plugin::Plugin;
 use cln_rpc::{
     model::requests::{ListnodesRequest, ListpeerchannelsRequest},
-    primitives::{Amount, ChannelState, ShortChannelId, ShortChannelIdDir},
+    primitives::{Amount, ChannelState, ShortChannelIdDir},
     ClnRpc,
 };
 
@@ -20,7 +19,7 @@ use tokio::{
     time::{self, Instant},
 };
 
-use crate::{gossip::read_gossip_store, model::*, util::*};
+use crate::{gossip::read_gossip_store, model::*};
 
 pub async fn refresh_aliasmap(plugin: Plugin<PluginState>) -> Result<(), Error> {
     loop {
@@ -56,13 +55,13 @@ pub async fn refresh_listpeerchannels_loop(plugin: Plugin<PluginState>) -> Resul
             interval = config.refresh_peers_interval;
         }
         {
-            refresh_listpeerchannels(&plugin).await?;
+            refresh_listpeerchannels(plugin.clone()).await?;
         }
         time::sleep(Duration::from_secs(interval)).await;
     }
 }
 
-pub async fn refresh_listpeerchannels(plugin: &Plugin<PluginState>) -> Result<(), Error> {
+pub async fn refresh_listpeerchannels(plugin: Plugin<PluginState>) -> Result<(), Error> {
     let rpc_path;
     {
         let config = plugin.state().config.lock();
@@ -285,36 +284,9 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
     loop {
         {
             let now = Instant::now();
-            let mut successes = HashMap::new();
-            let mut failures = HashMap::new();
-            refresh_joblists(plugin.clone()).await?;
-            let pull_jobs = plugin.state().pull_jobs.lock().clone();
-            let push_jobs = plugin.state().push_jobs.lock().clone();
-            let mut all_jobs: Vec<ShortChannelId> =
-                pull_jobs.into_iter().chain(push_jobs.into_iter()).collect();
+            let successes = SuccessReb::read_from_files(&sling_dir, None).await?;
+            let failures = FailureReb::read_from_files(&sling_dir, None).await?;
 
-            let scid_peer_map;
-            {
-                let peer_channels = plugin.state().peer_channels.lock();
-                scid_peer_map = get_all_normal_channels_from_listpeerchannels(&peer_channels);
-            }
-
-            all_jobs.retain(|c| scid_peer_map.contains_key(c));
-            for scid in &all_jobs {
-                match SuccessReb::read_from_file(&sling_dir, scid).await {
-                    Ok(o) => {
-                        successes.insert(scid, o);
-                    }
-                    Err(e) => log::debug!("{}: probably no success stats yet: {:?}", scid, e),
-                };
-
-                match FailureReb::read_from_file(&sling_dir, scid).await {
-                    Ok(o) => {
-                        failures.insert(scid, o);
-                    }
-                    Err(e) => log::debug!("{}: probably no failure stats yet: {:?}", scid, e),
-                };
-            }
             let stats_delete_successes_age =
                 plugin.state().config.lock().stats_delete_successes_age;
             let stats_delete_failures_age = plugin.state().config.lock().stats_delete_failures_age;
@@ -368,7 +340,7 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     .write(true)
                     .create(true)
                     .truncate(true)
-                    .open(sling_dir.join(chan_id.to_string() + SUCCESSES_SUFFIX))
+                    .open(sling_dir.join(chan_id.to_string() + "_" + SUCCESSES_SUFFIX))
                     .await?;
                 file.write_all(&content).await?;
             }
@@ -412,7 +384,7 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     .write(true)
                     .create(true)
                     .truncate(true)
-                    .open(sling_dir.join(chan_id.to_string() + FAILURES_SUFFIX))
+                    .open(sling_dir.join(chan_id.to_string() + "_" + FAILURES_SUFFIX))
                     .await?;
                 file.write_all(&content).await?;
             }

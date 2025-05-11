@@ -222,10 +222,37 @@ async fn main() -> Result<(), anyhow::Error> {
         Some(plugin) => {
             let rpc_path = Path::new(&plugin.configuration().lightning_dir)
                 .join(plugin.configuration().rpc_file);
-            let mut rpc = ClnRpc::new(&rpc_path).await?;
+            let mut rpc = match ClnRpc::new(&rpc_path).await {
+                Ok(o) => o,
+                Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
+            };
             let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
-            let getinfo = rpc.call_typed(&GetinfoRequest {}).await?;
-            state = PluginState::new(getinfo.id, rpc_path, sling_dir, getinfo.version);
+            let getinfo = match rpc.call_typed(&GetinfoRequest {}).await {
+                Ok(o) => o,
+                Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
+            };
+            let except_chans = match read_except_chans(&sling_dir).await {
+                Ok(o) => o,
+                Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
+            };
+            let except_peers = match read_except_peers(&sling_dir).await {
+                Ok(o) => o,
+                Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
+            };
+            let liquidity = match read_liquidity(&sling_dir).await {
+                Ok(o) => o,
+                Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
+            };
+            let config = Config::new(
+                getinfo.id,
+                rpc_path,
+                sling_dir,
+                getinfo.version,
+                except_chans.clone(),
+                except_chans,
+                except_peers,
+            );
+            state = PluginState::new(config, liquidity);
             {
                 *state.blockheight.lock() = getinfo.blockheight;
             }
@@ -240,52 +267,53 @@ async fn main() -> Result<(), anyhow::Error> {
     };
     if let Ok(plugin) = confplugin.start(state).await {
         log::debug!("{:?}", plugin.configuration());
-        let config = plugin.state().config.lock().clone();
-        *plugin.state().liquidity.lock() = read_liquidity(&config.sling_dir).await?;
         let peersclone = plugin.clone();
         tokio::spawn(async move {
-            match tasks::refresh_listpeerchannels_loop(peersclone).await {
+            match tasks::refresh_listpeerchannels_loop(peersclone.clone()).await {
                 Ok(()) => (),
                 Err(e) => log::warn!("Error in refresh_listpeers thread: {:?}", e),
             };
+            let _res = peersclone.shutdown();
         });
-        plugin.state().read_excepts().await?;
-        let joblists_clone = plugin.clone();
-        refresh_joblists(joblists_clone).await?;
         let channelsclone = plugin.clone();
         tokio::spawn(async move {
-            match tasks::refresh_graph(channelsclone).await {
+            match tasks::refresh_graph(channelsclone.clone()).await {
                 Ok(()) => (),
                 Err(e) => log::warn!("Error in refresh_graph thread: {:?}", e),
             };
+            let _res = channelsclone.shutdown();
         });
         let aliasclone = plugin.clone();
         tokio::spawn(async move {
-            match tasks::refresh_aliasmap(aliasclone).await {
+            match tasks::refresh_aliasmap(aliasclone.clone()).await {
                 Ok(()) => (),
                 Err(e) => log::warn!("Error in refresh_aliasmap thread: {:?}", e),
             };
+            let _res = aliasclone.shutdown();
         });
         let liquidityclone = plugin.clone();
         tokio::spawn(async move {
-            match tasks::refresh_liquidity(liquidityclone).await {
+            match tasks::refresh_liquidity(liquidityclone.clone()).await {
                 Ok(()) => (),
                 Err(e) => log::warn!("Error in refresh_liquidity thread: {:?}", e),
             };
+            let _res = liquidityclone.shutdown();
         });
         let tempbanclone = plugin.clone();
         tokio::spawn(async move {
-            match tasks::clear_tempbans(tempbanclone).await {
+            match tasks::clear_tempbans(tempbanclone.clone()).await {
                 Ok(()) => (),
                 Err(e) => log::warn!("Error in clear_tempbans thread: {:?}", e),
             };
+            let _res = tempbanclone.shutdown();
         });
         let clearstatsclone = plugin.clone();
         tokio::spawn(async move {
-            match tasks::clear_stats(clearstatsclone).await {
+            match tasks::clear_stats(clearstatsclone.clone()).await {
                 Ok(()) => (),
                 Err(e) => log::warn!("Error in clear_stats thread: {:?}", e),
             };
+            let _res = clearstatsclone.shutdown();
         });
 
         plugin.join().await?;
