@@ -15,18 +15,12 @@ use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use sling::Job;
 use tabled::Tabled;
-use tokio::{
-    fs::{self, File, OpenOptions},
-    io::{self, AsyncWriteExt},
-};
+use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 
-use crate::{
-    create_sling_dir,
-    gossip::{ChannelAnnouncement, ChannelUpdate},
-};
+use crate::gossip::{ChannelAnnouncement, ChannelUpdate};
 
-pub const SUCCESSES_SUFFIX: &str = "_successes.json";
-pub const FAILURES_SUFFIX: &str = "_failures.json";
+pub const SUCCESSES_SUFFIX: &str = "successes.json";
+pub const FAILURES_SUFFIX: &str = "failures.json";
 pub const NO_ALIAS_SET: &str = "NO_ALIAS_SET";
 
 pub const PLUGIN_NAME: &str = "sling";
@@ -44,96 +38,223 @@ pub struct PluginState {
     pub liquidity: Arc<Mutex<HashMap<ShortChannelIdDir, Liquidity>>>,
     pub pays: Arc<RwLock<HashMap<String, String>>>,
     pub alias_peer_map: Arc<Mutex<HashMap<PublicKey, String>>>,
-    pub pull_jobs: Arc<Mutex<HashSet<ShortChannelId>>>,
-    pub push_jobs: Arc<Mutex<HashSet<ShortChannelId>>>,
-    pub excepts_chans: Arc<Mutex<HashSet<ShortChannelId>>>,
-    pub excepts_peers: Arc<Mutex<HashSet<PublicKey>>>,
     pub tempbans: Arc<Mutex<HashMap<ShortChannelId, u64>>>,
-    pub parrallel_bans: Arc<Mutex<HashMap<ShortChannelId, HashMap<u16, ShortChannelIdDir>>>>,
-    pub job_state: Arc<Mutex<HashMap<ShortChannelId, Vec<JobState>>>>,
+    pub tasks: Arc<Mutex<Tasks>>,
     pub blockheight: Arc<Mutex<u32>>,
+    pub rpc_lock: Arc<tokio::sync::Mutex<()>>,
 }
 impl PluginState {
-    pub fn new(
-        pubkey: PublicKey,
-        rpc_path: PathBuf,
-        sling_dir: PathBuf,
-        version: String,
-    ) -> PluginState {
+    pub fn new(config: Config, liquidity: HashMap<ShortChannelIdDir, Liquidity>) -> PluginState {
         PluginState {
-            config: Arc::new(Mutex::new(Config::new(
-                pubkey, rpc_path, sling_dir, version,
-            ))),
+            config: Arc::new(Mutex::new(config)),
             peer_channels: Arc::new(Mutex::new(HashMap::new())),
             graph: Arc::new(Mutex::new(LnGraph::new())),
             incomplete_channels: Arc::new(Mutex::new(IncompleteChannels::new())),
-            liquidity: Arc::new(Mutex::new(HashMap::new())),
+            liquidity: Arc::new(Mutex::new(liquidity)),
             pays: Arc::new(RwLock::new(HashMap::new())),
             alias_peer_map: Arc::new(Mutex::new(HashMap::new())),
-            pull_jobs: Arc::new(Mutex::new(HashSet::new())),
-            push_jobs: Arc::new(Mutex::new(HashSet::new())),
-            excepts_chans: Arc::new(Mutex::new(HashSet::new())),
-            excepts_peers: Arc::new(Mutex::new(HashSet::new())),
             tempbans: Arc::new(Mutex::new(HashMap::new())),
-            parrallel_bans: Arc::new(Mutex::new(HashMap::new())),
-            job_state: Arc::new(Mutex::new(HashMap::new())),
+            tasks: Arc::new(Mutex::new(Tasks::new())),
             blockheight: Arc::new(Mutex::new(0)),
+            rpc_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
-    }
-    pub async fn read_excepts(&self) -> Result<(), Error> {
-        let sling_dir = self.config.lock().sling_dir.clone();
-        let excepts_chan_file = sling_dir.join(EXCEPTS_CHANS_FILE_NAME);
-        let excepts_peers_file = sling_dir.join(EXCEPTS_PEERS_FILE_NAME);
-        let excepts_chan_file_content = fs::read_to_string(excepts_chan_file.clone()).await;
-        let excepts_peers_file_content = fs::read_to_string(excepts_peers_file.clone()).await;
-
-        create_sling_dir(&sling_dir).await?;
-
-        *self.excepts_chans.lock() =
-            PluginState::parse_excepts(excepts_chan_file_content, excepts_chan_file).await?;
-        *self.excepts_peers.lock() =
-            PluginState::parse_excepts(excepts_peers_file_content, excepts_peers_file).await?;
-        Ok(())
-    }
-    async fn parse_excepts<T: FromStr + std::hash::Hash + Eq>(
-        content: Result<String, io::Error>,
-        excepts_file: PathBuf,
-    ) -> Result<HashSet<T>, Error> {
-        let excepts_tostring: Vec<String>;
-        let mut excepts: HashSet<T> = HashSet::new();
-
-        match content {
-            Ok(file) => excepts_tostring = serde_json::from_str(&file).unwrap_or(Vec::new()),
-            Err(e) => {
-                log::warn!(
-                    "Could not open {}: {}. First time using sling? Creating new file.",
-                    excepts_file.to_str().unwrap(),
-                    e
-                );
-                File::create(excepts_file.clone()).await?;
-                excepts_tostring = Vec::new();
-            }
-        };
-
-        for except in excepts_tostring {
-            match T::from_str(&except) {
-                Ok(id) => {
-                    excepts.insert(id);
-                }
-                Err(_e) => log::warn!(
-                    "excepts file contains invalid short_channel_id/node_id: {}",
-                    except
-                ),
-            }
-        }
-        Ok(excepts)
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Copy)]
+#[derive(Clone, Debug)]
+pub struct Tasks {
+    tasks: HashMap<ShortChannelId, HashMap<u16, Task>>,
+}
+impl Tasks {
+    pub fn new() -> Tasks {
+        Tasks {
+            tasks: HashMap::new(),
+        }
+    }
+    pub fn insert_task(
+        &mut self,
+        scid: ShortChannelId,
+        task_id: u16,
+        task: Task,
+    ) -> Result<(), anyhow::Error> {
+        match self.tasks.entry(scid) {
+            std::collections::hash_map::Entry::Vacant(e) => {
+                e.insert(HashMap::from([(task_id, task)]));
+                Ok(())
+            }
+            std::collections::hash_map::Entry::Occupied(mut e) => {
+                match e.get_mut().entry(task_id) {
+                    std::collections::hash_map::Entry::Vacant(e) => {
+                        e.insert(task);
+                        Ok(())
+                    }
+                    std::collections::hash_map::Entry::Occupied(_e) => {
+                        Err(anyhow::anyhow!("task already exists"))
+                    }
+                }
+            }
+        }
+    }
+    pub fn is_any_active(&self, scid: &ShortChannelId) -> bool {
+        if let Some(tasks) = self.tasks.get(scid) {
+            tasks.values().any(|t| t.is_active())
+        } else {
+            false
+        }
+    }
+    pub fn set_active(&mut self, task_ident: &TaskIdentifier, active: bool) {
+        if let Some(tasks) = self.tasks.get_mut(&task_ident.get_chan_id()) {
+            if let Some(task) = tasks.get_mut(&task_ident.get_task_id()) {
+                task.set_active(active);
+            }
+        }
+    }
+    pub fn set_state(&mut self, task_ident: &TaskIdentifier, state: JobMessage) {
+        if let Some(tasks) = self.tasks.get_mut(&task_ident.get_chan_id()) {
+            if let Some(task) = tasks.get_mut(&task_ident.get_task_id()) {
+                task.set_state(state);
+            }
+        }
+    }
+    pub fn get_all_tasks_mut(&mut self) -> &mut HashMap<ShortChannelId, HashMap<u16, Task>> {
+        &mut self.tasks
+    }
+    pub fn get_all_tasks(&self) -> &HashMap<ShortChannelId, HashMap<u16, Task>> {
+        &self.tasks
+    }
+    pub fn get_scid_tasks_mut(&mut self, scid: &ShortChannelId) -> Option<&mut HashMap<u16, Task>> {
+        self.tasks.get_mut(scid)
+    }
+    pub fn get_scid_tasks(&self, scid: &ShortChannelId) -> Option<&HashMap<u16, Task>> {
+        self.tasks.get(scid)
+    }
+    pub fn get_parallelbans(
+        &self,
+        scid: ShortChannelId,
+    ) -> Result<HashSet<ShortChannelIdDir>, anyhow::Error> {
+        if let Some(tasks) = self.tasks.get(&scid) {
+            Ok(tasks.values().filter_map(|t| t.parallel_ban).collect())
+        } else {
+            Err(anyhow::anyhow!("no tasks found for scid"))
+        }
+    }
+    pub fn get_task(&self, task_ident: &TaskIdentifier) -> Option<&Task> {
+        if let Some(tasks) = self.tasks.get(&task_ident.get_chan_id()) {
+            tasks.get(&task_ident.get_task_id())
+        } else {
+            None
+        }
+    }
+    pub fn get_task_mut(&mut self, task_ident: &TaskIdentifier) -> Option<&mut Task> {
+        if let Some(tasks) = self.tasks.get_mut(&task_ident.get_chan_id()) {
+            tasks.get_mut(&task_ident.get_task_id())
+        } else {
+            None
+        }
+    }
+    pub fn remove_all_tasks(&mut self) {
+        self.tasks.clear();
+    }
+    pub fn remove_task(&mut self, scid: &ShortChannelId) {
+        self.tasks.remove(scid);
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TaskIdentifier {
+    short_channel_id: ShortChannelId,
+    task_id: u16,
+}
+impl TaskIdentifier {
+    pub fn new(short_channel_id: ShortChannelId, task_id: u16) -> TaskIdentifier {
+        TaskIdentifier {
+            short_channel_id,
+            task_id,
+        }
+    }
+    pub fn get_chan_id(&self) -> ShortChannelId {
+        self.short_channel_id
+    }
+    pub fn get_task_id(&self) -> u16 {
+        self.task_id
+    }
+}
+impl Display for TaskIdentifier {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}", self.short_channel_id, self.task_id)
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct Task {
-    pub chan_id: ShortChannelId,
-    pub task_id: u16,
+    task_ident: TaskIdentifier,
+    latest_state: JobMessage,
+    active: bool,
+    should_stop: bool,
+    once: bool,
+    pub actual_candidates: Vec<ShortChannelId>,
+    pub parallel_ban: Option<ShortChannelIdDir>,
+    pub my_pubkey: PublicKey,
+    pub other_pubkey: PublicKey,
+}
+impl Display for Task {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.task_ident)
+    }
+}
+
+impl Task {
+    pub fn new(
+        short_channel_id: ShortChannelId,
+        task_id: u16,
+        latest_state: JobMessage,
+        once: bool,
+        my_pubkey: PublicKey,
+        other_pubkey: PublicKey,
+    ) -> Self {
+        Task {
+            latest_state,
+            active: true,
+            should_stop: false,
+            once,
+            my_pubkey,
+            other_pubkey,
+            parallel_ban: None,
+            actual_candidates: Vec::new(),
+            task_ident: TaskIdentifier::new(short_channel_id, task_id),
+        }
+    }
+
+    pub fn get_state(&self) -> JobMessage {
+        self.latest_state
+    }
+    pub fn set_state(&mut self, state: JobMessage) {
+        self.latest_state = state;
+    }
+    pub fn stop(&mut self) {
+        self.should_stop = true;
+    }
+    pub fn should_stop(&self) -> bool {
+        self.should_stop
+    }
+    pub fn is_active(&self) -> bool {
+        self.active
+    }
+    pub fn set_active(&mut self, active: bool) {
+        self.active = active;
+        if active {
+            self.should_stop = false;
+        }
+    }
+    pub fn get_chan_id(&self) -> ShortChannelId {
+        self.task_ident.get_chan_id()
+    }
+    pub fn get_identifier(&self) -> &TaskIdentifier {
+        &self.task_ident
+    }
+    pub fn is_once(&self) -> bool {
+        self.once
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -160,6 +281,9 @@ pub struct Config {
     pub cltv_delta: u32,
     pub at_or_above_24_11: bool,
     pub inform_layers: Vec<String>,
+    pub exclude_chans_pull: HashSet<ShortChannelId>,
+    pub exclude_chans_push: HashSet<ShortChannelId>,
+    pub exclude_peers: HashSet<PublicKey>,
 }
 impl Config {
     pub fn new(
@@ -167,6 +291,9 @@ impl Config {
         rpc_path: PathBuf,
         sling_dir: PathBuf,
         version: String,
+        exclude_chans_pull: HashSet<ShortChannelId>,
+        exclude_chans_push: HashSet<ShortChannelId>,
+        exclude_peers: HashSet<PublicKey>,
     ) -> Config {
         Config {
             pubkey,
@@ -191,96 +318,11 @@ impl Config {
             cltv_delta: 144,
             at_or_above_24_11: false,
             inform_layers: vec!["xpay".to_string()],
+            exclude_chans_pull,
+            exclude_chans_push,
+            exclude_peers,
         }
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct JobState {
-    latest_state: JobMessage,
-    active: bool,
-    should_stop: bool,
-    id: u16,
-    once: bool,
-}
-impl JobState {
-    pub fn new(latest_state: JobMessage, id: u16, once: bool) -> Self {
-        JobState {
-            latest_state,
-            active: true,
-            should_stop: false,
-            id,
-            once,
-        }
-    }
-    pub fn missing() -> Self {
-        JobState {
-            latest_state: JobMessage::NoJob,
-            active: false,
-            should_stop: false,
-            id: 0,
-            once: false,
-        }
-    }
-
-    fn statechange(&mut self, latest_state: JobMessage) {
-        self.latest_state = latest_state;
-    }
-    pub fn state(&self) -> JobMessage {
-        self.latest_state
-    }
-    pub fn stop(&mut self) {
-        self.should_stop = true;
-    }
-    pub fn should_stop(&self) -> bool {
-        self.should_stop
-    }
-    pub fn is_active(&self) -> bool {
-        self.active
-    }
-    fn set_active(&mut self, active: bool) {
-        self.active = active;
-    }
-    pub fn id(&self) -> u16 {
-        self.id
-    }
-    pub fn is_once(&self) -> bool {
-        self.once
-    }
-}
-
-pub fn channel_jobstate_update(
-    jobstates: Arc<Mutex<HashMap<ShortChannelId, Vec<JobState>>>>,
-    task: &Task,
-    latest_state: &JobMessage,
-    active: bool,
-    should_stop: bool,
-) -> Result<(), Error> {
-    let mut jobstates_lock = jobstates.lock();
-    let jobstates = jobstates_lock.get_mut(&task.chan_id);
-    let jobstate = if let Some(jss) = jobstates {
-        if let Some(js) = jss.iter_mut().find(|jt| jt.id() == task.task_id) {
-            js
-        } else {
-            return Err(anyhow!("channel_jobstate_update: Could not find task id"));
-        }
-    } else {
-        return Err(anyhow!("channel_jobstate_update: Could not find scid"));
-    };
-    jobstate.statechange(*latest_state);
-
-    if jobstate.should_stop() {
-        if !active {
-            jobstate.set_active(active);
-        }
-        return Ok(());
-    }
-
-    jobstate.set_active(active);
-    if should_stop {
-        jobstate.stop()
-    }
-    Ok(())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -301,7 +343,7 @@ pub enum JobMessage {
     Stopping,
     Stopped,
     Error,
-    NoJob,
+    NotStarted,
 }
 impl Display for JobMessage {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
@@ -322,20 +364,20 @@ impl Display for JobMessage {
             JobMessage::Stopping => write!(f, "Stopping"),
             JobMessage::Stopped => write!(f, "Stopped"),
             JobMessage::Error => write!(f, "Error"),
-            JobMessage::NoJob => write!(f, "NoJob"),
+            JobMessage::NotStarted => write!(f, "NotStarted"),
         }
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct DijkstraNode<'a> {
+pub struct DijkstraNode {
     pub score: u64,
-    pub channel_state: &'a ShortChannelIdDirState,
+    pub channel_state: ShortChannelIdDirState,
     pub short_channel_id: ShortChannelId,
     pub destination: PublicKey,
     pub hops: u8,
 }
-impl PartialEq for DijkstraNode<'_> {
+impl PartialEq for DijkstraNode {
     fn eq(&self, other: &Self) -> bool {
         self.score == other.score
             && self.hops == other.hops
@@ -515,18 +557,6 @@ fn get_node_order(
     } else {
         Err(anyhow!("gossip_reader: invalid direction:{}", direction))
     }
-}
-
-#[derive(Clone, Debug)]
-pub struct PublicKeyPair {
-    pub my_pubkey: PublicKey,
-    pub other_pubkey: PublicKey,
-}
-
-#[derive(Clone, Debug)]
-pub struct ExcludeGraph {
-    pub exclude_chans: HashSet<ShortChannelId>,
-    pub exclude_peers: HashSet<PublicKey>,
 }
 
 #[derive(Debug, Serialize)]
@@ -731,36 +761,29 @@ impl LnGraph {
     #[allow(clippy::too_many_arguments)]
     pub fn edges(
         &self,
+        source: &PublicKey,
         two_weeks_ago: u32,
-        keypair: &PublicKeyPair,
-        exclude_graph: &ExcludeGraph,
+        task: &Task,
+        config: &Config,
         job: &Job,
-        candidatelist: &[ShortChannelId],
-        tempbans: &HashMap<ShortChannelId, u64>,
-        parallel_bans: &[ShortChannelIdDir],
+        excepts: &[ShortChannelIdDir],
         liquidity: &HashMap<ShortChannelIdDir, Liquidity>,
     ) -> Vec<(&ShortChannelIdDir, &ShortChannelIdDirState)> {
         let mut result = Vec::new();
-        if let Some(node_channels) = self.graph.get(&keypair.other_pubkey) {
+        if let Some(node_channels) = self.graph.get(source) {
             for dir_chan in node_channels {
                 if let Some(dir_chan_state) = self.channels.get(dir_chan) {
                     if dir_chan_state.active
                         && dir_chan_state.last_update >= two_weeks_ago
-                        && !exclude_graph
-                            .exclude_chans
-                            .contains(&dir_chan.short_channel_id)
-                        && !tempbans.contains_key(&dir_chan.short_channel_id)
-                        && !parallel_bans.contains(dir_chan)
+                        && !excepts.contains(dir_chan)
                         && Amount::msat(&dir_chan_state.htlc_minimum_msat) <= job.amount_msat
                         && Amount::msat(&dir_chan_state.htlc_maximum_msat) >= job.amount_msat
-                        && !exclude_graph.exclude_peers.contains(&dir_chan_state.source)
-                        && !exclude_graph
-                            .exclude_peers
-                            .contains(&dir_chan_state.destination)
-                        && if dir_chan_state.source == keypair.my_pubkey
-                            || dir_chan_state.destination == keypair.my_pubkey
+                        && !config.exclude_peers.contains(&dir_chan_state.source)
+                        && !config.exclude_peers.contains(&dir_chan_state.destination)
+                        && if dir_chan_state.source == task.my_pubkey
+                            || dir_chan_state.destination == task.my_pubkey
                         {
-                            candidatelist
+                            task.actual_candidates
                                 .iter()
                                 .any(|c| c == &dir_chan.short_channel_id)
                         } else {
@@ -801,25 +824,73 @@ impl SuccessReb {
         let mut file = OpenOptions::new()
             .append(true)
             .create(true)
-            .open(sling_dir.join(chan_id.to_string() + SUCCESSES_SUFFIX))
+            .open(sling_dir.join(chan_id.to_string() + "_" + SUCCESSES_SUFFIX))
             .await?;
         file.write_all(format!("{}\n", serialized).as_bytes())
             .await?;
         Ok(())
     }
 
-    pub async fn read_from_file(
+    pub async fn read_from_files(
         sling_dir: &Path,
-        chan_id: &ShortChannelId,
-    ) -> Result<Vec<SuccessReb>, Error> {
-        let contents =
-            tokio::fs::read_to_string(sling_dir.join(chan_id.to_string() + SUCCESSES_SUFFIX))
-                .await?;
-        let mut vec = vec![];
-        for line in contents.lines() {
-            vec.push(serde_json::from_str(line)?);
+        search_scid: Option<ShortChannelId>,
+    ) -> Result<HashMap<ShortChannelId, Vec<SuccessReb>>, Error> {
+        let mut result = HashMap::new();
+        let mut read_dir = tokio::fs::read_dir(sling_dir).await?;
+        while let Some(file) = read_dir.next_entry().await? {
+            let file_name_os = file.file_name();
+            let file_name = if let Some(f_n) = file_name_os.to_str() {
+                f_n
+            } else {
+                continue;
+            };
+            let file_path = file.path();
+            let file_extension = if let Some(f_e) = file_path.extension() {
+                if let Some(f_e_str) = f_e.to_str() {
+                    f_e_str
+                } else {
+                    continue;
+                }
+            } else {
+                continue;
+            };
+            let (scid_str, suffix) = if let Some(split) = file_name.split_once('_') {
+                split
+            } else {
+                continue;
+            };
+            let scid = if let Ok(id) = ShortChannelId::from_str(scid_str) {
+                id
+            } else {
+                continue;
+            };
+            if let Some(s) = search_scid {
+                if s != scid {
+                    continue;
+                }
+            }
+
+            if suffix == SUCCESSES_SUFFIX && file_extension == "json" {
+                log::debug!("Reading success file: {}", file.path().display());
+                let contents = tokio::fs::read_to_string(file_path).await?;
+                for line in contents.lines() {
+                    let reb: SuccessReb = if let Ok(r) = serde_json::from_str(line) {
+                        r
+                    } else {
+                        continue;
+                    };
+                    match result.entry(scid) {
+                        std::collections::hash_map::Entry::Vacant(e) => {
+                            e.insert(vec![reb]);
+                        }
+                        std::collections::hash_map::Entry::Occupied(mut e) => {
+                            e.get_mut().push(reb);
+                        }
+                    }
+                }
+            }
         }
-        Ok(vec)
+        Ok(result)
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -841,25 +912,73 @@ impl FailureReb {
         let mut file = OpenOptions::new()
             .append(true)
             .create(true)
-            .open(sling_dir.join(chan_id.to_string() + FAILURES_SUFFIX))
+            .open(sling_dir.join(chan_id.to_string() + "_" + FAILURES_SUFFIX))
             .await?;
         file.write_all(format!("{}\n", serialized).as_bytes())
             .await?;
         Ok(())
     }
 
-    pub async fn read_from_file(
+    pub async fn read_from_files(
         sling_dir: &Path,
-        chan_id: &ShortChannelId,
-    ) -> Result<Vec<FailureReb>, Error> {
-        let contents =
-            tokio::fs::read_to_string(sling_dir.join(chan_id.to_string() + FAILURES_SUFFIX))
-                .await?;
-        let mut vec = vec![];
-        for line in contents.lines() {
-            vec.push(serde_json::from_str(line)?);
+        search_scid: Option<ShortChannelId>,
+    ) -> Result<HashMap<ShortChannelId, Vec<FailureReb>>, Error> {
+        let mut result = HashMap::new();
+        let mut read_dir = tokio::fs::read_dir(sling_dir).await?;
+        while let Some(file) = read_dir.next_entry().await? {
+            let file_name_os = file.file_name();
+            let file_name = if let Some(f_n) = file_name_os.to_str() {
+                f_n
+            } else {
+                continue;
+            };
+            let file_path = file.path();
+            let file_extension = if let Some(f_e) = file_path.extension() {
+                if let Some(f_e_str) = f_e.to_str() {
+                    f_e_str
+                } else {
+                    continue;
+                }
+            } else {
+                continue;
+            };
+            let (scid_str, suffix) = if let Some(split) = file_name.split_once('_') {
+                split
+            } else {
+                continue;
+            };
+            let scid = if let Ok(id) = ShortChannelId::from_str(scid_str) {
+                id
+            } else {
+                continue;
+            };
+            if let Some(s) = search_scid {
+                if s != scid {
+                    continue;
+                }
+            }
+
+            if suffix == FAILURES_SUFFIX && file_extension == "json" {
+                log::debug!("Reading failure file: {}", file.path().display());
+                let contents = tokio::fs::read_to_string(file_path).await?;
+                for line in contents.lines() {
+                    let reb: FailureReb = if let Ok(r) = serde_json::from_str(line) {
+                        r
+                    } else {
+                        continue;
+                    };
+                    match result.entry(scid) {
+                        std::collections::hash_map::Entry::Vacant(e) => {
+                            e.insert(vec![reb]);
+                        }
+                        std::collections::hash_map::Entry::Occupied(mut e) => {
+                            e.get_mut().push(reb);
+                        }
+                    }
+                }
+            }
         }
-        Ok(vec)
+        Ok(result)
     }
 }
 

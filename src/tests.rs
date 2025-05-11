@@ -8,14 +8,14 @@ use crate::util::feeppm_effective;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use crate::model::{DijkstraNode, ExcludeGraph, IncompleteChannels, LnGraph, PublicKeyPair};
+use crate::model::{Config, IncompleteChannels, JobMessage, LnGraph, Task, PLUGIN_NAME};
 
 #[test]
 fn test_effective_feeppm() {
@@ -293,87 +293,62 @@ fn test_dijkstra_speed() {
     let start_node =
         PublicKey::from_str("026165850492521f4ac8abd9bd8088123446d126f648ca35e60f88177dc149ceb2")
             .unwrap();
+    let rando_node =
+        PublicKey::from_str("0221299f99b760f35851a3a6ae60f62680b79ec02a34c3b25f6ba1e0ce9da62ba7")
+            .unwrap();
 
-    let slingchan = DijkstraNode {
-        score: 0,
-        channel_state: graph
-            .get_state_no_direction(
-                &PublicKey::from_str(
-                    "02b3a0d1df18df7121681e994170e8d000c9afc212301249c0fc011f330e141a31",
-                )
-                .unwrap(),
-                &ShortChannelId::from_str("852152x3048x0").unwrap(),
-            )
-            .unwrap()
-            .1,
-        short_channel_id: ShortChannelId::from_str("852152x3048x0").unwrap(),
-        destination: start_node,
-        hops: 0,
-    };
-
-    let job = Job {
-        sat_direction: sling::SatDirection::Pull,
-        amount_msat: 50_000_000,
-        outppm: Some(10000),
-        maxppm: 5000,
-        candidatelist: None,
-        target: None,
-        maxhops: Some(10),
-        depleteuptopercent: None,
-        depleteuptoamount: None,
-        paralleljobs: Some(1),
-        once: None,
-        total_amount_msat: None,
-    };
-    let mut exclude_graph = ExcludeGraph {
-        exclude_chans: HashSet::new(),
-        exclude_peers: HashSet::new(),
-    };
+    let job = Job::new(sling::SatDirection::Pull, 50_000_000, Some(10000), 5000);
+    let mut task = Task::new(
+        ShortChannelId::from_str("852152x3048x0").unwrap(),
+        1,
+        JobMessage::Starting,
+        false,
+        rando_node,
+        PublicKey::from_str("02b3a0d1df18df7121681e994170e8d000c9afc212301249c0fc011f330e141a31")
+            .unwrap(),
+    );
     let two_weeks_ago = (SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs()
         - 60 * 60 * 24 * 14) as u32;
 
+    let mut config = Config::new(
+        start_node,
+        PathBuf::from("lightning-rpc"),
+        PathBuf::from(PLUGIN_NAME),
+        "v25.02".to_owned(),
+        HashSet::new(),
+        HashSet::new(),
+        HashSet::new(),
+    );
+
     let candidatelist: Vec<ShortChannelId> = graph
         .edges(
+            &start_node,
             two_weeks_ago,
-            &PublicKeyPair {
-                my_pubkey: PublicKey::from_str(
-                    "0322d0e43b3d92d30ed187f4e101a9a9605c3ee5fc9721e6dac3ce3d7732fbb13e",
-                )
-                .unwrap(),
-                other_pubkey: start_node,
-            },
-            &exclude_graph,
+            &task,
+            &config,
             &job,
-            &[],
-            &HashMap::new(),
             &[],
             &HashMap::new(),
         )
         .iter()
         .map(|r| r.0.short_channel_id)
         .collect();
+    println!("candidates: {}", candidatelist.len());
+    task.my_pubkey = start_node;
+    task.actual_candidates = candidatelist;
 
     for _i in 0..iterations {
         let now = Instant::now();
         let route = dijkstra(
-            &start_node,
+            &config,
             &graph,
-            &start_node,
-            &PublicKey::from_str(
-                "02b3a0d1df18df7121681e994170e8d000c9afc212301249c0fc011f330e141a31",
-            )
-            .unwrap(),
-            &slingchan,
             &job,
-            &candidatelist,
-            10,
-            &exclude_graph,
-            80,
+            &mut task,
             &HashMap::new(),
-            &[],
+            &HashSet::new(),
             &HashMap::new(),
         )
         .unwrap();
@@ -389,8 +364,8 @@ fn test_dijkstra_speed() {
         //     );
         // }
         // println!("----------------------------------");
-        exclude_graph
-            .exclude_chans
+        config
+            .exclude_chans_pull
             .insert(route.first().unwrap().channel);
         vec_len.push(route.len());
         vec_times.push(elapsed);

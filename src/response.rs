@@ -20,16 +20,20 @@ use sling::{Job, SatDirection};
 use tokio::time::Instant;
 
 use crate::{
-    errors::WaitsendpayErrorData, feeppm_effective_from_amts, model::Liquidity, my_sleep,
-    util::get_direction_from_nodes, Config, FailureReb, PluginState, SuccessReb, Task,
+    errors::WaitsendpayErrorData,
+    feeppm_effective_from_amts,
+    model::{Liquidity, TaskIdentifier},
+    my_sleep,
+    util::get_direction_from_nodes,
+    Config, FailureReb, PluginState, SuccessReb,
 };
 
 #[allow(clippy::too_many_arguments)]
 pub async fn waitsendpay_response(
-    plugin: &Plugin<PluginState>,
+    plugin: Plugin<PluginState>,
     config: &Config,
     payment_hash: Sha256,
-    task: &Task,
+    task_ident: &TaskIdentifier,
     now: Instant,
     job: &Job,
     route: &[SendpayRoute],
@@ -47,9 +51,8 @@ pub async fn waitsendpay_response(
     {
         Ok(o) => {
             log::info!(
-                "{}/{}: Rebalance SUCCESSFULL after {}s. Sent {}sats plus {}msats fee",
-                task.chan_id,
-                task.task_id,
+                "{}: Rebalance SUCCESSFULL after {}s. Sent {}sats plus {}msats fee",
+                task_ident,
                 now.elapsed().as_secs(),
                 Amount::msat(&o.amount_msat.unwrap()) / 1_000,
                 Amount::msat(&o.amount_sent_msat) - Amount::msat(&o.amount_msat.unwrap()),
@@ -68,7 +71,7 @@ pub async fn waitsendpay_response(
                 hops: (route.len() - 1) as u8,
                 completed_at: o.completed_at.unwrap() as u64,
             }
-            .write_to_file(task.chan_id, &config.sling_dir)
+            .write_to_file(task_ident.get_chan_id(), &config.sling_dir)
             .await?;
             *success_route = Some(route.to_vec());
             Ok(o.amount_msat.unwrap().msat())
@@ -85,18 +88,16 @@ pub async fn waitsendpay_response(
                 c
             } else {
                 return Err(anyhow!(
-                    "{}/{}: No WaitsendpayErrorCode, instead: {}",
-                    task.chan_id,
-                    task.task_id,
+                    "{}: No WaitsendpayErrorCode, instead: {}",
+                    task_ident,
                     err.message
                 ));
             };
 
             if ws_code == 200 {
                 log::warn!(
-                    "{}/{}: Rebalance WAITSENDPAY_TIMEOUT failure after {}s: {}",
-                    task.chan_id,
-                    task.task_id,
+                    "{}: Rebalance WAITSENDPAY_TIMEOUT failure after {}s: {}",
+                    task_ident,
                     now.elapsed().as_secs(),
                     err.message,
                 );
@@ -150,16 +151,15 @@ pub async fn waitsendpay_response(
                         .unwrap()
                         .as_secs(),
                 }
-                .write_to_file(task.chan_id, &config.sling_dir)
+                .write_to_file(task_ident.get_chan_id(), &config.sling_dir)
                 .await?;
                 Ok(0)
             } else if let Some(d) = err.data {
                 let ws_error = serde_json::from_value::<WaitsendpayErrorData>(d)?;
 
                 log::info!(
-                    "{}/{}: Rebalance failure after {}s: {} at node:{} chan:{}",
-                    task.chan_id,
-                    task.task_id,
+                    "{}: Rebalance failure after {}s: {} at node:{} chan:{}",
+                    task_ident,
                     now.elapsed().as_secs(),
                     err.message,
                     ws_error.erring_node,
@@ -171,9 +171,8 @@ pub async fn waitsendpay_response(
                         && ws_error.erring_node == config.pubkey =>
                     {
                         log::warn!(
-                            "{}/{}: PAYMENT DETAILS ERROR:{:?} {:?}",
-                            task.chan_id,
-                            task.task_id,
+                            "{}: PAYMENT DETAILS ERROR:{:?} {:?}",
+                            task_ident,
                             err,
                             route
                         );
@@ -193,13 +192,12 @@ pub async fn waitsendpay_response(
                     hops: (route.len() - 1) as u8,
                     created_at: ws_error.created_at,
                 }
-                .write_to_file(task.chan_id, &config.sling_dir)
+                .write_to_file(task_ident.get_chan_id(), &config.sling_dir)
                 .await?;
                 if special_stop {
                     return Err(anyhow!(
-                        "{}/{}: UNEXPECTED waitsendpay failure after {}s: {}",
-                        task.chan_id,
-                        task.task_id,
+                        "{}: UNEXPECTED waitsendpay failure after {}s: {}",
+                        task_ident,
                         now.elapsed().as_secs().to_string(),
                         err.message
                     ));
@@ -207,13 +205,12 @@ pub async fn waitsendpay_response(
 
                 if ws_error.erring_channel == route.last().unwrap().channel {
                     log::warn!(
-                        "{}/{}: Last peer has a problem or just updated their fees? {}",
-                        task.chan_id,
-                        task.task_id,
+                        "{}: Last peer has a problem or just updated their fees? {}",
+                        task_ident,
                         ws_error.failcodename
                     );
                     if err.message.contains("Too many HTLCs") {
-                        my_sleep(3, plugin.state().job_state.clone(), task).await;
+                        my_sleep(plugin.clone(), 3, task_ident).await;
                     } else {
                         plugin.state().tempbans.lock().insert(
                             route.last().unwrap().channel,
@@ -224,14 +221,9 @@ pub async fn waitsendpay_response(
                         );
                     }
                 } else if ws_error.erring_channel == route.first().unwrap().channel {
-                    log::warn!(
-                        "{}/{}: First peer has a problem {}",
-                        task.chan_id,
-                        task.task_id,
-                        err.message.clone()
-                    );
+                    log::warn!("{}: First peer has a problem {}", task_ident, err.message);
                     if err.message.contains("Too many HTLCs") {
-                        my_sleep(3, plugin.state().job_state.clone(), task).await;
+                        my_sleep(plugin.clone(), 3, task_ident).await;
                     } else {
                         plugin.state().tempbans.lock().insert(
                             route.first().unwrap().channel,
@@ -243,9 +235,8 @@ pub async fn waitsendpay_response(
                     }
                 } else {
                     log::debug!(
-                        "{}/{}: Adjusting liquidity for {}/{}.",
-                        task.chan_id,
-                        task.task_id,
+                        "{}: Adjusting liquidity for {}/{}.",
+                        task_ident,
                         ws_error.erring_channel,
                         ws_error.erring_direction
                     );
@@ -292,9 +283,8 @@ pub async fn waitsendpay_response(
                 Ok(0)
             } else {
                 return Err(anyhow!(
-                    "{}/{}: UNEXPECTED waitsendpay failure: {} after: {}",
-                    task.chan_id,
-                    task.task_id,
+                    "{}: UNEXPECTED waitsendpay failure: {} after: {}",
+                    task_ident,
                     err.message,
                     now.elapsed().as_millis().to_string()
                 ));
@@ -305,11 +295,11 @@ pub async fn waitsendpay_response(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn sendpay_response(
-    plugin: &Plugin<PluginState>,
+    plugin: Plugin<PluginState>,
     config: &Config,
     payment_hash: Sha256,
     preimage: String,
-    task: &Task,
+    task_ident: &TaskIdentifier,
     job: &Job,
     route: &[SendpayRoute],
     success_route: &mut Option<Vec<SendpayRoute>>,
@@ -342,9 +332,8 @@ pub async fn sendpay_response(
         Err(e) => {
             if e.to_string().contains("First peer not ready") {
                 log::info!(
-                    "{}/{}: First peer not ready, banning it for now...",
-                    task.chan_id,
-                    task.task_id
+                    "{}: First peer not ready, banning it for now...",
+                    task_ident
                 );
                 plugin.state().tempbans.lock().insert(
                     route.first().unwrap().channel,
@@ -368,15 +357,14 @@ pub async fn sendpay_response(
                         .unwrap()
                         .as_secs(),
                 }
-                .write_to_file(task.chan_id, &config.sling_dir)
+                .write_to_file(task_ident.get_chan_id(), &config.sling_dir)
                 .await?;
                 return Ok(None);
             }
 
             Err(anyhow!(
-                "{}/{}: Unexpected sendpay error: {}",
-                task.chan_id,
-                task.task_id,
+                "{}: Unexpected sendpay error: {}",
+                task_ident,
                 e.to_string()
             ))
         }

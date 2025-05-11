@@ -6,30 +6,27 @@ use cln_rpc::primitives::ChannelState;
 use cln_rpc::primitives::PublicKey;
 use cln_rpc::primitives::Sha256;
 use cln_rpc::primitives::ShortChannelIdDir;
-use parking_lot::Mutex;
 use rand::Rng;
-use sling::SatDirection;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::io;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::str::FromStr;
 use std::time::Duration;
 use std::{collections::HashMap, path::Path};
 
-use crate::channel_jobstate_update;
 use crate::model::Liquidity;
 use crate::model::PluginState;
-use crate::model::Task;
+use crate::model::TaskIdentifier;
+use crate::model::EXCEPTS_CHANS_FILE_NAME;
+use crate::model::EXCEPTS_PEERS_FILE_NAME;
 use crate::model::JOB_FILE_NAME;
 use crate::model::LIQUIDITY_FILE_NAME;
 use crate::model::PLUGIN_NAME;
-use crate::model::{JobMessage, JobState, LnGraph};
-use crate::slingstop;
+use crate::model::{JobMessage, LnGraph};
 use crate::ShortChannelIdDirState;
 use sling::Job;
 
-use crate::tasks::refresh_listpeerchannels;
 use anyhow::{anyhow, Error};
 use bitcoin::consensus::encode::serialize_hex;
 use cln_plugin::Plugin;
@@ -41,43 +38,9 @@ use tokio::fs::{self, File};
 
 use tokio::time::{self, Instant};
 
-pub async fn refresh_joblists(p: Plugin<PluginState>) -> Result<(), Error> {
-    let now = Instant::now();
-    refresh_listpeerchannels(&p).await?;
-    let jobs = read_jobs(
-        &Path::new(&p.configuration().lightning_dir).join(PLUGIN_NAME),
-        &p,
-    )
-    .await?;
-    let mut pull_jobs = p.state().pull_jobs.lock();
-    let mut push_jobs = p.state().push_jobs.lock();
-    pull_jobs.clear();
-    push_jobs.clear();
-
-    p.state()
-        .job_state
-        .lock()
-        .retain(|k, v| jobs.contains_key(k) || v.iter().any(|js| js.is_once()));
-
-    for (chan_id, job) in jobs {
-        match job.sat_direction {
-            SatDirection::Pull => pull_jobs.insert(chan_id),
-            SatDirection::Push => push_jobs.insert(chan_id),
-        };
-    }
-    log::debug!(
-        "Read {} pull jobs and {} push jobs in {}ms",
-        pull_jobs.len(),
-        push_jobs.len(),
-        now.elapsed().as_millis(),
-    );
-
-    Ok(())
-}
-
 pub async fn read_jobs(
     sling_dir: &PathBuf,
-    plugin: &Plugin<PluginState>,
+    plugin: Plugin<PluginState>,
 ) -> Result<BTreeMap<ShortChannelId, Job>, Error> {
     let jobfile = sling_dir.join(JOB_FILE_NAME);
     let jobfilecontent = fs::read_to_string(jobfile.clone()).await;
@@ -105,41 +68,21 @@ pub async fn read_jobs(
 }
 
 pub async fn write_job(
-    p: Plugin<PluginState>,
+    plugin: Plugin<PluginState>,
     sling_dir: PathBuf,
     chan_id: ShortChannelId,
     job: Option<Job>,
     remove: bool,
 ) -> Result<BTreeMap<ShortChannelId, Job>, Error> {
-    let mut jobs = read_jobs(&sling_dir, &p).await?;
+    let mut jobs = read_jobs(&sling_dir, plugin.clone()).await?;
     let job_change;
     let my_job;
-    let jobstates = p.state().job_state.lock().clone();
-    if jobstates.contains_key(&chan_id)
-        && jobstates
-            .get(&chan_id)
-            .unwrap()
-            .iter()
-            .any(|j| j.is_active())
     {
-        if jobstates.get(&chan_id).unwrap().iter().any(|j| j.is_once()) {
-            return Err(anyhow!("Once-job is currently running for this channel"));
-        }
-        slingstop(
-            p.clone(),
-            serde_json::Value::Array(vec![serde_json::Value::String(chan_id.to_string())]),
-        )
-        .await?;
-    }
-    {
-        let mut job_states = p.state().job_state.lock();
         if jobs.contains_key(&chan_id) {
             if remove {
                 jobs.remove(&chan_id);
-                job_states.remove(&chan_id);
                 job_change = "Removing";
             } else {
-                job_states.remove(&chan_id);
                 job_change = "Updating";
             }
         } else {
@@ -150,25 +93,11 @@ pub async fn write_job(
         log::info!("{} job for {}", job_change, &chan_id);
     } else {
         my_job = job.unwrap();
-        log::info!(
-            "{} job for {} with amount: {}msat, maxppm: {}, outppm: {:?}, target: {:?},\
-            maxhops: {:?}, candidatelist: {:?},\
-            depleteuptopercent: {:?}, depleteuptoamount: {:?}, paralleljobs: {:?}",
-            job_change,
-            &chan_id,
-            &my_job.amount_msat,
-            &my_job.maxppm,
-            &my_job.outppm,
-            &my_job.target,
-            &my_job.maxhops,
-            &my_job.candidatelist,
-            &my_job.depleteuptopercent,
-            &my_job.depleteuptoamount,
-            &my_job.paralleljobs,
-        );
+        log::info!("{} job for {}:", job_change, &chan_id);
+        log::info!("{}", my_job);
         jobs.insert(chan_id, my_job);
     }
-    let peer_channels = p.state().peer_channels.lock().clone();
+    let peer_channels = plugin.state().peer_channels.lock().clone();
     let mut jobs_to_remove = HashSet::new();
     if !peer_channels.is_empty() {
         for chan_id in jobs.keys() {
@@ -183,7 +112,6 @@ pub async fn write_job(
         serde_json::to_string_pretty(&jobs)?,
     )
     .await?;
-    refresh_joblists(p.clone()).await?;
     Ok(jobs)
 }
 
@@ -348,71 +276,43 @@ pub fn get_all_normal_channels_from_listpeerchannels(
     scid_peer_map
 }
 
-pub async fn my_sleep(
-    seconds: u64,
-    job_state: Arc<Mutex<HashMap<ShortChannelId, Vec<JobState>>>>,
-    task: &Task,
-) {
-    log::debug!(
-        "{}/{}: Starting sleeper for {}s",
-        task.chan_id,
-        task.task_id,
-        seconds
-    );
+pub async fn my_sleep(plugin: Plugin<PluginState>, seconds: u64, task_ident: &TaskIdentifier) {
+    log::debug!("{}: Starting sleeper for {}s", task_ident, seconds);
     let timer = Instant::now();
     while timer.elapsed() < Duration::from_secs(seconds) {
         {
-            let job_state_lock = job_state.lock();
-            let job_states = job_state_lock.get(&task.chan_id);
-            if let Some(js) = job_states {
-                if let Some(job_state) = js.iter().find(|jt| jt.id() == task.task_id) {
-                    if job_state.should_stop() {
-                        break;
-                    }
-                } else {
-                    log::warn!(
-                        "{}/{}: my_sleep: task id not found",
-                        task.chan_id,
-                        task.task_id
-                    );
+            if let Some(o) = plugin.state().tasks.lock().get_task(task_ident) {
+                if o.should_stop() {
                     break;
                 }
             } else {
-                log::warn!(
-                    "{}/{}: my_sleep: scid not found",
-                    task.chan_id,
-                    task.task_id
-                );
                 break;
-            }
+            };
         }
         time::sleep(Duration::from_secs(1)).await;
     }
 }
 
-pub async fn wait_for_gossip(plugin: &Plugin<PluginState>, task: &Task) -> Result<(), Error> {
+pub async fn wait_for_gossip(
+    plugin: Plugin<PluginState>,
+    task_ident: &TaskIdentifier,
+) -> Result<(), Error> {
     loop {
         {
             let graph = plugin.state().graph.lock();
 
             if graph.is_empty() {
-                log::info!(
-                    "{}/{}: graph is still empty. Sleeping...",
-                    task.chan_id,
-                    task.task_id
-                );
-                channel_jobstate_update(
-                    plugin.state().job_state.clone(),
-                    task,
-                    &JobMessage::GraphEmpty,
-                    true,
-                    false,
-                )?;
+                let mut tasks = plugin.state().tasks.lock();
+                let task = tasks
+                    .get_task_mut(task_ident)
+                    .ok_or_else(|| anyhow!("Task not found"))?;
+                log::info!("{}: graph is still empty. Sleeping...", task);
+                task.set_state(JobMessage::GraphEmpty);
             } else {
                 break;
             }
         }
-        my_sleep(600, plugin.state().job_state.clone(), task).await;
+        my_sleep(plugin.clone(), 600, task_ident).await;
     }
     Ok(())
 }
@@ -466,6 +366,62 @@ pub fn get_direction_from_nodes(
         return Ok(1);
     }
     Err(anyhow!("Nodes are equal"))
+}
+
+pub async fn read_except_chans(sling_dir: &PathBuf) -> Result<HashSet<ShortChannelId>, Error> {
+    let excepts_chan_file = sling_dir.join(EXCEPTS_CHANS_FILE_NAME);
+    let excepts_chan_file_content = fs::read_to_string(excepts_chan_file.clone()).await;
+
+    create_sling_dir(sling_dir).await?;
+
+    parse_excepts(excepts_chan_file_content, excepts_chan_file).await
+}
+pub async fn read_except_peers(sling_dir: &PathBuf) -> Result<HashSet<PublicKey>, Error> {
+    let excepts_peers_file = sling_dir.join(EXCEPTS_PEERS_FILE_NAME);
+    let excepts_peers_file_content = fs::read_to_string(excepts_peers_file.clone()).await;
+
+    create_sling_dir(sling_dir).await?;
+
+    parse_excepts(excepts_peers_file_content, excepts_peers_file).await
+}
+async fn parse_excepts<T: FromStr + std::hash::Hash + Eq>(
+    content: Result<String, io::Error>,
+    excepts_file: PathBuf,
+) -> Result<HashSet<T>, Error> {
+    let excepts_tostring: Vec<String>;
+    let mut excepts: HashSet<T> = HashSet::new();
+
+    match content {
+        Ok(file) => excepts_tostring = serde_json::from_str(&file).unwrap_or(Vec::new()),
+        Err(e) => match e.kind() {
+            io::ErrorKind::NotFound => {
+                log::info!("{} not found. Creating...", excepts_file.display());
+                File::create(excepts_file.clone()).await?;
+                excepts_tostring = Vec::new();
+            }
+            _ => {
+                log::warn!("Could not open {}: {}.", excepts_file.to_str().unwrap(), e);
+                return Err(anyhow!(
+                    "Could not open {}: {}.",
+                    excepts_file.to_str().unwrap(),
+                    e
+                ));
+            }
+        },
+    };
+
+    for except in excepts_tostring {
+        match T::from_str(&except) {
+            Ok(id) => {
+                excepts.insert(id);
+            }
+            Err(_e) => log::warn!(
+                "excepts file contains invalid short_channel_id/node_id: {}",
+                except
+            ),
+        }
+    }
+    Ok(excepts)
 }
 
 pub fn at_or_above_version(my_version: &str, min_version: &str) -> Result<bool, Error> {

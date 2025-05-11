@@ -1,4 +1,8 @@
-use std::{collections::HashMap, fmt, str::FromStr};
+use std::{
+    collections::HashMap,
+    fmt::{self, Display},
+    str::FromStr,
+};
 
 use anyhow::{anyhow, Error};
 use cln_rpc::{
@@ -44,31 +48,112 @@ pub struct Job {
     pub outppm: Option<u64>,
     pub maxppm: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub candidatelist: Option<Vec<ShortChannelId>>,
+    candidatelist: Option<Vec<ShortChannelId>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub target: Option<f64>,
+    target: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub maxhops: Option<u8>,
+    maxhops: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub depleteuptopercent: Option<f64>,
+    depleteuptopercent: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub depleteuptoamount: Option<u64>,
+    depleteuptoamount: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub paralleljobs: Option<u16>,
+    paralleljobs: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub once: Option<()>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub total_amount_msat: Option<u64>,
+    pub once_amount_msat: Option<u64>,
+}
+
+impl Display for Job {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut parts: Vec<String> = Vec::new();
+        parts.push(format!("sat_direction:{}", self.sat_direction));
+        parts.push(format!("amount_msat:{}", self.amount_msat));
+        parts.push(format!("maxppm:{}", self.maxppm));
+
+        if let Some(o) = self.outppm {
+            parts.push(format!("outppm:{}", o));
+        }
+        if let Some(c) = &self.candidatelist {
+            parts.push(format!(
+                "candidatelist:{}",
+                c.iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<String>>()
+                    .join(",")
+            ));
+        }
+        if let Some(t) = self.target {
+            parts.push(format!("target:{}", t));
+        }
+        if let Some(m) = self.maxhops {
+            parts.push(format!("maxhops:{}", m));
+        }
+        if let Some(d) = self.depleteuptopercent {
+            parts.push(format!("depleteuptopercent:{}", d));
+        }
+        if let Some(d) = self.depleteuptoamount {
+            parts.push(format!("depleteuptoamount:{}", d));
+        }
+        if let Some(p) = self.paralleljobs {
+            parts.push(format!("paralleljobs:{}", p));
+        }
+        if let Some(t) = self.once_amount_msat {
+            parts.push(format!("total_amount_msat:{}", t));
+        }
+
+        write!(f, "{}", parts.join(" "))
+    }
 }
 
 impl Job {
+    pub fn new(
+        sat_direction: SatDirection,
+        amount_msat: u64,
+        outppm: Option<u64>,
+        maxppm: u32,
+    ) -> Job {
+        Job {
+            sat_direction,
+            amount_msat,
+            outppm,
+            maxppm,
+            candidatelist: None,
+            target: None,
+            maxhops: None,
+            depleteuptopercent: None,
+            depleteuptoamount: None,
+            paralleljobs: None,
+            once_amount_msat: None,
+        }
+    }
+    pub fn add_candidates(&mut self, candidates: Vec<ShortChannelId>) {
+        self.candidatelist = Some(candidates);
+    }
+    pub fn add_target(&mut self, target: f64) {
+        self.target = Some(target);
+    }
+    pub fn add_maxhops(&mut self, maxhops: u8) {
+        self.maxhops = Some(maxhops);
+    }
+    pub fn add_depleteuptopercent(&mut self, depleteuptopercent: f64) {
+        self.depleteuptopercent = Some(depleteuptopercent);
+    }
+    pub fn add_depleteuptoamount(&mut self, depleteuptoamount: u64) {
+        self.depleteuptoamount = Some(depleteuptoamount);
+    }
+    pub fn add_paralleljobs(&mut self, paralleljobs: u16) {
+        self.paralleljobs = Some(paralleljobs);
+    }
+    pub fn add_once_amount_msat(&mut self, amount_msat: u64) {
+        self.once_amount_msat = Some(amount_msat);
+    }
     pub fn is_balanced(
         &self,
         channel: &ListpeerchannelsChannels,
         chan_id: &ShortChannelId,
     ) -> bool {
         let target_cap = self.target_cap(channel);
-        if self.once.is_none() {
+        if self.once_amount_msat.is_none() {
             log::debug!("{}: target: {}sats", chan_id, target_cap / 1_000);
         }
 
@@ -84,7 +169,7 @@ impl Job {
         let target = self.target.unwrap_or(0.5);
 
         let total_msat = Amount::msat(&channel.total_msat.unwrap());
-        if let Some(()) = self.once {
+        if self.once_amount_msat.is_some() {
             return total_msat;
         }
         let their_reserve_msat = Amount::msat(&channel.their_reserve_msat.unwrap());
@@ -145,6 +230,48 @@ impl Job {
             None => None,
         };
         json!(result)
+    }
+    pub fn get_maxhops(&self, config_maxhops: u8) -> u8 {
+        if let Some(mh) = self.maxhops {
+            mh + 1
+        } else {
+            config_maxhops + 1
+        }
+    }
+    pub fn get_target(&self, config_target: f64) -> f64 {
+        if let Some(t) = self.target {
+            t
+        } else {
+            config_target
+        }
+    }
+    pub fn get_deplteuptoamount(&self, config_depleteuptoamount: u64) -> u64 {
+        if let Some(da) = self.depleteuptoamount {
+            da
+        } else {
+            config_depleteuptoamount
+        }
+    }
+    pub fn get_depleteuptopercent(&self, config_depleteuptopercent: f64) -> f64 {
+        if let Some(dp) = self.depleteuptopercent {
+            dp
+        } else {
+            config_depleteuptopercent
+        }
+    }
+    pub fn get_paralleljobs(&self, config_paralleljobs: u16) -> u16 {
+        if let Some(pj) = self.paralleljobs {
+            pj
+        } else {
+            config_paralleljobs
+        }
+    }
+    pub fn get_candidates(&self) -> Vec<ShortChannelId> {
+        if let Some(c) = &self.candidatelist {
+            c.clone()
+        } else {
+            Vec::new()
+        }
     }
 }
 
