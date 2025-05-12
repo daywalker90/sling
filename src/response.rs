@@ -157,14 +157,19 @@ pub async fn waitsendpay_response(
             } else if let Some(d) = err.data {
                 let ws_error = serde_json::from_value::<WaitsendpayErrorData>(d)?;
 
-                log::info!(
-                    "{}: Rebalance failure after {}s: {} at node:{} chan:{}",
-                    task_ident,
-                    now.elapsed().as_secs(),
-                    err.message,
-                    ws_error.erring_node,
-                    ws_error.erring_channel,
-                );
+                {
+                    let alias_map = plugin.state().alias_peer_map.lock();
+                    log::info!(
+                        "{}: Rebalance failure after {}s: {} at node:{} chan:{}",
+                        task_ident,
+                        now.elapsed().as_secs(),
+                        err.message,
+                        alias_map
+                            .get(&ws_error.erring_node)
+                            .unwrap_or(&ws_error.erring_node.to_string()),
+                        ws_error.erring_channel,
+                    );
+                }
 
                 match &ws_error.failcodename {
                     err if err.eq("WIRE_INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS")
