@@ -136,87 +136,71 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     if !private {
                         continue;
                     }
+                    if !(chan.state == ChannelState::CHANNELD_NORMAL
+                        || chan.state == ChannelState::CHANNELD_AWAITING_SPLICE)
+                    {
+                        continue;
+                    }
                     let local_alias = chan.alias.as_ref().and_then(|l| l.local);
                     let remote_alias = chan.alias.as_ref().and_then(|l| l.remote);
                     let updates = if let Some(upd) = &chan.updates {
                         upd
                     } else {
-                        // pre 24.02 versions don't have this and
-                        // get private channel gossip from gossip_store
-                        // but we don't get the alias there
-                        let dir_chan_a = ShortChannelIdDir {
-                            short_channel_id: chan.short_channel_id.unwrap(),
-                            direction: chan.direction.unwrap(),
-                        };
-                        if let Some(dir_chan_state) = lngraph.get_state_mut_direction(dir_chan_a) {
-                            dir_chan_state.scid_alias = local_alias;
-                            dir_chan_state.private = true;
-                        }
-                        let dir_chan_b = ShortChannelIdDir {
-                            short_channel_id: chan.short_channel_id.unwrap(),
-                            direction: chan.direction.unwrap() ^ 1,
-                        };
-                        if let Some(dir_chan_state) = lngraph.get_state_mut_direction(dir_chan_b) {
-                            dir_chan_state.scid_alias = remote_alias;
-                            dir_chan_state.private = true;
-                        }
-
+                        log::debug!(
+                            "{} is missing updates field",
+                            chan.short_channel_id.unwrap()
+                        );
                         continue;
                     };
-                    if chan.state == ChannelState::CHANNELD_NORMAL
-                        || chan.state == ChannelState::CHANNELD_AWAITING_SPLICE
-                    {
+
+                    lngraph.insert(
+                        ShortChannelIdDir {
+                            short_channel_id: chan.short_channel_id.unwrap(),
+                            direction: chan.direction.unwrap(),
+                        },
+                        ShortChannelIdDirState {
+                            source: my_pubkey,
+                            destination: PubKeyBytes::from_pubkey(&chan.peer_id),
+                            scid_alias: local_alias,
+                            fee_per_millionth: updates.local.fee_proportional_millionths,
+                            base_fee_millisatoshi: Amount::msat(&updates.local.fee_base_msat)
+                                as u32,
+                            htlc_maximum_msat: updates.local.htlc_maximum_msat,
+                            htlc_minimum_msat: updates.local.htlc_minimum_msat,
+                            delay: updates.local.cltv_expiry_delta,
+                            active: chan.peer_connected,
+                            last_update: timestamp as u32,
+                            private: true,
+                        },
+                    );
+
+                    if let Some(remote_updates) = &updates.remote {
                         lngraph.insert(
                             ShortChannelIdDir {
                                 short_channel_id: chan.short_channel_id.unwrap(),
-                                direction: chan.direction.unwrap(),
+                                direction: chan.direction.unwrap() ^ 1,
                             },
                             ShortChannelIdDirState {
-                                source: my_pubkey,
-                                destination: PubKeyBytes::from_pubkey(&chan.peer_id),
-                                scid_alias: local_alias,
-                                fee_per_millionth: updates.local.fee_proportional_millionths,
-                                base_fee_millisatoshi: Amount::msat(&updates.local.fee_base_msat)
+                                source: PubKeyBytes::from_pubkey(&chan.peer_id),
+                                destination: my_pubkey,
+                                scid_alias: remote_alias,
+                                fee_per_millionth: remote_updates.fee_proportional_millionths,
+                                base_fee_millisatoshi: Amount::msat(&remote_updates.fee_base_msat)
                                     as u32,
-                                htlc_maximum_msat: updates.local.htlc_maximum_msat,
-                                htlc_minimum_msat: updates.local.htlc_minimum_msat,
-                                delay: updates.local.cltv_expiry_delta,
+                                htlc_maximum_msat: remote_updates.htlc_maximum_msat,
+                                htlc_minimum_msat: remote_updates.htlc_minimum_msat,
+                                delay: remote_updates.cltv_expiry_delta,
                                 active: chan.peer_connected,
                                 last_update: timestamp as u32,
                                 private: true,
                             },
                         );
-
-                        if let Some(remote_updates) = &updates.remote {
-                            lngraph.insert(
-                                ShortChannelIdDir {
-                                    short_channel_id: chan.short_channel_id.unwrap(),
-                                    direction: chan.direction.unwrap() ^ 1,
-                                },
-                                ShortChannelIdDirState {
-                                    source: PubKeyBytes::from_pubkey(&chan.peer_id),
-                                    destination: my_pubkey,
-                                    scid_alias: remote_alias,
-                                    fee_per_millionth: remote_updates.fee_proportional_millionths,
-                                    base_fee_millisatoshi: Amount::msat(
-                                        &remote_updates.fee_base_msat,
-                                    )
-                                        as u32,
-                                    htlc_maximum_msat: remote_updates.htlc_maximum_msat,
-                                    htlc_minimum_msat: remote_updates.htlc_minimum_msat,
-                                    delay: remote_updates.cltv_expiry_delta,
-                                    active: chan.peer_connected,
-                                    last_update: timestamp as u32,
-                                    private: true,
-                                },
-                            );
-                        } else {
-                            log::debug!(
-                                "No remote gossip found for private channel {:?}, \
-                            not adding to graph",
-                                chan.short_channel_id
-                            );
-                        }
+                    } else {
+                        log::debug!(
+                            "No remote gossip found for private channel {}, \
+                            not adding that direction to graph",
+                            chan.short_channel_id.unwrap()
+                        );
                     }
                 }
 
