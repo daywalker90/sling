@@ -342,7 +342,7 @@ impl Config {
             refresh_peers_interval: 1,
             refresh_aliasmap_interval: 3600,
             refresh_gossmap_interval: 10,
-            reset_liquidity_interval: 60,
+            reset_liquidity_interval: 360,
             depleteuptopercent: 0.2,
             depleteuptoamount: 2_000_000_000,
             maxhops: 8,

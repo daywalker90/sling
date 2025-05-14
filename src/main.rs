@@ -9,7 +9,7 @@ static GLOBAL: Jemalloc = Jemalloc;
 
 use anyhow::anyhow;
 use cln_plugin::options::{
-    ConfigOption, IntegerConfigOption, StringArrayConfigOption, StringConfigOption,
+    ConfigOption, DefaultIntegerConfigOption, DefaultStringConfigOption, StringArrayConfigOption,
 };
 use cln_plugin::Builder;
 use config::*;
@@ -64,81 +64,104 @@ async fn main() -> Result<(), anyhow::Error> {
     log_panics::init();
     let state;
     let confplugin;
-    let opt_refresh_peers_interval: IntegerConfigOption = ConfigOption::new_i64_no_default(
-        OPT_REFRESH_PEERS_INTERVAL,
-        "Refresh interval for listpeers task. Default is `1`",
-    )
-    .dynamic();
-    let opt_refresh_aliasmap_interval: IntegerConfigOption = ConfigOption::new_i64_no_default(
-        OPT_REFRESH_ALIASMAP_INTERVAL,
-        "Refresh interval for aliasmap task. Default is `3600`",
-    )
-    .dynamic();
-    let opt_refresh_gossmap_interval: IntegerConfigOption = ConfigOption::new_i64_no_default(
-        OPT_REFRESH_GOSSMAP_INTERVAL,
-        "Refresh interval for gossmap task. Default is `10`",
-    )
-    .dynamic();
-    let opt_reset_liquidity_interval: IntegerConfigOption = ConfigOption::new_i64_no_default(
-        OPT_RESET_LIQUIDITY_INTERVAL,
-        "Refresh interval for liquidity reset task. Default is `60`",
-    )
-    .dynamic();
-    let opt_depleteuptopercent: StringConfigOption = ConfigOption::new_str_no_default(
+    let opt_refresh_peers_interval: DefaultIntegerConfigOption =
+        ConfigOption::new_i64_with_default(
+            OPT_REFRESH_PEERS_INTERVAL,
+            1,
+            "Refresh interval for listpeers task. Default is `1`",
+        )
+        .dynamic();
+    let opt_refresh_aliasmap_interval: DefaultIntegerConfigOption =
+        ConfigOption::new_i64_with_default(
+            OPT_REFRESH_ALIASMAP_INTERVAL,
+            3600,
+            "Refresh interval for aliasmap task. Default is `3600`",
+        )
+        .dynamic();
+    let opt_refresh_gossmap_interval: DefaultIntegerConfigOption =
+        ConfigOption::new_i64_with_default(
+            OPT_REFRESH_GOSSMAP_INTERVAL,
+            10,
+            "Refresh interval for gossmap task. Default is `10`",
+        )
+        .dynamic();
+    let opt_reset_liquidity_interval: DefaultIntegerConfigOption =
+        ConfigOption::new_i64_with_default(
+            OPT_RESET_LIQUIDITY_INTERVAL,
+            360,
+            "Refresh interval for liquidity reset task. Default is `360`",
+        )
+        .dynamic();
+    let opt_depleteuptopercent: DefaultStringConfigOption = ConfigOption::new_str_with_default(
         OPT_DEPLETEUPTOPERCENT,
+        "0.2",
         "Deplete up to percent for candidate search. Default is `0.2`",
     )
     .dynamic();
-    let opt_depleteuptoamount: IntegerConfigOption = ConfigOption::new_i64_no_default(
+    let opt_depleteuptoamount: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
         OPT_DEPLETEUPTOAMOUNT,
+        2000000000,
         "Deplete up to amount for candidate search. Default is `2000000000`",
     )
     .dynamic();
-    let opt_maxhops: IntegerConfigOption = ConfigOption::new_i64_no_default(
+    let opt_maxhops: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
         OPT_MAXHOPS,
+        8,
         "Maximum number of hops in a route. Default is `8`",
     )
     .dynamic();
-    let opt_candidates_min_age: IntegerConfigOption = ConfigOption::new_i64_no_default(
+    let opt_candidates_min_age: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
         OPT_CANDIDATES_MIN_AGE,
+        0,
         "Minium age of a candidate to rebalance with in days. Default is `0`",
     )
     .dynamic();
-    let opt_paralleljobs: IntegerConfigOption = ConfigOption::new_i64_no_default(
+    let opt_paralleljobs: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
         OPT_PARALLELJOBS,
+        1,
         "Number of parallel tasks for a job. Default is `1`",
     )
     .dynamic();
-    let opt_timeoutpay: IntegerConfigOption = ConfigOption::new_i64_no_default(
+    let opt_timeoutpay: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
         OPT_TIMEOUTPAY,
+        120,
         "Timeout for rebalances until we give up and continue. Default is `120`",
     )
     .dynamic();
-    let opt_max_htlc_count: IntegerConfigOption = ConfigOption::new_i64_no_default(
+    let opt_max_htlc_count: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
         OPT_MAX_HTLC_COUNT,
+        5,
         "Max number of htlc allowed pending in job and candidate. Default is `5`",
     )
     .dynamic();
-    let opt_stats_delete_failures_age: IntegerConfigOption = ConfigOption::new_i64_no_default(
-        OPT_STATS_DELETE_FAILURES_AGE,
-        "Max age of failure stats in days. Default is `30`",
-    )
-    .dynamic();
-    let opt_stats_delete_failures_size: IntegerConfigOption = ConfigOption::new_i64_no_default(
-        OPT_STATS_DELETE_FAILURES_SIZE,
-        "Max number of failure stats per channel. Default is `10000`",
-    )
-    .dynamic();
-    let opt_stats_delete_successes_age: IntegerConfigOption = ConfigOption::new_i64_no_default(
-        OPT_STATS_DELETE_SUCCESSES_AGE,
-        "Max age of success stats in days. Default is `30`",
-    )
-    .dynamic();
-    let opt_stats_delete_successes_size: IntegerConfigOption = ConfigOption::new_i64_no_default(
-        OPT_STATS_DELETE_SUCCESSES_SIZE,
-        "Max number of success stats per channel. Default is `10000`",
-    )
-    .dynamic();
+    let opt_stats_delete_failures_age: DefaultIntegerConfigOption =
+        ConfigOption::new_i64_with_default(
+            OPT_STATS_DELETE_FAILURES_AGE,
+            30,
+            "Max age of failure stats in days. Default is `30`",
+        )
+        .dynamic();
+    let opt_stats_delete_failures_size: DefaultIntegerConfigOption =
+        ConfigOption::new_i64_with_default(
+            OPT_STATS_DELETE_FAILURES_SIZE,
+            10000,
+            "Max number of failure stats per channel. Default is `10000`",
+        )
+        .dynamic();
+    let opt_stats_delete_successes_age: DefaultIntegerConfigOption =
+        ConfigOption::new_i64_with_default(
+            OPT_STATS_DELETE_SUCCESSES_AGE,
+            30,
+            "Max age of success stats in days. Default is `30`",
+        )
+        .dynamic();
+    let opt_stats_delete_successes_size: DefaultIntegerConfigOption =
+        ConfigOption::new_i64_with_default(
+            OPT_STATS_DELETE_SUCCESSES_SIZE,
+            10000,
+            "Max number of success stats per channel. Default is `10000`",
+        )
+        .dynamic();
     let opt_inform_layers: StringArrayConfigOption = ConfigOption::new_str_arr_no_default(
         OPT_INFORM_LAYERS,
         "Inform these layers about our information we gather from rebalances. \
