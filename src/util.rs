@@ -16,16 +16,15 @@ use std::str::FromStr;
 use std::time::Duration;
 use std::{collections::HashMap, path::Path};
 
+use crate::model::JobMessage;
 use crate::model::Liquidity;
 use crate::model::PluginState;
-use crate::model::PubKeyBytes;
 use crate::model::TaskIdentifier;
 use crate::model::EXCEPTS_CHANS_FILE_NAME;
 use crate::model::EXCEPTS_PEERS_FILE_NAME;
 use crate::model::JOB_FILE_NAME;
 use crate::model::LIQUIDITY_FILE_NAME;
 use crate::model::PLUGIN_NAME;
-use crate::model::{JobMessage, LnGraph};
 use crate::ShortChannelIdDirState;
 use sling::Job;
 
@@ -327,41 +326,23 @@ pub async fn wait_for_gossip(
 
 pub fn get_remote_feeppm_effective(
     channel: &ListpeerchannelsChannels,
-    graph: &LnGraph,
-    scid: ShortChannelId,
     amount_msat: u64,
-    version: &str,
 ) -> Result<u64, Error> {
-    if at_or_above_version(version, "24.02")? {
-        let chan_updates = if let Some(updates) = &channel.updates {
-            if let Some(remote) = &updates.remote {
-                remote
-            } else {
-                return Err(anyhow!("No remote gossip in listpeerchannels"));
-            }
+    let chan_updates = if let Some(updates) = &channel.updates {
+        if let Some(remote) = &updates.remote {
+            remote
         } else {
-            return Err(anyhow!("No gossip in listpeerchannels"));
-        };
-        let chan_in_ppm = feeppm_effective(
-            chan_updates.fee_proportional_millionths,
-            Amount::msat(&chan_updates.fee_base_msat) as u32,
-            amount_msat,
-        );
-        Ok(chan_in_ppm)
+            return Err(anyhow!("No remote gossip in listpeerchannels"));
+        }
     } else {
-        let (_scid_dir, chan_from_peer) = match graph
-            .get_state_no_direction(&PubKeyBytes::from_pubkey(&channel.peer_id), &scid)
-        {
-            Ok(chan) => chan,
-            Err(_) => return Err(anyhow!("No gossip for {} in graph", scid)),
-        };
-        let chan_in_ppm = feeppm_effective(
-            chan_from_peer.fee_per_millionth,
-            chan_from_peer.base_fee_millisatoshi,
-            amount_msat,
-        );
-        Ok(chan_in_ppm)
-    }
+        return Err(anyhow!("No gossip in listpeerchannels"));
+    };
+    let chan_in_ppm = feeppm_effective(
+        chan_updates.fee_proportional_millionths,
+        Amount::msat(&chan_updates.fee_base_msat) as u32,
+        amount_msat,
+    );
+    Ok(chan_in_ppm)
 }
 
 pub fn get_direction_from_nodes(
