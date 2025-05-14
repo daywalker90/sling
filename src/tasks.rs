@@ -85,8 +85,7 @@ pub async fn refresh_listpeerchannels(plugin: Plugin<PluginState>) -> Result<(),
 }
 
 pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
-    let my_pubkey = plugin.state().config.lock().pubkey;
-    // let mut offset = 0;
+    let my_pubkey = plugin.state().config.lock().pubkey_bytes;
     let mut is_startup = true;
 
     let gossip_file =
@@ -174,7 +173,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                             },
                             ShortChannelIdDirState {
                                 source: my_pubkey,
-                                destination: chan.peer_id,
+                                destination: PubKeyBytes::from_pubkey(&chan.peer_id),
                                 scid_alias: local_alias,
                                 fee_per_millionth: updates.local.fee_proportional_millionths,
                                 base_fee_millisatoshi: Amount::msat(&updates.local.fee_base_msat)
@@ -195,7 +194,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                                     direction: chan.direction.unwrap() ^ 1,
                                 },
                                 ShortChannelIdDirState {
-                                    source: chan.peer_id,
+                                    source: PubKeyBytes::from_pubkey(&chan.peer_id),
                                     destination: my_pubkey,
                                     scid_alias: remote_alias,
                                     fee_per_millionth: remote_updates.fee_proportional_millionths,
