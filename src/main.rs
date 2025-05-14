@@ -236,7 +236,10 @@ async fn main() -> Result<(), anyhow::Error> {
                 Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
             };
             let except_peers = match read_except_peers(&sling_dir).await {
-                Ok(o) => o,
+                Ok(o) => o
+                    .into_iter()
+                    .map(|p| PubKeyBytes::from_pubkey(&p))
+                    .collect(),
                 Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
             };
             let liquidity = match read_liquidity(&sling_dir).await {

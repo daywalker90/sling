@@ -5,12 +5,11 @@ use std::{
 };
 
 use anyhow::{anyhow, Error};
-use bitcoin::secp256k1::PublicKey;
 use cln_plugin::Plugin;
 use cln_rpc::primitives::{Amount, ShortChannelId, ShortChannelIdDir};
 
 use crate::{
-    model::{IncompleteChannels, LnGraph, ShortChannelIdDirStateBuilder},
+    model::{IncompleteChannels, LnGraph, PubKeyBytes, ShortChannelIdDirStateBuilder},
     PluginState,
 };
 
@@ -30,8 +29,8 @@ pub struct ChannelUpdate {
 
 #[derive(Debug, Clone, Copy)]
 pub struct ChannelAnnouncement {
-    pub source: PublicKey,
-    pub destination: PublicKey,
+    pub source: PubKeyBytes,
+    pub destination: PubKeyBytes,
     // pub features: String,
 }
 
@@ -397,8 +396,8 @@ fn parse_channel_announcement(inpu: &[u8]) -> Result<(ShortChannelId, ChannelAnn
     // 258..258+len features
     // 258+len..290+len chain_hash
     let scid = extract_scid(&inpu[(290 + len)..(298 + len)])?;
-    let source = PublicKey::from_slice(&inpu[(298 + len)..(331 + len)])?;
-    let destination = PublicKey::from_slice(&inpu[(331 + len)..(364 + len)])?;
+    let source = PubKeyBytes::new(inpu[(298 + len)..(331 + len)].try_into()?);
+    let destination = PubKeyBytes::new(inpu[(331 + len)..(364 + len)].try_into()?);
     Ok((
         scid,
         ChannelAnnouncement {

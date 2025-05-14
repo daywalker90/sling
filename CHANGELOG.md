@@ -6,8 +6,10 @@
 - `sling-once`: new command to rebalance a specific amount once
 
 ### Changed
-- optimized gossip file reader to be 10x faster with similar memory usage
+- optimized gossip file reader to be ~18x faster with similar memory usage
+- optimized route search to be ~2x faster
 - make use of the new trace level logging
+- if possible show node alias in failure log message instead of id
 
 ## [3.0.6] - 2025-05-03
 

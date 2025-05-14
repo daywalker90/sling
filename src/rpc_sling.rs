@@ -13,7 +13,7 @@ use tokio::{fs, time};
 
 use crate::{
     get_normal_channel_from_listpeerchannels,
-    model::TaskIdentifier,
+    model::{PubKeyBytes, TaskIdentifier},
     parse::{parse_job, parse_once_job},
     read_jobs,
     slings::sling,
@@ -45,6 +45,12 @@ pub async fn slingjob(
             }
         }
     }
+
+    let _res = stop_job(
+        plugin.clone(),
+        serde_json::Value::Array(vec![serde_json::to_value(chan_id)?]),
+    )
+    .await;
 
     write_job(plugin.clone(), sling_dir, chan_id, Some(job), false).await?;
     Ok(json!({"result":"success"}))
@@ -101,10 +107,12 @@ pub async fn slinggo(
     let peer_channels = plugin.state().peer_channels.lock().clone();
 
     for (chan_id, job) in jobs {
-        let other_peer = peer_channels
-            .get(&chan_id)
-            .ok_or(anyhow!("other_peer: channel not found"))?
-            .peer_id;
+        let other_peer = PubKeyBytes::from_pubkey(
+            &peer_channels
+                .get(&chan_id)
+                .ok_or(anyhow!("other_peer: channel not found"))?
+                .peer_id,
+        );
         let parallel_jobs = job.get_paralleljobs(config.paralleljobs);
         {
             let tasks = plugin.state().tasks.lock();
@@ -136,14 +144,7 @@ pub async fn slinggo(
                             tasks.insert_task(
                                 chan_id,
                                 i,
-                                Task::new(
-                                    chan_id,
-                                    i,
-                                    JobMessage::Starting,
-                                    false,
-                                    config.pubkey,
-                                    other_peer,
-                                ),
+                                Task::new(chan_id, i, JobMessage::Starting, false, other_peer),
                             )?;
                         }
                     }
@@ -283,10 +284,12 @@ pub async fn slingonce(
     let _res = refresh_listpeerchannels(plugin.clone()).await;
     let peer_channels = plugin.state().peer_channels.lock().clone();
     let our_listpeers_channel = get_normal_channel_from_listpeerchannels(&peer_channels, &chan_id)?;
-    let other_peer = peer_channels
-        .get(&chan_id)
-        .ok_or(anyhow!("other_peer: channel not found"))?
-        .peer_id;
+    let other_peer = PubKeyBytes::from_pubkey(
+        &peer_channels
+            .get(&chan_id)
+            .ok_or(anyhow!("other_peer: channel not found"))?
+            .peer_id,
+    );
 
     match job.sat_direction {
         sling::SatDirection::Pull => {
@@ -325,9 +328,15 @@ pub async fn slingonce(
         return Err(anyhow!("There is already a job for that scid!"));
     }
 
-    let config = plugin.state().config.lock().clone();
-
-    let parallel_jobs = job.get_paralleljobs(config.paralleljobs);
+    let parallel_jobs;
+    {
+        let mut config = plugin.state().config.lock();
+        match job.sat_direction {
+            sling::SatDirection::Pull => config.exclude_chans_pull.insert(chan_id),
+            sling::SatDirection::Push => config.exclude_chans_push.insert(chan_id),
+        };
+        parallel_jobs = job.get_paralleljobs(config.paralleljobs);
+    }
 
     for i in 1..=parallel_jobs {
         let task_ident = TaskIdentifier::new(chan_id, i);
@@ -368,14 +377,7 @@ pub async fn slingonce(
                                 match tasks.insert_task(
                                     chan_id,
                                     i,
-                                    Task::new(
-                                        chan_id,
-                                        i,
-                                        JobMessage::Starting,
-                                        true,
-                                        config.pubkey,
-                                        other_peer,
-                                    ),
+                                    Task::new(chan_id, i, JobMessage::Starting, true, other_peer),
                                 ) {
                                     Ok(_) => {}
                                     Err(e) => {
@@ -396,12 +398,30 @@ pub async fn slingonce(
                             log::debug!("{}/{}: Spawned once-job exited.", chan_id, i);
                             task.set_state(JobMessage::Stopped);
                             task.set_active(false);
+                            let mut config = plugin.state().config.lock();
+                            match job.sat_direction {
+                                sling::SatDirection::Pull => {
+                                    config.exclude_chans_pull.remove(&chan_id)
+                                }
+                                sling::SatDirection::Push => {
+                                    config.exclude_chans_push.remove(&chan_id)
+                                }
+                            };
                             break;
                         }
                         if *total_rebalanced + job.amount_msat > job.once_amount_msat.unwrap() {
                             log::debug!("{}/{}: Done rebalancing.", chan_id, i);
                             task.set_state(JobMessage::Balanced);
                             task.set_active(false);
+                            let mut config = plugin.state().config.lock();
+                            match job.sat_direction {
+                                sling::SatDirection::Pull => {
+                                    config.exclude_chans_pull.remove(&chan_id)
+                                }
+                                sling::SatDirection::Push => {
+                                    config.exclude_chans_push.remove(&chan_id)
+                                }
+                            };
                             break;
                         } else {
                             *total_rebalanced += job.amount_msat;
@@ -492,6 +512,10 @@ pub async fn slingdeletejob(
                             fs::remove_file(jobfile).await?;
                             plugin.state().tasks.lock().remove_all_tasks();
                             log::info!("Deleted all jobs");
+                            let except_chans = read_except_chans(&sling_dir).await?;
+                            let mut config = plugin.state().config.lock();
+                            config.exclude_chans_pull = except_chans.clone();
+                            config.exclude_chans_push = except_chans;
                         }
                         _ => {
                             let scid = ShortChannelId::from_str(i)?;
@@ -502,6 +526,9 @@ pub async fn slingdeletejob(
                             .await?;
                             write_job(plugin.clone(), sling_dir, scid, None, true).await?;
                             plugin.state().tasks.lock().remove_task(&scid);
+                            let mut config = plugin.state().config.lock();
+                            config.exclude_chans_pull.remove(&scid);
+                            config.exclude_chans_push.remove(&scid);
                         }
                     },
                     _ => return Err(anyhow!("invalid string for deleting job(s)")),
@@ -643,19 +670,20 @@ pub async fn slingexceptpeer(
     let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
     let mut static_excepts = read_except_peers(&sling_dir).await?;
     if array.len() == 2 {
-        let pubkey = match array.get(1).unwrap() {
-            serde_json::Value::String(s) => PublicKey::from_str(s)?,
+        let pubkey_bytes = match array.get(1).unwrap() {
+            serde_json::Value::String(s) => PubKeyBytes::from_str(s)?,
             o => return Err(anyhow!("invaild node_id: {}", o)),
         };
+        let pubkey = pubkey_bytes.to_pubkey();
         {
             let jobs = read_jobs(&sling_dir, plugin.clone()).await?;
             let mut config = plugin.state().config.lock();
-            if config.pubkey == pubkey {
+            if config.pubkey_bytes == pubkey_bytes {
                 return Err(anyhow!("Can't exclude yourself"));
             };
             match command {
                 opt if opt.eq("add") => {
-                    if config.exclude_peers.contains(&pubkey) {
+                    if config.exclude_peers.contains(&pubkey_bytes) {
                         return Err(anyhow!("{} is already in excepts", pubkey));
                     }
                     for scid in jobs.keys() {
@@ -667,13 +695,13 @@ pub async fn slingexceptpeer(
                             }
                         };
                     }
-                    config.exclude_peers.insert(pubkey);
+                    config.exclude_peers.insert(pubkey_bytes);
                     static_excepts.insert(pubkey);
                 }
                 opt if opt.eq("remove") => {
                     if static_excepts.contains(&pubkey) {
                         static_excepts.remove(&pubkey);
-                        config.exclude_peers.remove(&pubkey);
+                        config.exclude_peers.remove(&pubkey_bytes);
                     } else {
                         return Err(anyhow!(
                             "node_id {} not in excepts, nothing to remove",

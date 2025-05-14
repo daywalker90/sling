@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     fmt::{self, Display, Formatter},
+    hash::{Hash, Hasher},
     path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
@@ -12,7 +13,7 @@ use cln_rpc::{
     primitives::{Amount, PublicKey, ShortChannelId, ShortChannelIdDir},
 };
 use parking_lot::{Mutex, RwLock};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use sling::Job;
 use tabled::Tabled;
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
@@ -160,6 +161,47 @@ impl Tasks {
     }
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd)]
+pub struct PubKeyBytes([u8; 33]);
+
+impl PubKeyBytes {
+    pub fn new(bytes: [u8; 33]) -> PubKeyBytes {
+        PubKeyBytes(bytes)
+    }
+    pub fn from_pubkey(pubkey: &PublicKey) -> PubKeyBytes {
+        PubKeyBytes(pubkey.serialize())
+    }
+    pub fn from_str(s: &str) -> Result<PubKeyBytes, anyhow::Error> {
+        Ok(PubKeyBytes(PublicKey::from_str(s)?.serialize()))
+    }
+    pub fn to_pubkey(self) -> PublicKey {
+        PublicKey::from_slice(&self.0).unwrap()
+    }
+}
+
+impl Display for PubKeyBytes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", PublicKey::from_slice(&self.0).unwrap())
+    }
+}
+
+impl Hash for PubKeyBytes {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+impl Serialize for PubKeyBytes {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut hex = String::with_capacity(66);
+        for byte in self.0.iter() {
+            use std::fmt::Write;
+            write!(&mut hex, "{:02x}", byte).unwrap();
+        }
+        serializer.serialize_str(&hex)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TaskIdentifier {
     short_channel_id: ShortChannelId,
@@ -192,10 +234,8 @@ pub struct Task {
     active: bool,
     should_stop: bool,
     once: bool,
-    pub actual_candidates: Vec<ShortChannelId>,
     pub parallel_ban: Option<ShortChannelIdDir>,
-    pub my_pubkey: PublicKey,
-    pub other_pubkey: PublicKey,
+    pub other_pubkey: PubKeyBytes,
 }
 impl Display for Task {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -209,18 +249,15 @@ impl Task {
         task_id: u16,
         latest_state: JobMessage,
         once: bool,
-        my_pubkey: PublicKey,
-        other_pubkey: PublicKey,
+        other_pubkey: PubKeyBytes,
     ) -> Self {
         Task {
             latest_state,
             active: true,
             should_stop: false,
             once,
-            my_pubkey,
             other_pubkey,
             parallel_ban: None,
-            actual_candidates: Vec::new(),
             task_ident: TaskIdentifier::new(short_channel_id, task_id),
         }
     }
@@ -260,6 +297,7 @@ impl Task {
 #[derive(Clone, Debug)]
 pub struct Config {
     pub pubkey: PublicKey,
+    pub pubkey_bytes: PubKeyBytes,
     pub rpc_path: PathBuf,
     pub sling_dir: PathBuf,
     pub version: String,
@@ -283,7 +321,7 @@ pub struct Config {
     pub inform_layers: Vec<String>,
     pub exclude_chans_pull: HashSet<ShortChannelId>,
     pub exclude_chans_push: HashSet<ShortChannelId>,
-    pub exclude_peers: HashSet<PublicKey>,
+    pub exclude_peers: HashSet<PubKeyBytes>,
 }
 impl Config {
     pub fn new(
@@ -293,10 +331,11 @@ impl Config {
         version: String,
         exclude_chans_pull: HashSet<ShortChannelId>,
         exclude_chans_push: HashSet<ShortChannelId>,
-        exclude_peers: HashSet<PublicKey>,
+        exclude_peers: HashSet<PubKeyBytes>,
     ) -> Config {
         Config {
             pubkey,
+            pubkey_bytes: PubKeyBytes::from_pubkey(&pubkey),
             rpc_path,
             sling_dir,
             version,
@@ -374,7 +413,7 @@ pub struct DijkstraNode {
     pub score: u64,
     pub channel_state: ShortChannelIdDirState,
     pub short_channel_id: ShortChannelId,
-    pub destination: PublicKey,
+    pub destination: PubKeyBytes,
     pub hops: u8,
 }
 impl PartialEq for DijkstraNode {
@@ -396,8 +435,8 @@ pub struct Liquidity {
 
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct ShortChannelIdDirState {
-    pub source: PublicKey,
-    pub destination: PublicKey,
+    pub source: PubKeyBytes,
+    pub destination: PubKeyBytes,
     pub active: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scid_alias: Option<ShortChannelId>,
@@ -423,8 +462,8 @@ impl ShortChannelIdDirState {
 
 #[derive(Debug, Serialize)]
 pub struct ShortChannelIdDirStateBuilder {
-    pub source: Option<PublicKey>,
-    destination: Option<PublicKey>,
+    pub source: Option<PubKeyBytes>,
+    destination: Option<PubKeyBytes>,
     active: Option<bool>,
     scid_alias: Option<ShortChannelId>,
     fee_per_millionth: Option<u32>,
@@ -539,9 +578,9 @@ impl ShortChannelIdDirStateBuilder {
 
 fn get_node_order(
     direction: u32,
-    node_1: PublicKey,
-    node_2: PublicKey,
-) -> Result<(PublicKey, PublicKey), Error> {
+    node_1: PubKeyBytes,
+    node_2: PubKeyBytes,
+) -> Result<(PubKeyBytes, PubKeyBytes), Error> {
     if direction == 0 {
         if node_1 < node_2 {
             Ok((node_1, node_2))
@@ -628,7 +667,7 @@ impl IncompleteChannels {
 #[derive(Debug, Serialize)]
 pub struct LnGraph {
     channels: HashMap<ShortChannelIdDir, ShortChannelIdDirState>,
-    graph: HashMap<PublicKey, HashSet<ShortChannelIdDir>>,
+    graph: HashMap<PubKeyBytes, HashSet<ShortChannelIdDir>>,
 }
 impl LnGraph {
     pub fn new() -> Self {
@@ -733,7 +772,7 @@ impl LnGraph {
 
     pub fn get_state_no_direction(
         &self,
-        source: &PublicKey,
+        source: &PubKeyBytes,
         scid: &ShortChannelId,
     ) -> Result<(ShortChannelIdDir, &ShortChannelIdDirState), Error> {
         let dir_chan_0 = ShortChannelIdDir {
@@ -761,9 +800,9 @@ impl LnGraph {
     #[allow(clippy::too_many_arguments)]
     pub fn edges(
         &self,
-        source: &PublicKey,
+        source: &PubKeyBytes,
         two_weeks_ago: u32,
-        task: &Task,
+        actual_candidates: &[ShortChannelId],
         config: &Config,
         job: &Job,
         excepts: &[ShortChannelIdDir],
@@ -780,10 +819,10 @@ impl LnGraph {
                         && Amount::msat(&dir_chan_state.htlc_maximum_msat) >= job.amount_msat
                         && !config.exclude_peers.contains(&dir_chan_state.source)
                         && !config.exclude_peers.contains(&dir_chan_state.destination)
-                        && if dir_chan_state.source == task.my_pubkey
-                            || dir_chan_state.destination == task.my_pubkey
+                        && if dir_chan_state.source == config.pubkey_bytes
+                            || dir_chan_state.destination == config.pubkey_bytes
                         {
-                            task.actual_candidates
+                            actual_candidates
                                 .iter()
                                 .any(|c| c == &dir_chan.short_channel_id)
                         } else {
@@ -872,7 +911,7 @@ impl SuccessReb {
 
             if suffix == SUCCESSES_SUFFIX && file_extension == "json" {
                 log::debug!("Reading success file: {}", file.path().display());
-                let contents = tokio::fs::read_to_string(file_path).await?;
+                let contents = tokio::fs::read_to_string(&file_path).await?;
                 for line in contents.lines() {
                     let reb: SuccessReb = if let Ok(r) = serde_json::from_str(line) {
                         r
@@ -887,6 +926,17 @@ impl SuccessReb {
                             e.get_mut().push(reb);
                         }
                     }
+                }
+                if let Some(rebs) = result.remove(&scid) {
+                    if rebs.is_empty() {
+                        log::debug!("Deleting empty success file: {}", file.path().display());
+                        tokio::fs::remove_file(file_path).await?;
+                    } else {
+                        result.insert(scid, rebs);
+                    }
+                } else {
+                    log::debug!("Deleting empty success file: {}", file.path().display());
+                    tokio::fs::remove_file(file_path).await?;
                 }
             }
         }
@@ -960,7 +1010,7 @@ impl FailureReb {
 
             if suffix == FAILURES_SUFFIX && file_extension == "json" {
                 log::debug!("Reading failure file: {}", file.path().display());
-                let contents = tokio::fs::read_to_string(file_path).await?;
+                let contents = tokio::fs::read_to_string(&file_path).await?;
                 for line in contents.lines() {
                     let reb: FailureReb = if let Ok(r) = serde_json::from_str(line) {
                         r
@@ -975,6 +1025,17 @@ impl FailureReb {
                             e.get_mut().push(reb);
                         }
                     }
+                }
+                if let Some(rebs) = result.remove(&scid) {
+                    if rebs.is_empty() {
+                        log::debug!("Deleting empty failure file: {}", file.path().display());
+                        tokio::fs::remove_file(file_path).await?;
+                    } else {
+                        result.insert(scid, rebs);
+                    }
+                } else {
+                    log::debug!("Deleting empty failure file: {}", file.path().display());
+                    tokio::fs::remove_file(file_path).await?;
                 }
             }
         }
