@@ -1,14 +1,15 @@
 use std::{
+    collections::hash_map,
     fs::File,
     io::BufReader,
     path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use anyhow::Error;
+use anyhow::{anyhow, Error};
 use cln_plugin::Plugin;
 use cln_rpc::{
-    model::requests::{ListnodesRequest, ListpeerchannelsRequest},
+    model::requests::{AskrenelistlayersRequest, ListnodesRequest, ListpeerchannelsRequest},
     primitives::{Amount, ChannelState, ShortChannelIdDir},
     ClnRpc,
 };
@@ -374,5 +375,75 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
             log::debug!("Pruned stats successfully in {}s!", now.elapsed().as_secs());
         }
         time::sleep(Duration::from_secs(21_600)).await;
+    }
+}
+
+pub async fn read_askrene_liquidity(plugin: Plugin<PluginState>) -> Result<(), Error> {
+    let rpc_path = plugin.state().config.lock().rpc_path.clone();
+    let interval = plugin.state().config.lock().reset_liquidity_interval * 60;
+    let mut rpc = ClnRpc::new(&rpc_path).await?;
+    loop {
+        {
+            let now = Instant::now();
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            let xpay_layer_resp = rpc
+                .call_typed(&AskrenelistlayersRequest {
+                    layer: Some("xpay".to_owned()),
+                })
+                .await?;
+
+            let xpay_layer = xpay_layer_resp
+                .layers
+                .first()
+                .ok_or_else(|| anyhow!("no xpay layer"))?;
+            let mut liquidity = plugin.state().liquidity.lock();
+            let mut counter = 0;
+            for belief in xpay_layer.constraints.iter() {
+                let scid_dir = if let Some(sd) = belief.short_channel_id_dir {
+                    sd
+                } else {
+                    continue;
+                };
+                let belief_timestamp = if let Some(ts) = belief.timestamp {
+                    ts
+                } else {
+                    continue;
+                };
+                let belief_maximum_msat = if let Some(mm) = belief.maximum_msat {
+                    mm.msat()
+                } else {
+                    continue;
+                };
+                if belief_timestamp < timestamp - interval {
+                    continue;
+                }
+                counter += 1;
+                match liquidity.entry(scid_dir) {
+                    hash_map::Entry::Occupied(mut occupied_entry) => {
+                        if occupied_entry.get().liquidity_age < belief_timestamp {
+                            *occupied_entry.get_mut() = Liquidity {
+                                liquidity_msat: belief_maximum_msat,
+                                liquidity_age: belief_timestamp,
+                            };
+                        }
+                    }
+                    hash_map::Entry::Vacant(vacant_entry) => {
+                        vacant_entry.insert(Liquidity {
+                            liquidity_msat: belief_maximum_msat,
+                            liquidity_age: belief_timestamp,
+                        });
+                    }
+                };
+            }
+            log::info!(
+                "Read {} askerene liquidity constraints in {}ms!",
+                counter,
+                now.elapsed().as_millis()
+            );
+        }
+        time::sleep(Duration::from_secs(60)).await;
     }
 }
