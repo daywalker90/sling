@@ -341,6 +341,16 @@ async fn main() -> Result<(), anyhow::Error> {
             };
             let _res = clearstatsclone.shutdown();
         });
+        if plugin.state().config.lock().at_or_above_24_11 {
+            let askrene_clone = plugin.clone();
+            tokio::spawn(async move {
+                match tasks::read_askrene_liquidity(askrene_clone.clone()).await {
+                    Ok(()) => (),
+                    Err(e) => log::warn!("Error in read_askrene_liquidity thread: {:?}", e),
+                };
+                let _res = askrene_clone.shutdown();
+            });
+        }
 
         plugin.join().await?;
         std::process::exit(0);
