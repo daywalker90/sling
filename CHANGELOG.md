@@ -10,6 +10,7 @@
 - optimized route search to be ~2x faster
 - make use of the new trace level logging
 - if possible show node alias in failure log message instead of id
+- ``sling-reset-liquidity-interval`` default value increased to 360m again, if liquidity beliefs are forgotten too quickly it may result in an infinite loop of trying the very cheapest, never succeeding paths
 
 ## [3.0.6] - 2025-05-03
 
