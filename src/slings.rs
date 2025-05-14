@@ -15,7 +15,7 @@ use std::time::Duration;
 use tokio::time::{self, Instant};
 
 use crate::dijkstra::dijkstra;
-use crate::model::{Config, JobMessage, PluginState, TaskIdentifier};
+use crate::model::{Config, JobMessage, PluginState, PubKeyBytes, TaskIdentifier};
 use crate::response::{sendpay_response, waitsendpay_response};
 use crate::util::{
     feeppm_effective, feeppm_effective_from_amts, get_normal_channel_from_listpeerchannels,
@@ -235,7 +235,7 @@ async fn next_route(
     success_route: &mut Option<Vec<SendpayRoute>>,
 ) -> Result<Vec<SendpayRoute>, Error> {
     let graph = plugin.state().graph.lock();
-    build_candidatelist(
+    let actual_candidates = build_candidatelist(
         plugin.clone(),
         peer_channels,
         task_ident,
@@ -254,7 +254,7 @@ async fn next_route(
     log::debug!(
         "{}: Candidates: {}",
         task_ident,
-        task.actual_candidates
+        actual_candidates
             .iter()
             .map(|y| y.to_string())
             .collect::<Vec<String>>()
@@ -275,7 +275,7 @@ async fn next_route(
                 .join(", ")
         );
     }
-    if task.actual_candidates.is_empty() {
+    if actual_candidates.is_empty() {
         log::info!(
             "{}: No candidates found. Adjust out_ppm or wait for liquidity. Sleeping...",
             task_ident,
@@ -291,7 +291,7 @@ async fn next_route(
     let mut route = Vec::new();
     if let Some(prev_route) = success_route {
         if match job.sat_direction {
-            SatDirection::Pull => task.actual_candidates.iter().any(|c| {
+            SatDirection::Pull => actual_candidates.iter().any(|c| {
                 c == &prev_route.first().unwrap().channel
                     || peer_channels
                         .get(c)
@@ -304,7 +304,7 @@ async fn next_route(
                         })
                         .unwrap_or(false)
             }),
-            SatDirection::Push => task.actual_candidates.iter().any(|c| {
+            SatDirection::Push => actual_candidates.iter().any(|c| {
                 c == &prev_route.last().unwrap().channel
                     || peer_channels
                         .get(c)
@@ -329,23 +329,81 @@ async fn next_route(
             task_bans.remove(&pb);
         }
         task.parallel_ban = None;
+
+        let mut excepts = Vec::new();
+        excepts.extend(task_bans);
+        for scid in tempbans.keys() {
+            excepts.push(ShortChannelIdDir {
+                short_channel_id: *scid,
+                direction: 0,
+            });
+            excepts.push(ShortChannelIdDir {
+                short_channel_id: *scid,
+                direction: 1,
+            });
+        }
+        match job.sat_direction {
+            SatDirection::Pull => {
+                for scid in config.exclude_chans_pull.iter() {
+                    excepts.push(ShortChannelIdDir {
+                        short_channel_id: *scid,
+                        direction: 0,
+                    });
+                    excepts.push(ShortChannelIdDir {
+                        short_channel_id: *scid,
+                        direction: 1,
+                    });
+                }
+            }
+            SatDirection::Push => {
+                for scid in config.exclude_chans_push.iter() {
+                    excepts.push(ShortChannelIdDir {
+                        short_channel_id: *scid,
+                        direction: 0,
+                    });
+                    excepts.push(ShortChannelIdDir {
+                        short_channel_id: *scid,
+                        direction: 1,
+                    });
+                }
+            }
+        }
+
         let liquidity = plugin.state().liquidity.lock();
         match job.sat_direction {
             SatDirection::Pull => {
-                route = dijkstra(config, &graph, job, task, tempbans, &task_bans, &liquidity)?;
+                route = dijkstra(
+                    config,
+                    &graph,
+                    job,
+                    task,
+                    &actual_candidates,
+                    &excepts,
+                    &liquidity,
+                )?;
             }
             SatDirection::Push => {
-                route = dijkstra(config, &graph, job, task, tempbans, &task_bans, &liquidity)?;
+                route = dijkstra(
+                    config,
+                    &graph,
+                    job,
+                    task,
+                    &actual_candidates,
+                    &excepts,
+                    &liquidity,
+                )?;
             }
         }
     }
     if route.len() >= 3 {
         let route_claim_chan = route[route.len() / 2].channel;
         let route_claim_peer = route[(route.len() / 2) - 1].id;
-        if let Ok((dir_chan, dir_chan_state)) =
-            graph.get_state_no_direction(&route_claim_peer, &route_claim_chan)
-        {
-            if dir_chan_state.source != config.pubkey && dir_chan_state.destination != config.pubkey
+        if let Ok((dir_chan, dir_chan_state)) = graph.get_state_no_direction(
+            &PubKeyBytes::from_pubkey(&route_claim_peer),
+            &route_claim_chan,
+        ) {
+            if dir_chan_state.source != config.pubkey_bytes
+                && dir_chan_state.destination != config.pubkey_bytes
             {
                 task.parallel_ban = Some(dir_chan);
             } else {
@@ -364,7 +422,7 @@ async fn health_check(
     peer_channels: &HashMap<ShortChannelId, ListpeerchannelsChannels>,
     task_ident: &TaskIdentifier,
     job: &Job,
-    other_peer: PublicKey,
+    other_peer: PubKeyBytes,
     tempbans: &HashMap<ShortChannelId, u64>,
 ) -> Result<Option<bool>, Error> {
     let channel =
@@ -407,7 +465,10 @@ async fn health_check(
         my_sleep(plugin.clone(), 10, task_ident).await;
         Ok(Some(true))
     } else {
-        match peer_channels.values().find(|x| x.peer_id == other_peer) {
+        match peer_channels
+            .values()
+            .find(|x| x.peer_id == other_peer.to_pubkey())
+        {
             Some(p) => {
                 if !p.peer_connected {
                     log::info!("{}: not connected. Taking a break...", task_ident);
@@ -450,7 +511,7 @@ fn build_candidatelist(
     graph: &LnGraph,
     tempbans: &HashMap<ShortChannelId, u64>,
     config: &Config,
-) -> Result<(), Error> {
+) -> Result<Vec<ShortChannelId>, Error> {
     let blockheight = *plugin.state().blockheight.lock();
     let mut candidatelist = Vec::<ShortChannelId>::new();
     let custom_candidates = job.get_candidates();
@@ -639,13 +700,5 @@ fn build_candidatelist(
         candidatelist.push(scid);
     }
 
-    plugin
-        .state()
-        .tasks
-        .lock()
-        .get_task_mut(task_ident)
-        .ok_or_else(|| anyhow!("no task found"))?
-        .actual_candidates = candidatelist;
-
-    Ok(())
+    Ok(candidatelist)
 }

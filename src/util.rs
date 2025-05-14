@@ -7,6 +7,7 @@ use cln_rpc::primitives::PublicKey;
 use cln_rpc::primitives::Sha256;
 use cln_rpc::primitives::ShortChannelIdDir;
 use rand::Rng;
+use sling::SatDirection;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::io;
@@ -17,6 +18,7 @@ use std::{collections::HashMap, path::Path};
 
 use crate::model::Liquidity;
 use crate::model::PluginState;
+use crate::model::PubKeyBytes;
 use crate::model::TaskIdentifier;
 use crate::model::EXCEPTS_CHANS_FILE_NAME;
 use crate::model::EXCEPTS_PEERS_FILE_NAME;
@@ -61,9 +63,15 @@ pub async fn read_jobs(
     };
     let peer_channels = plugin.state().peer_channels.lock();
     let channels = get_all_normal_channels_from_listpeerchannels(&peer_channels);
-    let channels = channels.keys().collect::<Vec<&ShortChannelId>>();
 
-    jobs.retain(|c, _j| channels.contains(&c));
+    jobs.retain(|c, _j| channels.contains_key(c));
+    let mut config = plugin.state().config.lock();
+    for (scid, job) in jobs.iter() {
+        match job.sat_direction {
+            SatDirection::Pull => config.exclude_chans_pull.insert(*scid),
+            SatDirection::Push => config.exclude_chans_push.insert(*scid),
+        };
+    }
     Ok(jobs)
 }
 
@@ -341,11 +349,12 @@ pub fn get_remote_feeppm_effective(
         );
         Ok(chan_in_ppm)
     } else {
-        let (_scid_dir, chan_from_peer) =
-            match graph.get_state_no_direction(&channel.peer_id, &scid) {
-                Ok(chan) => chan,
-                Err(_) => return Err(anyhow!("No gossip for {} in graph", scid)),
-            };
+        let (_scid_dir, chan_from_peer) = match graph
+            .get_state_no_direction(&PubKeyBytes::from_pubkey(&channel.peer_id), &scid)
+        {
+            Ok(chan) => chan,
+            Err(_) => return Err(anyhow!("No gossip for {} in graph", scid)),
+        };
         let chan_in_ppm = feeppm_effective(
             chan_from_peer.fee_per_millionth,
             chan_from_peer.base_fee_millisatoshi,

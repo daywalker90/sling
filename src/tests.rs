@@ -1,4 +1,4 @@
-use cln_rpc::primitives::{PublicKey, ShortChannelId};
+use cln_rpc::primitives::{PublicKey, ShortChannelId, ShortChannelIdDir};
 use sling::Job;
 
 use crate::dijkstra::dijkstra;
@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::thread;
+use std::thread::{self, sleep};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::model::{Config, IncompleteChannels, JobMessage, LnGraph, Task, PLUGIN_NAME};
@@ -306,9 +306,10 @@ fn test_dijkstra_speed() {
     )
     .expect("read_gossip_file failed");
 
-    let start_node =
-        PublicKey::from_str("026165850492521f4ac8abd9bd8088123446d126f648ca35e60f88177dc149ceb2")
-            .unwrap();
+    let start_node = crate::model::PubKeyBytes::from_str(
+        "026165850492521f4ac8abd9bd8088123446d126f648ca35e60f88177dc149ceb2",
+    )
+    .unwrap();
     let rando_node =
         PublicKey::from_str("0221299f99b760f35851a3a6ae60f62680b79ec02a34c3b25f6ba1e0ce9da62ba7")
             .unwrap();
@@ -319,9 +320,10 @@ fn test_dijkstra_speed() {
         1,
         JobMessage::Starting,
         false,
-        rando_node,
-        PublicKey::from_str("02b3a0d1df18df7121681e994170e8d000c9afc212301249c0fc011f330e141a31")
-            .unwrap(),
+        crate::model::PubKeyBytes::from_str(
+            "02b3a0d1df18df7121681e994170e8d000c9afc212301249c0fc011f330e141a31",
+        )
+        .unwrap(),
     );
     let two_weeks_ago = (SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -330,7 +332,7 @@ fn test_dijkstra_speed() {
         - 60 * 60 * 24 * 14) as u32;
 
     let mut config = Config::new(
-        start_node,
+        rando_node,
         PathBuf::from("lightning-rpc"),
         PathBuf::from(PLUGIN_NAME),
         "v25.02".to_owned(),
@@ -343,7 +345,7 @@ fn test_dijkstra_speed() {
         .edges(
             &start_node,
             two_weeks_ago,
-            &task,
+            &[],
             &config,
             &job,
             &[],
@@ -353,8 +355,13 @@ fn test_dijkstra_speed() {
         .map(|r| r.0.short_channel_id)
         .collect();
     println!("candidates: {}", candidatelist.len());
-    task.my_pubkey = start_node;
-    task.actual_candidates = candidatelist;
+    config.pubkey_bytes = start_node;
+    // task.actual_candidates = candidatelist;
+
+    let mut excepts: Vec<ShortChannelIdDir> = Vec::new();
+
+    println!("ready for profiling");
+    sleep(Duration::from_secs(4));
 
     for _i in 0..iterations {
         let now = Instant::now();
@@ -363,8 +370,8 @@ fn test_dijkstra_speed() {
             &graph,
             &job,
             &mut task,
-            &HashMap::new(),
-            &HashSet::new(),
+            &candidatelist,
+            &excepts,
             &HashMap::new(),
         )
         .unwrap();
@@ -380,9 +387,14 @@ fn test_dijkstra_speed() {
         //     );
         // }
         // println!("----------------------------------");
-        config
-            .exclude_chans_pull
-            .insert(route.first().unwrap().channel);
+        excepts.push(ShortChannelIdDir {
+            short_channel_id: route.first().unwrap().channel,
+            direction: 0,
+        });
+        excepts.push(ShortChannelIdDir {
+            short_channel_id: route.first().unwrap().channel,
+            direction: 1,
+        });
         vec_len.push(route.len());
         vec_times.push(elapsed);
     }
