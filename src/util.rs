@@ -177,7 +177,7 @@ pub async fn write_liquidity(plugin: Plugin<PluginState>) -> Result<(), Error> {
     let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
     let now = Instant::now();
     fs::write(sling_dir.join(LIQUIDITY_FILE_NAME), graph_string).await?;
-    log::debug!("Wrote graph to disk in {}ms", now.elapsed().as_millis());
+    log::debug!("Wrote liquidity to disk in {}ms", now.elapsed().as_millis());
     Ok(())
 }
 
