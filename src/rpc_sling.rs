@@ -18,7 +18,7 @@ use crate::{
     read_jobs,
     slings::sling,
     tasks::refresh_listpeerchannels,
-    util::{read_except_chans, read_except_peers},
+    util::{read_except_chans, read_except_peers, write_liquidity},
     write_excepts, write_job, JobMessage, PluginState, Task, EXCEPTS_CHANS_FILE_NAME,
     EXCEPTS_PEERS_FILE_NAME, JOB_FILE_NAME, PLUGIN_NAME,
 };
@@ -270,6 +270,8 @@ async fn stop_job(plugin: Plugin<PluginState>, args: serde_json::Value) -> Resul
             }
         };
     }
+
+    write_liquidity(plugin.clone()).await?;
     Ok(stopped_count)
 }
 
