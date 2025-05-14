@@ -21,7 +21,7 @@ use crate::util::{
     feeppm_effective, feeppm_effective_from_amts, get_normal_channel_from_listpeerchannels,
     get_preimage_paymend_hash_pair, get_total_htlc_count, is_channel_normal, my_sleep,
 };
-use crate::{get_remote_feeppm_effective, wait_for_gossip, LnGraph};
+use crate::{get_remote_feeppm_effective, wait_for_gossip};
 
 pub async fn sling(
     job: &Job,
@@ -240,7 +240,6 @@ async fn next_route(
         peer_channels,
         task_ident,
         job,
-        &graph,
         tempbans,
         config,
     )?;
@@ -508,7 +507,6 @@ fn build_candidatelist(
     peer_channels: &HashMap<ShortChannelId, ListpeerchannelsChannels>,
     task_ident: &TaskIdentifier,
     job: &Job,
-    graph: &LnGraph,
     tempbans: &HashMap<ShortChannelId, u64>,
     config: &Config,
 ) -> Result<Vec<ShortChannelId>, Error> {
@@ -577,13 +575,7 @@ fn build_candidatelist(
             continue;
         }
 
-        let chan_in_ppm = match get_remote_feeppm_effective(
-            channel,
-            graph,
-            scid,
-            job.amount_msat,
-            &config.version,
-        ) {
+        let chan_in_ppm = match get_remote_feeppm_effective(channel, job.amount_msat) {
             Ok(o) => o,
             Err(e) => {
                 log::trace!(
