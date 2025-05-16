@@ -166,7 +166,7 @@ impl Job {
         }
     }
     pub fn target_cap(&self, channel: &ListpeerchannelsChannels) -> u64 {
-        let target = self.target.unwrap_or(0.5);
+        let target = self.get_target();
 
         let total_msat = Amount::msat(&channel.total_msat.unwrap());
         if self.once_amount_msat.is_some() {
@@ -238,12 +238,8 @@ impl Job {
             config_maxhops + 1
         }
     }
-    pub fn get_target(&self, config_target: f64) -> f64 {
-        if let Some(t) = self.target {
-            t
-        } else {
-            config_target
-        }
+    pub fn get_target(&self) -> f64 {
+        self.target.unwrap_or(0.5)
     }
     pub fn get_deplteuptoamount(&self, config_depleteuptoamount: u64) -> u64 {
         if let Some(da) = self.depleteuptoamount {

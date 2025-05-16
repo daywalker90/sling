@@ -78,19 +78,76 @@ pub async fn sling(
             .lock()
             .set_state(&task_ident, JobMessage::Rebalancing);
 
+        let actual_candidates = build_candidatelist(
+            plugin.clone(),
+            &peer_channels,
+            task.get_identifier(),
+            job,
+            &tempbans,
+            &config,
+        )?;
+
+        log::debug!(
+            "{}: Candidates: {}",
+            task,
+            actual_candidates
+                .iter()
+                .map(|y| y.to_string())
+                .collect::<Vec<String>>()
+                .join(", ")
+        );
+        if !tempbans.is_empty() {
+            log::debug!(
+                "{}: Tempbans: {}",
+                task,
+                plugin
+                    .state()
+                    .tempbans
+                    .lock()
+                    .clone()
+                    .keys()
+                    .map(|y| y.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            );
+        }
+        if actual_candidates.is_empty() {
+            log::info!(
+                "{}: No candidates found. Adjust out_ppm or wait for liquidity. Sleeping...",
+                task,
+            );
+            plugin
+                .state()
+                .tasks
+                .lock()
+                .set_state(task.get_identifier(), JobMessage::NoCandidates);
+            if job.once_amount_msat.is_some() {
+                time::sleep(Duration::from_secs(1)).await;
+                break 'outer;
+            }
+            success_route = None;
+            my_sleep(plugin.clone(), 600, &task_ident).await;
+            continue 'outer;
+        }
+
+        let mut excepts = build_excepts(&tempbans, &config, job);
+
         let route = {
             let nr = next_route(
                 plugin.clone(),
                 &config,
                 &peer_channels,
                 job,
-                &tempbans,
+                &mut excepts,
                 &task_ident,
                 &mut success_route,
-            )
-            .await;
+                &actual_candidates,
+            );
             if nr.is_err() || nr.as_ref().unwrap().is_empty() {
-                log::info!("{}: could not find a route. Sleeping...", task_ident);
+                log::info!(
+                    "{}: could not find a dijkstra route. Sleeping...",
+                    task_ident
+                );
                 plugin
                     .state()
                     .tasks
@@ -119,18 +176,6 @@ pub async fn sling(
             now.elapsed().as_millis()
         );
 
-        if fee_ppm_effective > job.maxppm {
-            log::info!("{}: route not cheap enough! Sleeping...", task_ident);
-            plugin
-                .state()
-                .tasks
-                .lock()
-                .set_state(&task_ident, JobMessage::TooExp);
-            my_sleep(plugin.clone(), 600, &task_ident).await;
-            success_route = None;
-            continue 'outer;
-        }
-
         {
             let alias_map = plugin.state().alias_peer_map.lock();
             for r in &route {
@@ -145,13 +190,19 @@ pub async fn sling(
             }
         }
 
+        if fee_ppm_effective > job.maxppm {
+            log::info!("{}: route not cheap enough! Sleeping...", task_ident);
+            plugin
+                .state()
+                .tasks
+                .lock()
+                .set_state(&task_ident, JobMessage::TooExp);
+            my_sleep(plugin.clone(), 600, &task_ident).await;
+            success_route = None;
+            continue 'outer;
+        }
+
         let (preimage, payment_hash) = get_preimage_paymend_hash_pair();
-        // debug!(
-        //     "{}: Made preimage and payment_hash: {} Total: {}ms",
-        //     chan_id.to_string(),
-        //     payment_hash.to_string(),
-        //     now.elapsed().as_millis().to_string()
-        // );
 
         let send_response = match sendpay_response(
             plugin.clone(),
@@ -225,67 +276,70 @@ pub async fn sling(
     Ok(rebalanced_msat)
 }
 
-async fn next_route(
+fn build_excepts(
+    tempbans: &HashMap<ShortChannelId, u64>,
+    config: &Config,
+    job: &Job,
+) -> Vec<ShortChannelIdDir> {
+    let mut excepts = Vec::new();
+    for scid in tempbans.keys() {
+        excepts.push(ShortChannelIdDir {
+            short_channel_id: *scid,
+            direction: 0,
+        });
+        excepts.push(ShortChannelIdDir {
+            short_channel_id: *scid,
+            direction: 1,
+        });
+    }
+    match job.sat_direction {
+        SatDirection::Pull => {
+            for scid in config.exclude_chans_pull.iter() {
+                excepts.push(ShortChannelIdDir {
+                    short_channel_id: *scid,
+                    direction: 0,
+                });
+                excepts.push(ShortChannelIdDir {
+                    short_channel_id: *scid,
+                    direction: 1,
+                });
+            }
+        }
+        SatDirection::Push => {
+            for scid in config.exclude_chans_push.iter() {
+                excepts.push(ShortChannelIdDir {
+                    short_channel_id: *scid,
+                    direction: 0,
+                });
+                excepts.push(ShortChannelIdDir {
+                    short_channel_id: *scid,
+                    direction: 1,
+                });
+            }
+        }
+    }
+
+    excepts
+}
+
+#[allow(clippy::too_many_arguments)]
+fn next_route(
     plugin: Plugin<PluginState>,
     config: &Config,
     peer_channels: &HashMap<ShortChannelId, ListpeerchannelsChannels>,
     job: &Job,
-    tempbans: &HashMap<ShortChannelId, u64>,
+    excepts: &mut Vec<ShortChannelIdDir>,
     task_ident: &TaskIdentifier,
     success_route: &mut Option<Vec<SendpayRoute>>,
+    actual_candidates: &[ShortChannelId],
 ) -> Result<Vec<SendpayRoute>, Error> {
     let graph = plugin.state().graph.lock();
-    let actual_candidates = build_candidatelist(
-        plugin.clone(),
-        peer_channels,
-        task_ident,
-        job,
-        tempbans,
-        config,
-    )?;
 
     let mut tasks = plugin.state().tasks.lock();
     let mut task_bans = tasks.get_parallelbans(task_ident.get_chan_id())?;
     let task = tasks
         .get_task_mut(task_ident)
         .ok_or_else(|| anyhow!("no task found"))?;
-
-    log::debug!(
-        "{}: Candidates: {}",
-        task_ident,
-        actual_candidates
-            .iter()
-            .map(|y| y.to_string())
-            .collect::<Vec<String>>()
-            .join(", ")
-    );
-    if !tempbans.is_empty() {
-        log::debug!(
-            "{}: Tempbans: {}",
-            task_ident,
-            plugin
-                .state()
-                .tempbans
-                .lock()
-                .clone()
-                .keys()
-                .map(|y| y.to_string())
-                .collect::<Vec<String>>()
-                .join(", ")
-        );
-    }
-    if actual_candidates.is_empty() {
-        log::info!(
-            "{}: No candidates found. Adjust out_ppm or wait for liquidity. Sleeping...",
-            task_ident,
-        );
-        plugin
-            .state()
-            .tasks
-            .lock()
-            .set_state(task_ident, JobMessage::NoCandidates);
-        return Err(anyhow!("No candidates found"));
-    }
 
     let mut route = Vec::new();
     if let Some(prev_route) = success_route {
@@ -329,44 +383,7 @@ async fn next_route(
         }
         task.parallel_ban = None;
 
-        let mut excepts = Vec::new();
         excepts.extend(task_bans);
-        for scid in tempbans.keys() {
-            excepts.push(ShortChannelIdDir {
-                short_channel_id: *scid,
-                direction: 0,
-            });
-            excepts.push(ShortChannelIdDir {
-                short_channel_id: *scid,
-                direction: 1,
-            });
-        }
-        match job.sat_direction {
-            SatDirection::Pull => {
-                for scid in config.exclude_chans_pull.iter() {
-                    excepts.push(ShortChannelIdDir {
-                        short_channel_id: *scid,
-                        direction: 0,
-                    });
-                    excepts.push(ShortChannelIdDir {
-                        short_channel_id: *scid,
-                        direction: 1,
-                    });
-                }
-            }
-            SatDirection::Push => {
-                for scid in config.exclude_chans_push.iter() {
-                    excepts.push(ShortChannelIdDir {
-                        short_channel_id: *scid,
-                        direction: 0,
-                    });
-                    excepts.push(ShortChannelIdDir {
-                        short_channel_id: *scid,
-                        direction: 1,
-                    });
-                }
-            }
-        }
 
         let liquidity = plugin.state().liquidity.lock();
         match job.sat_direction {
@@ -376,8 +393,8 @@ async fn next_route(
                     &graph,
                     job,
                     task,
-                    &actual_candidates,
-                    &excepts,
+                    actual_candidates,
+                    excepts,
                     &liquidity,
                 )?;
             }
@@ -387,8 +404,8 @@ async fn next_route(
                     &graph,
                     job,
                     task,
-                    &actual_candidates,
-                    &excepts,
+                    actual_candidates,
+                    excepts,
                     &liquidity,
                 )?;
             }
