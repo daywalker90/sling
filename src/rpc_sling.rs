@@ -213,8 +213,6 @@ async fn stop_job(plugin: Plugin<PluginState>, args: serde_json::Value) -> Resul
                                     task.stop();
                                     log::debug!("{}: Stopping job...", task.get_identifier());
                                 }
-                            } else {
-                                return Err(anyhow!("{}: No job running", scid));
                             }
                         }
                         loop {
