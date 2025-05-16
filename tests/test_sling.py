@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 import logging
+import math
 import os
 import time
 
@@ -310,70 +311,105 @@ def test_maxhops_2(node_factory, bitcoind, get_plugin):  # noqa: F811
 
 
 def test_pull_and_push(node_factory, bitcoind, get_plugin):  # noqa: F811
-    l1, l2, l3 = node_factory.get_nodes(
-        3,
+    l1, l2, l3, l4, l5 = node_factory.get_nodes(
+        5,
         opts=[
             {
                 "plugin": get_plugin,
                 "sling-refresh-gossmap-interval": 1,
             },
-            {},
+            {"fee-per-satoshi": 20, "fee-base": 2, "cltv-delta": 100},
+            {"fee-per-satoshi": 30, "fee-base": 3, "cltv-delta": 150},
+            {"fee-per-satoshi": 60, "fee-base": 6, "cltv-delta": 200},
             {},
         ],
     )
+    nodes = [l1, l2, l3, l4, l5]
     l1.fundwallet(10_000_000)
     l2.fundwallet(10_000_000)
     l3.fundwallet(10_000_000)
+    l4.fundwallet(10_000_000)
+    l5.fundwallet(10_000_000)
     l1.rpc.connect(l2.info["id"], "localhost", l2.port)
     l2.rpc.connect(l3.info["id"], "localhost", l3.port)
-    l3.rpc.connect(l1.info["id"], "localhost", l1.port)
+    l3.rpc.connect(l4.info["id"], "localhost", l4.port)
+    l4.rpc.connect(l5.info["id"], "localhost", l5.port)
+    l5.rpc.connect(l1.info["id"], "localhost", l1.port)
     l1.rpc.fundchannel(l2.info["id"], 1_000_000, mindepth=1, announce=True)
-    l2.rpc.fundchannel(
-        l3.info["id"],
+    l2.rpc.fundchannel(l3.info["id"], 1_000_000, mindepth=1, announce=True)
+    l3.rpc.fundchannel(
+        l4.info["id"],
         1_000_000,
         mindepth=1,
         announce=True,
         push_msat=500_000_000,
     )
-    l3.rpc.fundchannel(l1.info["id"], 1_000_000, mindepth=1, announce=True)
+    l4.rpc.fundchannel(l5.info["id"], 1_000_000, mindepth=1, announce=True)
+    l5.rpc.fundchannel(l1.info["id"], 1_000_000, mindepth=1, announce=True)
     bitcoind.generate_block(1)
-    sync_blockheight(bitcoind, [l1, l2, l3])
-    l2.rpc.fundchannel(
-        l3.info["id"],
+    sync_blockheight(bitcoind, nodes)
+    l3.rpc.fundchannel(
+        l4.info["id"],
         1_000_000,
         mindepth=1,
         announce=True,
         push_msat=500_000_000,
     )
     bitcoind.generate_block(1)
-    sync_blockheight(bitcoind, [l1, l2, l3])
-    l2.rpc.fundchannel(
-        l3.info["id"],
+    sync_blockheight(bitcoind, nodes)
+    l3.rpc.fundchannel(
+        l4.info["id"],
         1_000_000,
         mindepth=1,
         announce=True,
         push_msat=500_000_000,
     )
     bitcoind.generate_block(6)
-    sync_blockheight(bitcoind, [l1, l2, l3])
+    sync_blockheight(bitcoind, nodes)
 
-    cl1 = l1.rpc.listpeerchannels(l2.info["id"])["channels"][0]["short_channel_id"]
+    cl1s = l1.rpc.listpeerchannels(l2.info["id"])["channels"]
+    cl1 = cl1s[0]["short_channel_id"]
     cl2s = l2.rpc.listpeerchannels(l3.info["id"])["channels"]
-    cl2_0 = cl2s[0]["short_channel_id"]
-    cl2_1 = cl2s[1]["short_channel_id"]
-    cl2_2 = cl2s[2]["short_channel_id"]
-    cl3 = l3.rpc.listpeerchannels(l1.info["id"])["channels"][0]["short_channel_id"]
+    cl2 = cl2s[0]["short_channel_id"]
+    cl3s = l3.rpc.listpeerchannels(l4.info["id"])["channels"]
+    cl3_0 = cl3s[0]["short_channel_id"]
+    cl3_1 = cl3s[1]["short_channel_id"]
+    cl3_2 = cl3s[2]["short_channel_id"]
+    cl4s = l4.rpc.listpeerchannels(l5.info["id"])["channels"]
+    cl4 = cl4s[0]["short_channel_id"]
+    cl5s = l5.rpc.listpeerchannels(l1.info["id"])["channels"]
+    cl5 = cl5s[0]["short_channel_id"]
+
+    fee_base_l2 = cl2s[0]["updates"]["local"]["fee_base_msat"]
+    fee_decimal_l2 = (
+        float(cl2s[0]["updates"]["local"]["fee_proportional_millionths"]) / 1_000_000.0
+    )
+    fee_base_l3 = cl3s[0]["updates"]["local"]["fee_base_msat"]
+    fee_decimal_l3 = (
+        float(cl3s[0]["updates"]["local"]["fee_proportional_millionths"]) / 1_000_000.0
+    )
+    fee_base_l4 = cl4s[0]["updates"]["local"]["fee_base_msat"]
+    fee_decimal_l4 = (
+        float(cl4s[0]["updates"]["local"]["fee_proportional_millionths"]) / 1_000_000.0
+    )
+    fee_base_l5 = cl5s[0]["updates"]["local"]["fee_base_msat"]
+    fee_decimal_l5 = (
+        float(cl5s[0]["updates"]["local"]["fee_proportional_millionths"]) / 1_000_000.0
+    )
+
+    LOGGER.info(f"cl1:{cl1}")
+    LOGGER.info(f"cl5:{cl5}")
 
     for n in [l1, l2, l3]:
-        for scid in [cl1, cl2_0, cl2_1, cl2_2, cl3]:
+        for scid in [cl1, cl2, cl3_0, cl3_1, cl3_2, cl4, cl5]:
             n.wait_channel_active(scid)
 
-    l1.daemon.wait_for_log(r"10 public channels")
+    l1.daemon.wait_for_log(r"14 public channels")
 
     l1.rpc.call(
         "sling-job",
         {
-            "scid": cl3,
+            "scid": cl5,
             "direction": "pull",
             "amount": 100_000,
             "maxppm": 1000,
@@ -385,17 +421,38 @@ def test_pull_and_push(node_factory, bitcoind, get_plugin):  # noqa: F811
     l1.rpc.call("sling-go", [])
     l1.daemon.wait_for_log(r"already balanced. Taking a break")
     wait_for(
-        lambda: only_one(l1.rpc.listpeerchannels(l3.info["id"])["channels"])[
+        lambda: only_one(l1.rpc.listpeerchannels(l5.info["id"])["channels"])[
             "to_us_msat"
         ]
         >= 400_000_000
+    )
+    pull_pay = l1.rpc.call("listpays", {"status": "complete"})["pays"][0]
+    LOGGER.info(f"{pull_pay}")
+    first_fee = math.ceil(pull_pay["amount_msat"] * fee_decimal_l5) + fee_base_l5
+    second_fee = (
+        math.ceil((pull_pay["amount_msat"] + first_fee) * fee_decimal_l4) + fee_base_l4
+    )
+    third_fee = (
+        math.ceil((pull_pay["amount_msat"] + first_fee + second_fee) * fee_decimal_l3)
+        + fee_base_l3
+    )
+    fourth_fee = (
+        math.ceil(
+            (pull_pay["amount_msat"] + first_fee + second_fee + third_fee)
+            * fee_decimal_l2
+        )
+        + fee_base_l2
+    )
+    assert (
+        pull_pay["amount_sent_msat"] - pull_pay["amount_msat"]
+        == first_fee + second_fee + third_fee + fourth_fee
     )
 
     l1.rpc.call("sling-deletejob", ["all"])
     l1.rpc.call(
         "sling-job",
         {
-            "scid": cl3,
+            "scid": cl5,
             "direction": "push",
             "target": 1,
             "amount": 100_000,
@@ -408,10 +465,32 @@ def test_pull_and_push(node_factory, bitcoind, get_plugin):  # noqa: F811
     l1.rpc.call("sling-go", [])
     l1.daemon.wait_for_log(r"already balanced. Taking a break")
     wait_for(
-        lambda: only_one(l1.rpc.listpeerchannels(l3.info["id"])["channels"])[
+        lambda: only_one(l1.rpc.listpeerchannels(l5.info["id"])["channels"])[
             "to_us_msat"
         ]
         <= 120_000_000
+    )
+    pays = l1.rpc.call("listpays", {"status": "complete"})["pays"]
+    push_pay = pays[len(pays) - 1]
+    LOGGER.info(f"{push_pay}")
+    first_fee = math.ceil(push_pay["amount_msat"] * fee_decimal_l5) + fee_base_l5
+    second_fee = (
+        math.ceil((push_pay["amount_msat"] + first_fee) * fee_decimal_l4) + fee_base_l4
+    )
+    third_fee = (
+        math.ceil((push_pay["amount_msat"] + first_fee + second_fee) * fee_decimal_l3)
+        + fee_base_l3
+    )
+    fourth_fee = (
+        math.ceil(
+            (push_pay["amount_msat"] + first_fee + second_fee + third_fee)
+            * fee_decimal_l2
+        )
+        + fee_base_l2
+    )
+    assert (
+        push_pay["amount_sent_msat"] - push_pay["amount_msat"]
+        == first_fee + second_fee + third_fee + fourth_fee
     )
 
 
@@ -1042,14 +1121,13 @@ def test_gossip(node_factory, bitcoind, get_plugin):  # noqa: F811
     assert not l1.daemon.is_in_log(f"sling: {scid_l1_l4_1}")
 
     sling_liquidity = os.path.join(l1.info["lightning-dir"], "sling", "liquidity.json")
-    assert os.path.getsize(sling_liquidity) == 0
+    assert os.path.getsize(sling_liquidity) == 2
 
     l1.restart()
     l1.rpc.connect(l2.info["id"] + "@localhost:" + str(l2.port))
     l1.rpc.connect(l3.info["id"] + "@localhost:" + str(l3.port))
     l1.rpc.connect(l4.info["id"] + "@localhost:" + str(l4.port))
 
-    assert os.path.getsize(sling_liquidity) > 0
     assert len(l1.rpc.call("listchannels", {})["channels"]) == 6
     l1.daemon.wait_for_log(r"4 private channels")
     l1.daemon.wait_for_log(r"6 public channels")
