@@ -9,7 +9,8 @@ static GLOBAL: Jemalloc = Jemalloc;
 
 use anyhow::anyhow;
 use cln_plugin::options::{
-    ConfigOption, DefaultIntegerConfigOption, DefaultStringConfigOption, StringArrayConfigOption,
+    ConfigOption, DefaultIntegerConfigOption, DefaultStringArrayConfigOption,
+    DefaultStringConfigOption,
 };
 use cln_plugin::Builder;
 use config::*;
@@ -60,7 +61,10 @@ const OPT_INFORM_LAYERS: &str = "sling-inform-layers";
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    std::env::set_var("CLN_PLUGIN_LOG", "cln_plugin=info,cln_rpc=info,debug");
+    std::env::set_var(
+        "CLN_PLUGIN_LOG",
+        "cln_plugin=info,cln_rpc=info,sling=trace,debug",
+    );
     log_panics::init();
     let state;
     let confplugin;
@@ -162,8 +166,9 @@ async fn main() -> Result<(), anyhow::Error> {
             "Max number of success stats per channel. Default is `10000`",
         )
         .dynamic();
-    let opt_inform_layers: StringArrayConfigOption = ConfigOption::new_str_arr_no_default(
+    let opt_inform_layers: DefaultStringArrayConfigOption = ConfigOption::new_str_arr_with_default(
         OPT_INFORM_LAYERS,
+        "xpay",
         "Inform these layers about our information we gather from rebalances. \
          Can be stated multiple times",
     );
