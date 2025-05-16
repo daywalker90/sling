@@ -233,18 +233,7 @@ pub fn get_total_htlc_count(channel: &ListpeerchannelsChannels) -> u64 {
 }
 
 pub fn edge_cost(edge: &ShortChannelIdDirState, amount: u64) -> u64 {
-    // debug!(
-    //     "edge cost for {} source:{} is {}",
-    //     edge.short_channel_id.to_string(),
-    //     edge.source,
-    //     (edge.base_fee_millisatoshi as f64
-    //         + edge.fee_per_millionth as f64 / 1_000_000.0 * amount as f64) as u64
-    // );
-    std::cmp::max(
-        fee_total_msat_precise(edge.fee_per_millionth, edge.base_fee_millisatoshi, amount).ceil()
-            as u64,
-        1,
-    )
+    feeppm_effective(edge.fee_per_millionth, edge.base_fee_millisatoshi, amount) + 10
 }
 
 pub fn feeppm_effective(feeppm: u32, basefee_msat: u32, amount_msat: u64) -> u64 {
