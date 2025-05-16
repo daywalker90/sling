@@ -234,14 +234,23 @@ pub fn fee_total_msat_precise(feeppm: u32, basefee_msat: u32, amount_msat: u64) 
     basefee_msat as f64 + (feeppm as f64 / 1_000_000.0 * amount_msat as f64)
 }
 
-pub fn feeppm_effective_from_amts(amount_msat_start: u64, amount_msat_end: u64) -> u32 {
-    if amount_msat_start < amount_msat_end {
-        panic!(
-            "CRITICAL ERROR: amount_msat_start should be greater than or equal to amount_msat_end"
-        )
+// pub fn amt_from_amt_sent_and_feeppm(amount_sent_msat: u64, feeppm: u32) -> u64 {
+//     (amount_sent_msat as f64 / (1.0 + (feeppm as f64 / 1_000_000.0))).ceil() as u64
+// }
+
+// pub fn amt_from_amt_sent(amount_sent_msat: u64, feeppm: u32, basefee_msat: u32) -> u64 {
+//     if (basefee_msat as u64) > amount_sent_msat {
+//         panic!("CRITICAL ERROR: basefee_msat should be less than or equal to amount_sent_msat")
+//     }
+//     ((amount_sent_msat as f64 - basefee_msat as f64) / (1.0 + (feeppm as f64 / 1_000_000.0)))
+//         .floor() as u64
+// }
+
+pub fn feeppm_effective_from_amts(amount_sent_msat: u64, amount_msat: u64) -> u32 {
+    if amount_sent_msat < amount_msat {
+        panic!("CRITICAL ERROR: amount_sent_msat should be greater than or equal to amount_msat")
     }
-    ((amount_msat_start - amount_msat_end) as f64 / amount_msat_end as f64 * 1_000_000.0).ceil()
-        as u32
+    ((amount_sent_msat - amount_msat) as f64 / amount_msat as f64 * 1_000_000.0).ceil() as u32
 }
 
 pub fn is_channel_normal(channel: &ListpeerchannelsChannels) -> Result<(), Error> {

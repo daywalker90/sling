@@ -145,7 +145,7 @@ pub async fn parse_job(args: serde_json::Value) -> Result<(ShortChannelId, Job),
             };
             if outppm.is_none() && candidatelist.is_none() {
                 return Err(anyhow!(
-                    "Atleast one of outppm and candidatelist need to be set."
+                    "Atleast one of outppm and candidatelist must be set."
                 ));
             }
 
@@ -166,12 +166,13 @@ pub async fn parse_once_job(args: serde_json::Value) -> Result<(ShortChannelId, 
         "amount",
         "maxppm",
         "outppm",
-        "total_amount",
+        "target",
         "maxhops",
         "candidates",
         "depleteuptopercent",
         "depleteuptoamount",
         "paralleljobs",
+        "total_amount",
     ];
 
     match args {
@@ -180,6 +181,10 @@ pub async fn parse_once_job(args: serde_json::Value) -> Result<(ShortChannelId, 
                 if !valid_keys.contains(&k.as_str()) {
                     return Err(anyhow!("Invalid argument: {}", k));
                 }
+            }
+
+            if ar.get("target").is_some() {
+                return Err(anyhow!("`target` can not be used with `sling-once`"));
             }
 
             let chan_id = match ar.get("scid") {
@@ -319,7 +324,7 @@ pub async fn parse_once_job(args: serde_json::Value) -> Result<(ShortChannelId, 
             };
             if outppm.is_none() && candidatelist.is_none() {
                 return Err(anyhow!(
-                    "Atleast one of outppm and candidatelist need to be set."
+                    "Atleast one of outppm and candidatelist must be set."
                 ));
             }
             if let Some(c) = candidatelist {
