@@ -12,6 +12,9 @@
 - if possible show node alias in failure log message instead of id
 - ``sling-reset-liquidity-interval`` default value increased to 360m again, if liquidity beliefs are forgotten too quickly it may result in an infinite loop of trying the very cheapest, never succeeding paths
 
+### Fixed
+- you can no longer add your own channels or your own node id to exceptions, for candidate control use candidatelist/outppm
+
 ## [3.0.6] - 2025-05-03
 
 ### Fixed

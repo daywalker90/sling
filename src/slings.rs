@@ -78,12 +78,14 @@ pub async fn sling(
             .lock()
             .set_state(&task_ident, JobMessage::Rebalancing);
 
+        let mut excepts = build_excepts(&tempbans, &config, job);
+
         let actual_candidates = build_candidatelist(
             plugin.clone(),
             &peer_channels,
             task.get_identifier(),
             job,
-            &tempbans,
+            &excepts,
             &config,
         )?;
 
@@ -111,6 +113,30 @@ pub async fn sling(
                     .join(", ")
             );
         }
+        if !config.exclude_chans_pull.is_empty() {
+            log::trace!(
+                "{}: exclude_pull_chans: {}",
+                task,
+                config
+                    .exclude_chans_pull
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            )
+        }
+        if !config.exclude_chans_push.is_empty() {
+            log::trace!(
+                "{}: exclude_push_chans: {}",
+                task,
+                config
+                    .exclude_chans_push
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            )
+        }
         if actual_candidates.is_empty() {
             log::info!(
                 "{}: No candidates found. Adjust out_ppm or wait for liquidity. Sleeping...",
@@ -129,8 +155,6 @@ pub async fn sling(
             my_sleep(plugin.clone(), 600, &task_ident).await;
             continue 'outer;
         }
-
-        let mut excepts = build_excepts(&tempbans, &config, job);
 
         let route = {
             let nr = next_route(
@@ -524,7 +548,7 @@ fn build_candidatelist(
     peer_channels: &HashMap<ShortChannelId, ListpeerchannelsChannels>,
     task_ident: &TaskIdentifier,
     job: &Job,
-    tempbans: &HashMap<ShortChannelId, u64>,
+    excepts: &[ShortChannelIdDir],
     config: &Config,
 ) -> Result<Vec<ShortChannelId>, Error> {
     let blockheight = *plugin.state().blockheight.lock();
@@ -545,6 +569,7 @@ fn build_candidatelist(
             );
             continue;
         };
+        let direction = channel.direction.unwrap();
 
         if scid == task_ident.get_chan_id() {
             continue;
@@ -561,6 +586,37 @@ fn build_candidatelist(
                 continue;
             }
         };
+
+        match job.sat_direction {
+            SatDirection::Pull => {
+                let scid_dir = ShortChannelIdDir {
+                    short_channel_id: scid,
+                    direction,
+                };
+                if excepts.contains(&scid_dir) {
+                    log::trace!(
+                        "{}: build_candidatelist: {} is in excepts",
+                        task_ident,
+                        scid_dir,
+                    );
+                    continue;
+                }
+            }
+            SatDirection::Push => {
+                let scid_dir = ShortChannelIdDir {
+                    short_channel_id: scid,
+                    direction: direction ^ 1,
+                };
+                if excepts.contains(&scid_dir) {
+                    log::trace!(
+                        "{}: build_candidatelist: {} is in excepts",
+                        task_ident,
+                        scid_dir,
+                    );
+                    continue;
+                }
+            }
+        }
 
         if let Err(e) = is_channel_normal(channel) {
             log::trace!(
@@ -687,15 +743,6 @@ fn build_candidatelist(
                 }
             }
         };
-
-        if tempbans.contains_key(&scid) {
-            log::trace!(
-                "{}: build_candidatelist: {} is temporarily banned",
-                task_ident,
-                scid
-            );
-            continue;
-        }
 
         if get_total_htlc_count(channel) > config.max_htlc_count {
             log::trace!(

@@ -30,7 +30,9 @@ pub async fn slingjob(
     let _rpc_lock = plugin.state().rpc_lock.lock().await;
     let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
 
-    let (chan_id, job) = parse_job(args).await?;
+    let config = plugin.state().config.lock().clone();
+
+    let (chan_id, job) = parse_job(args, &config).await?;
 
     let _res = refresh_listpeerchannels(plugin.clone()).await;
     let peer_channels = plugin.state().peer_channels.lock().clone();
@@ -279,7 +281,8 @@ pub async fn slingonce(
 ) -> Result<serde_json::Value, Error> {
     let _rpc_lock = plugin.state().rpc_lock.lock().await;
 
-    let (chan_id, job) = parse_once_job(args).await?;
+    let config_clone = plugin.state().config.lock().clone();
+    let (chan_id, job) = parse_once_job(args, &config_clone).await?;
 
     let _res = refresh_listpeerchannels(plugin.clone()).await;
     let peer_channels = plugin.state().peer_channels.lock().clone();
@@ -575,6 +578,7 @@ pub async fn slingexceptchan(
         }
     };
     let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
+    let peer_channels = plugin.state().peer_channels.lock().clone();
     let mut static_excepts = read_except_chans(&sling_dir).await?;
     if input_array.len() == 2 {
         let scid = match input_array.get(1).unwrap() {
@@ -600,6 +604,12 @@ pub async fn slingexceptchan(
                     if jobs.contains_key(&scid) {
                         return Err(anyhow!(
                             "this channel has a job already and can't be an except too"
+                        ));
+                    }
+                    if peer_channels.contains_key(&scid) {
+                        return Err(anyhow!(
+                            "You can't except your own channels. Use the candidate list of a \
+                            job to restrict those."
                         ));
                     }
                     config.exclude_chans_pull.insert(scid);
@@ -685,6 +695,9 @@ pub async fn slingexceptpeer(
                 opt if opt.eq("add") => {
                     if config.exclude_peers.contains(&pubkey_bytes) {
                         return Err(anyhow!("{} is already in excepts", pubkey));
+                    }
+                    if config.pubkey_bytes == pubkey_bytes {
+                        return Err(anyhow!("Can't exclude yourself"));
                     }
                     for scid in jobs.keys() {
                         if let Some(peer_chan) = peer_channels.get(scid) {
