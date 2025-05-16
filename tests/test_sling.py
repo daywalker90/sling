@@ -720,6 +720,7 @@ def test_private_candidates(node_factory, bitcoind, get_plugin):  # noqa: F811
     )
 
     l1.fundwallet(10_000_000)
+    l2.fundwallet(10_000_000)
     l3.fundwallet(10_000_000)
 
     l1.rpc.fundchannel(
@@ -768,50 +769,84 @@ def test_private_candidates(node_factory, bitcoind, get_plugin):  # noqa: F811
         2_000_000,
         push_msat=1_000_000_000,
     )
+    l2.rpc.fundchannel(
+        l3.info["id"] + "@localhost:" + str(l2.port),
+        2_000_000,
+        push_msat=1_000_000_000,
+    )
     bitcoind.generate_block(6)
     sync_blockheight(bitcoind, [l1, l2, l3])
 
     l1.daemon.wait_for_log(r"10 private channels")
-    l1.daemon.wait_for_log(r"2 public channels")
+    l1.daemon.wait_for_log(r"4 public channels")
 
-    l2_chans = []
-    l2_chan_aliases = []
+    l1_l2_chans = []
+    l1_l2_chan_aliases = []
 
     wait_for(lambda: len(l1.rpc.listpeerchannels()["channels"]) == 5)
     for chan in l1.rpc.listpeerchannels()["channels"]:
         if chan["peer_id"] == l2.info["id"]:
-            l2_chans.append(chan["short_channel_id"])
-            l2_chan_aliases.append(chan["alias"]["local"])
+            l1_l2_chans.append(chan["short_channel_id"])
+            l1_l2_chan_aliases.append(chan["alias"]["local"])
         else:
-            scid_l3 = chan["short_channel_id"]
+            scid_l1_l3 = chan["short_channel_id"]
 
-    assert len(l2_chans) == 4
-    assert len(l2_chan_aliases) == 4
+    wait_for(lambda: len(l2.rpc.listpeerchannels(l3.info["id"])["channels"]) == 2)
+    l2_l3_scid = l2.rpc.listpeerchannels(l3.info["id"])["channels"][0][
+        "short_channel_id"
+    ]
+
+    assert len(l1_l2_chans) == 4
+    assert len(l1_l2_chan_aliases) == 4
+
+    l1.rpc.call("sling-except-chan", ["add", l2_l3_scid])
+
+    with pytest.raises(RpcError, match="You can't except your own channels"):
+        l1.rpc.call("sling-except-chan", ["add", l1_l2_chans[3]])
 
     l1.rpc.call(
         "sling-job",
         {
-            "scid": scid_l3,
+            "scid": scid_l1_l3,
             "direction": "pull",
             "amount": 100_000,
             "maxppm": 1000,
             "outppm": 1000,
             "target": 0.4,
-            "candidates": [l2_chans[0]],
+            "candidates": [l1_l2_chans[0]],
         },
     )
+    with pytest.raises(RpcError, match=f"candidate {scid_l1_l3} has a pull-job"):
+        l1.rpc.call(
+            "sling-job",
+            {
+                "scid": l1_l2_chans[1],
+                "direction": "pull",
+                "amount": 100_000,
+                "maxppm": 1000,
+                "outppm": 1000,
+                "target": 0.4,
+                "candidates": [scid_l1_l3],
+            },
+        )
 
     l1.rpc.call("sling-go", [])
     l1.daemon.wait_for_log(r"Rebalance SUCCESSFULL after")
     l1.daemon.wait_for_log(r"already balanced. Taking a break")
+    assert l1.daemon.is_in_log(
+        f"exclude_pull_chans: {scid_l1_l3}, {l2_l3_scid}"
+    ) or l1.daemon.is_in_log(f"exclude_pull_chans: {l2_l3_scid}, {scid_l1_l3}")
+    assert l1.daemon.is_in_log(f"exclude_push_chans: {l2_l3_scid}")
 
     wait_for(
-        lambda: len(l1.rpc.call("sling-stats", [scid_l3])["successes_in_time_window"])
+        lambda: len(
+            l1.rpc.call("sling-stats", [scid_l1_l3])["successes_in_time_window"]
+        )
         is not None
     )
-    stats = l1.rpc.call("sling-stats", [scid_l3])["successes_in_time_window"]
+    stats = l1.rpc.call("sling-stats", [scid_l1_l3])["successes_in_time_window"]
     for chan_partner in stats["top_5_channel_partners"]:
-        assert chan_partner["scid"] == l2_chan_aliases[0]
+        assert chan_partner["scid"] == l1_l2_chan_aliases[0]
 
 
 def test_once(node_factory, bitcoind, get_plugin):  # noqa: F811
