@@ -5,7 +5,12 @@ use cln_plugin::Error;
 use cln_rpc::primitives::ShortChannelId;
 use sling::{Job, SatDirection};
 
-pub async fn parse_job(args: serde_json::Value) -> Result<(ShortChannelId, Job), Error> {
+use crate::model::Config;
+
+pub async fn parse_job(
+    args: serde_json::Value,
+    config: &Config,
+) -> Result<(ShortChannelId, Job), Error> {
     let valid_keys = [
         "scid",
         "direction",
@@ -149,7 +154,57 @@ pub async fn parse_job(args: serde_json::Value) -> Result<(ShortChannelId, Job),
                 ));
             }
 
+            log::trace!(
+                "{:?}",
+                candidatelist.clone().map(|s| s
+                    .iter()
+                    .map(|sc| sc.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", "))
+            );
+            log::trace!(
+                "{}",
+                config
+                    .exclude_chans_pull
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            );
+            log::trace!(
+                "{}",
+                config
+                    .exclude_chans_push
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            );
+
             if let Some(c) = candidatelist {
+                for candidate in c.iter() {
+                    match job.sat_direction {
+                        SatDirection::Pull => {
+                            if config.exclude_chans_pull.contains(candidate) {
+                                return Err(anyhow!(
+                                    "candidate {} has a pull-job that rebalances \
+                                in the other direction!",
+                                    candidate
+                                ));
+                            }
+                        }
+                        SatDirection::Push => {
+                            if config.exclude_chans_push.contains(candidate) {
+                                return Err(anyhow!(
+                                    "candidate {} has a push-job that rebalances \
+                                in the other direction!",
+                                    candidate
+                                ));
+                            }
+                        }
+                    }
+                }
+
                 job.add_candidates(c);
             }
 
@@ -159,7 +214,10 @@ pub async fn parse_job(args: serde_json::Value) -> Result<(ShortChannelId, Job),
     }
 }
 
-pub async fn parse_once_job(args: serde_json::Value) -> Result<(ShortChannelId, Job), Error> {
+pub async fn parse_once_job(
+    args: serde_json::Value,
+    config: &Config,
+) -> Result<(ShortChannelId, Job), Error> {
     let valid_keys = [
         "scid",
         "direction",
@@ -327,7 +385,57 @@ pub async fn parse_once_job(args: serde_json::Value) -> Result<(ShortChannelId, 
                     "Atleast one of outppm and candidatelist must be set."
                 ));
             }
+
+            log::trace!(
+                "{:?}",
+                candidatelist.clone().map(|s| s
+                    .iter()
+                    .map(|sc| sc.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", "))
+            );
+            log::trace!(
+                "{}",
+                config
+                    .exclude_chans_pull
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            );
+            log::trace!(
+                "{}",
+                config
+                    .exclude_chans_push
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            );
+
             if let Some(c) = candidatelist {
+                for candidate in c.iter() {
+                    match job.sat_direction {
+                        SatDirection::Pull => {
+                            if config.exclude_chans_pull.contains(candidate) {
+                                return Err(anyhow!(
+                                    "candidate {} has a pull-job that rebalances \
+                                in the other direction!",
+                                    candidate
+                                ));
+                            }
+                        }
+                        SatDirection::Push => {
+                            if config.exclude_chans_push.contains(candidate) {
+                                return Err(anyhow!(
+                                    "candidate {} has a push-job that rebalances \
+                                in the other direction!",
+                                    candidate
+                                ));
+                            }
+                        }
+                    }
+                }
                 job.add_candidates(c);
             }
 

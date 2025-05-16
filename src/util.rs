@@ -60,17 +60,13 @@ pub async fn read_jobs(
             jobs = BTreeMap::new();
         }
     };
-    let peer_channels = plugin.state().peer_channels.lock();
+    let peer_channels = plugin.state().peer_channels.lock().clone();
     let channels = get_all_normal_channels_from_listpeerchannels(&peer_channels);
 
     jobs.retain(|c, _j| channels.contains_key(c));
-    let mut config = plugin.state().config.lock();
-    for (scid, job) in jobs.iter() {
-        match job.sat_direction {
-            SatDirection::Pull => config.exclude_chans_pull.insert(*scid),
-            SatDirection::Push => config.exclude_chans_push.insert(*scid),
-        };
-    }
+
+    refresh_job_excepts(plugin, sling_dir, &jobs).await?;
+
     Ok(jobs)
 }
 
@@ -119,7 +115,33 @@ pub async fn write_job(
         serde_json::to_string_pretty(&jobs)?,
     )
     .await?;
+
+    refresh_job_excepts(plugin, &sling_dir, &jobs).await?;
+
     Ok(jobs)
+}
+
+async fn refresh_job_excepts(
+    plugin: Plugin<PluginState>,
+    sling_dir: &PathBuf,
+    jobs: &BTreeMap<ShortChannelId, Job>,
+) -> Result<(), Error> {
+    let static_excepts = read_except_chans(sling_dir).await?;
+    let mut config = plugin.state().config.lock();
+    config.exclude_chans_pull.clear();
+    config.exclude_chans_push.clear();
+    for (scid, job) in jobs.iter() {
+        match job.sat_direction {
+            SatDirection::Pull => config.exclude_chans_pull.insert(*scid),
+            SatDirection::Push => config.exclude_chans_push.insert(*scid),
+        };
+    }
+    for except in static_excepts {
+        config.exclude_chans_pull.insert(except);
+        config.exclude_chans_push.insert(except);
+    }
+
+    Ok(())
 }
 
 pub async fn write_excepts<T: ToString>(
