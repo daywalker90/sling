@@ -11,6 +11,7 @@
 - make use of the new trace level logging
 - if possible show node alias in failure log message instead of id
 - ``sling-reset-liquidity-interval`` default value increased to 360m again, if liquidity beliefs are forgotten too quickly it may result in an infinite loop of trying the very cheapest, never succeeding paths
+- slightly increased the minimum channel cost in pathfinding
 
 ### Fixed
 - you can no longer add your own channels or your own node id to exceptions, for candidate control use candidatelist/outppm
