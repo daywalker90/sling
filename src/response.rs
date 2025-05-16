@@ -1,7 +1,4 @@
-use std::{
-    str::FromStr,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
 use cln_plugin::{Error, Plugin};
@@ -239,20 +236,21 @@ pub async fn waitsendpay_response(
                         );
                     }
                 } else {
-                    log::debug!(
-                        "{}: Adjusting liquidity for {}/{}.",
-                        task_ident,
-                        ws_error.erring_channel,
-                        ws_error.erring_direction
-                    );
                     let dir_chan = ShortChannelIdDir {
                         short_channel_id: ws_error.erring_channel,
                         direction: ws_error.erring_direction as u32,
                     };
+                    log::debug!(
+                        "{}: Adjusting liquidity for {} to constrain it to {}msat",
+                        task_ident,
+                        dir_chan,
+                        ws_error.amount_msat.unwrap().msat() / 2
+                    );
+
                     {
                         let mut liquidity = plugin.state().liquidity.lock();
                         if let Some(liq) = liquidity.get_mut(&dir_chan) {
-                            liq.liquidity_msat = ws_error.amount_msat.unwrap().msat() - 1;
+                            liq.liquidity_msat = ws_error.amount_msat.unwrap().msat() / 2;
                             liq.liquidity_age = SystemTime::now()
                                 .duration_since(UNIX_EPOCH)
                                 .unwrap()
@@ -261,7 +259,7 @@ pub async fn waitsendpay_response(
                             liquidity.insert(
                                 dir_chan,
                                 Liquidity {
-                                    liquidity_msat: ws_error.amount_msat.unwrap().msat() - 1,
+                                    liquidity_msat: ws_error.amount_msat.unwrap().msat() / 2,
                                     liquidity_age: SystemTime::now()
                                         .duration_since(UNIX_EPOCH)
                                         .unwrap()
@@ -272,13 +270,19 @@ pub async fn waitsendpay_response(
                     }
                     if config.at_or_above_24_11 {
                         for lay in &config.inform_layers {
+                            log::debug!(
+                                "{}: Informing layer `{}` about scid_dir:{} amt:{}msat constraint",
+                                task_ident,
+                                lay,
+                                dir_chan,
+                                ws_error.amount_msat.unwrap().msat() / 2
+                            );
                             rpc.call_typed(&AskreneinformchannelRequest {
-                                amount_msat: Some(ws_error.amount_msat.unwrap()),
+                                amount_msat: Some(Amount::from_msat(
+                                    ws_error.amount_msat.unwrap().msat() / 2,
+                                )),
                                 inform: Some(AskreneinformchannelInform::CONSTRAINED),
-                                short_channel_id_dir: Some(ShortChannelIdDir::from_str(&format!(
-                                    "{}/{}",
-                                    ws_error.erring_channel, ws_error.erring_direction
-                                ))?),
+                                short_channel_id_dir: Some(dir_chan),
                                 layer: lay.clone(),
                             })
                             .await?;
