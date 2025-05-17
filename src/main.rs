@@ -43,7 +43,6 @@ mod util;
 mod tests;
 
 const OPT_REFRESH_ALIASMAP_INTERVAL: &str = "sling-refresh-aliasmap-interval";
-const OPT_REFRESH_GOSSMAP_INTERVAL: &str = "sling-refresh-gossmap-interval";
 const OPT_RESET_LIQUIDITY_INTERVAL: &str = "sling-reset-liquidity-interval";
 const OPT_DEPLETEUPTOPERCENT: &str = "sling-depleteuptopercent";
 const OPT_DEPLETEUPTOAMOUNT: &str = "sling-depleteuptoamount";
@@ -72,13 +71,6 @@ async fn main() -> Result<(), anyhow::Error> {
             OPT_REFRESH_ALIASMAP_INTERVAL,
             3600,
             "Refresh interval for aliasmap task. Default is `3600`",
-        )
-        .dynamic();
-    let opt_refresh_gossmap_interval: DefaultIntegerConfigOption =
-        ConfigOption::new_i64_with_default(
-            OPT_REFRESH_GOSSMAP_INTERVAL,
-            10,
-            "Refresh interval for gossmap task. Default is `10`",
         )
         .dynamic();
     let opt_reset_liquidity_interval: DefaultIntegerConfigOption =
@@ -168,7 +160,6 @@ async fn main() -> Result<(), anyhow::Error> {
         .hook("htlc_accepted", htlc_handler)
         .subscribe("block_added", block_added)
         .option(opt_refresh_aliasmap_interval)
-        .option(opt_refresh_gossmap_interval)
         .option(opt_reset_liquidity_interval)
         .option(opt_depleteuptopercent)
         .option(opt_depleteuptoamount)

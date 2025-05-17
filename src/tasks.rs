@@ -90,13 +90,8 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
     let mut reader = BufReader::new(gossip_file);
 
     loop {
-        let interval;
         {
             let now = Instant::now();
-            {
-                let config = plugin.state().config.lock();
-                interval = config.refresh_gossmap_interval;
-            }
             {
                 log::debug!("Getting all channels in gossip_store...");
                 read_gossip_store(plugin.clone(), &mut reader, &mut is_startup).await?;
@@ -218,7 +213,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
             }
             log::debug!("Refreshed graph in {}ms!", now.elapsed().as_millis());
         }
-        time::sleep(Duration::from_secs(interval)).await;
+        time::sleep(Duration::from_secs(10)).await;
     }
 }
 
