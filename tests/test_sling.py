@@ -30,9 +30,7 @@ def test_options(node_factory, get_plugin):  # noqa: F811
     node = node_factory.get_node(
         options={
             "plugin": get_plugin,
-            "sling-refresh-peers-interval": 2,
             "sling-refresh-aliasmap-interval": 3,
-            "sling-refresh-gossmap-interval": 599,
             "sling-reset-liquidity-interval": 300,
             "sling-depleteuptopercent": 0.33,
             "sling-depleteuptoamount": 100000,
@@ -48,9 +46,7 @@ def test_options(node_factory, get_plugin):  # noqa: F811
         }
     )
     configs = node.rpc.call("listconfigs")["configs"]
-    assert configs["sling-refresh-peers-interval"]["value_int"] == 2
     assert configs["sling-refresh-aliasmap-interval"]["value_int"] == 3
-    assert configs["sling-refresh-gossmap-interval"]["value_int"] == 599
     assert configs["sling-reset-liquidity-interval"]["value_int"] == 300
     assert configs["sling-depleteuptopercent"]["value_str"] == "0.33"
     assert configs["sling-depleteuptoamount"]["value_int"] == 100000
@@ -72,7 +68,7 @@ def test_setconfig_options(node_factory, get_plugin):  # noqa: F811
         }
     )
 
-    node.rpc.setconfig("sling-refresh-gossmap-interval", 1)
+    node.rpc.setconfig("sling-refresh-aliasmap-interval", 1)
 
     with pytest.raises(RpcError, match="needs to be greater than 0 and <1"):
         node.rpc.setconfig("sling-depleteuptopercent", 2)
@@ -94,31 +90,11 @@ def test_option_errors(node_factory, get_plugin):  # noqa: F811
     node = node_factory.get_node(
         options={
             "plugin": get_plugin,
-            "sling-refresh-peers-interval": 0,
-        }
-    )
-    assert node.daemon.is_in_log(
-        (r"sling-refresh-peers-interval must be " r"greater than or equal to 1")
-    )
-
-    node = node_factory.get_node(
-        options={
-            "plugin": get_plugin,
             "sling-refresh-aliasmap-interval": 0,
         }
     )
     assert node.daemon.is_in_log(
         (r"sling-refresh-aliasmap-interval must be " r"greater than or equal to 1")
-    )
-
-    node = node_factory.get_node(
-        options={
-            "plugin": get_plugin,
-            "sling-refresh-gossmap-interval": 0,
-        }
-    )
-    assert node.daemon.is_in_log(
-        (r"sling-refresh-gossmap-interval must be " r"greater than or equal to 1")
     )
 
     node = node_factory.get_node(
@@ -253,7 +229,6 @@ def test_method_args(node_factory, get_plugin):  # noqa: F811
         opts=[
             {
                 "plugin": get_plugin,
-                "sling-refresh-gossmap-interval": 1,
             },
             {},
             {},
@@ -368,7 +343,6 @@ def test_maxhops_2(node_factory, bitcoind, get_plugin):  # noqa: F811
             {
                 "plugin": get_plugin,
                 "sling-maxhops": 2,
-                "sling-refresh-gossmap-interval": 1,
             },
             {},
         ],
@@ -431,7 +405,6 @@ def test_pull_and_push(node_factory, bitcoind, get_plugin):  # noqa: F811
         opts=[
             {
                 "plugin": get_plugin,
-                "sling-refresh-gossmap-interval": 1,
             },
             {"fee-per-satoshi": 20, "fee-base": 2, "cltv-delta": 100},
             {"fee-per-satoshi": 30, "fee-base": 3, "cltv-delta": 150},
@@ -616,7 +589,6 @@ def test_stats(node_factory, bitcoind, get_plugin):  # noqa: F811
             {
                 "plugin": get_plugin,
                 "sling-maxhops": 2,
-                "sling-refresh-gossmap-interval": 1,
                 "sling-stats-delete-successes-age": 0,
                 "sling-stats-delete-failures-age": 0,
             },
@@ -680,7 +652,6 @@ def test_private_channel_receive(node_factory, bitcoind, get_plugin):  # noqa: F
         opts=[
             {
                 "plugin": get_plugin,
-                "sling-refresh-gossmap-interval": 1,
             },
             {},
         ],
@@ -737,7 +708,6 @@ def test_private_channel_node(node_factory, bitcoind, get_plugin):  # noqa: F811
         opts=[
             {
                 "plugin": get_plugin,
-                "sling-refresh-gossmap-interval": 1,
             },
             {},
             {},
@@ -827,7 +797,6 @@ def test_private_candidates(node_factory, bitcoind, get_plugin):  # noqa: F811
         opts=[
             {
                 "plugin": get_plugin,
-                "sling-refresh-gossmap-interval": 1,
             },
             {},
             {},
@@ -970,7 +939,6 @@ def test_once(node_factory, bitcoind, get_plugin):  # noqa: F811
         opts=[
             {
                 "plugin": get_plugin,
-                "sling-refresh-gossmap-interval": 1,
                 "sling-depleteuptopercent": 0.0,
             },
             {},
@@ -1181,7 +1149,6 @@ def test_gossip(node_factory, bitcoind, get_plugin):  # noqa: F811
         opts=[
             {
                 "plugin": get_plugin,
-                "sling-refresh-gossmap-interval": 1,
                 "may_reconnect": True,
             },
             {
@@ -1321,7 +1288,6 @@ def test_splice(node_factory, bitcoind, get_plugin):  # noqa: F811
             {
                 "experimental-splicing": None,
                 "plugin": get_plugin,
-                "sling-refresh-gossmap-interval": 1,
                 "log-level": "info",
                 "log-level": "debug:plugin-sling",  # noqa: F601
             },
