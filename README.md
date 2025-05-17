@@ -211,7 +211,6 @@ You can mix two methods and if you set the same option with different methods, i
 
 # Options
 * ``sling-refresh-aliasmap-interval``: How often to refresh node aliases cache in seconds. Default is every ``3600``s
-* ``sling-refresh-gossmap-interval``: How often to read ``gossip_store`` updates in seconds. Default is every ``10``s
 * ``sling-reset-liquidity-interval``: After how many minutes to reset liquidity knowledge. Default is ``360``m
 * ``sling-depleteuptopercent``: Up to what percent to pull/push sats from/to candidate channels as floating point between 0 and <1. Also see [Depleteformula](#depleteformula). Default is ``0.2``
 * ``sling-depleteuptoamount``: Up to what amount to pull/push sats from/to candidate channels. Also see [Depleteformula](#depleteformula). Default is ``2000000``sats
