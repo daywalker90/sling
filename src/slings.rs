@@ -278,7 +278,7 @@ pub async fn sling(
                 if job.onceamount_msat.is_some() {
                     break 'outer;
                 }
-                time::sleep(Duration::from_secs(config.refresh_peers_interval)).await;
+                time::sleep(Duration::from_secs(1)).await;
             }
             Err(e) => {
                 let mut tasks = plugin.state().tasks.lock();

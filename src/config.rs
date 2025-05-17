@@ -10,9 +10,9 @@ use serde_json::json;
 use crate::{
     at_or_above_version, model::PluginState, Config, OPT_CANDIDATES_MIN_AGE, OPT_DEPLETEUPTOAMOUNT,
     OPT_DEPLETEUPTOPERCENT, OPT_INFORM_LAYERS, OPT_MAXHOPS, OPT_MAX_HTLC_COUNT, OPT_PARALLELJOBS,
-    OPT_REFRESH_ALIASMAP_INTERVAL, OPT_REFRESH_GOSSMAP_INTERVAL, OPT_REFRESH_PEERS_INTERVAL,
-    OPT_RESET_LIQUIDITY_INTERVAL, OPT_STATS_DELETE_FAILURES_AGE, OPT_STATS_DELETE_FAILURES_SIZE,
-    OPT_STATS_DELETE_SUCCESSES_AGE, OPT_STATS_DELETE_SUCCESSES_SIZE, OPT_TIMEOUTPAY,
+    OPT_REFRESH_ALIASMAP_INTERVAL, OPT_REFRESH_GOSSMAP_INTERVAL, OPT_RESET_LIQUIDITY_INTERVAL,
+    OPT_STATS_DELETE_FAILURES_AGE, OPT_STATS_DELETE_FAILURES_SIZE, OPT_STATS_DELETE_SUCCESSES_AGE,
+    OPT_STATS_DELETE_SUCCESSES_SIZE, OPT_TIMEOUTPAY,
 };
 
 pub async fn setconfig_callback(
@@ -165,9 +165,6 @@ pub async fn get_startup_options(
     config.cltv_delta = cltv_delta;
     config.at_or_above_24_11 = at_or_above_version(&config.version, "24.11")?;
 
-    if let Some(rpi) = plugin.option_str(OPT_REFRESH_PEERS_INTERVAL)? {
-        check_option(&mut config, OPT_REFRESH_PEERS_INTERVAL, &rpi)?;
-    };
     if let Some(rai) = plugin.option_str(OPT_REFRESH_ALIASMAP_INTERVAL)? {
         check_option(&mut config, OPT_REFRESH_ALIASMAP_INTERVAL, &rai)?;
     };
@@ -219,10 +216,6 @@ pub async fn get_startup_options(
 
 fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Result<(), Error> {
     match name {
-        n if n.eq(OPT_REFRESH_PEERS_INTERVAL) => {
-            config.refresh_peers_interval =
-                options_value_to_u64(OPT_REFRESH_PEERS_INTERVAL, value.as_i64().unwrap(), 1, None)?
-        }
         n if n.eq(OPT_REFRESH_ALIASMAP_INTERVAL) => {
             config.refresh_aliasmap_interval = options_value_to_u64(
                 OPT_REFRESH_ALIASMAP_INTERVAL,

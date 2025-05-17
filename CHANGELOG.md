@@ -2,6 +2,10 @@
 
 ## [4.0.0] - Unreleased
 
+### Removed
+- :warning: make sure to comment out any removed options in your config
+- ``sling-refresh-peers-interval`` lowering it from the default 1 doesn't help much and if you must set it higher your node is probably too slow anyways
+
 ### Added
 - `sling-once`: new command to rebalance a specific amount once
 
