@@ -107,7 +107,7 @@ pub async fn parse_job(
             }
 
             if let Some(da) = ar.get("depleteuptoamount") {
-                job.add_depleteuptoamount(
+                job.add_depleteuptoamount_msat(
                     da.as_u64()
                         .ok_or(anyhow!("depleteuptoamount must be an integer"))?
                         * 1_000,
@@ -236,7 +236,7 @@ pub async fn parse_once_job(
         "depleteuptopercent",
         "depleteuptoamount",
         "paralleljobs",
-        "total_amount",
+        "onceamount",
     ];
 
     match args {
@@ -291,33 +291,33 @@ pub async fn parse_once_job(
 
             let mut job = Job::new(sat_direction, amount_msat, outppm, maxppm);
 
-            let total_amount_msat = match ar.get("total_amount") {
+            let onceamount_msat = match ar.get("onceamount") {
                 Some(amt) => {
                     amt.as_u64()
-                        .ok_or(anyhow!("total_amount must be a positive integer"))?
+                        .ok_or(anyhow!("onceamount must be a positive integer"))?
                         * 1_000
                 }
-                None => return Err(anyhow!("Missing total_amount")),
+                None => return Err(anyhow!("Missing onceamount")),
             };
-            if total_amount_msat == 0 {
-                return Err(anyhow!("total_amount_msat must be greater than 0"));
+            if onceamount_msat == 0 {
+                return Err(anyhow!("onceamount must be greater than 0"));
             }
-            if total_amount_msat % amount_msat != 0 {
+            if onceamount_msat % amount_msat != 0 {
                 return Err(anyhow!(
-                    "total_amount must be a multiple of amount. total_amount: {}, amount: {}",
-                    total_amount_msat / 1000,
+                    "onceamount must be a multiple of amount. onceamount: {}, amount: {}",
+                    onceamount_msat / 1000,
                     amount_msat / 1000
                 ));
             }
-            if total_amount_msat < amount_msat {
+            if onceamount_msat < amount_msat {
                 return Err(anyhow!(
-                    "total_amount must be greater than or equal to amount. \
-                    total_amount: {}, amount: {}",
-                    total_amount_msat / 1000,
+                    "onceamount must be greater than or equal to amount. \
+                    onceamount: {}, amount: {}",
+                    onceamount_msat / 1000,
                     amount_msat / 1000
                 ));
             }
-            job.add_once_amount_msat(total_amount_msat);
+            job.add_onceamount_msat(onceamount_msat);
 
             let maxhops = match ar.get("maxhops") {
                 Some(h) => Some(h.as_u64().ok_or(anyhow!("maxhops must be an integer"))? as u8),
@@ -345,7 +345,7 @@ pub async fn parse_once_job(
             }
 
             if let Some(da) = ar.get("depleteuptoamount") {
-                job.add_depleteuptoamount(
+                job.add_depleteuptoamount_msat(
                     da.as_u64()
                         .ok_or(anyhow!("depleteuptoamount must be an integer"))?
                         * 1_000,

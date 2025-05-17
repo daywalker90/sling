@@ -306,12 +306,12 @@ pub async fn slingonce(
                 .receivable_msat
                 .ok_or_else(|| anyhow!("Missing receivable_msat field for channel"))?
                 .msat()
-                < job.once_amount_msat.unwrap()
+                < job.onceamount_msat.unwrap()
             {
                 return Err(anyhow!(
                     "Channel {} has not enough capacity to pull {}msat",
                     chan_id,
-                    job.once_amount_msat.unwrap()
+                    job.onceamount_msat.unwrap()
                 ));
             }
         }
@@ -320,12 +320,12 @@ pub async fn slingonce(
                 .spendable_msat
                 .ok_or_else(|| anyhow!("Missing spendable_msat field for channel"))?
                 .msat()
-                < job.once_amount_msat.unwrap()
+                < job.onceamount_msat.unwrap()
             {
                 return Err(anyhow!(
                     "Channel {} has not enough capacity to push {}msat",
                     chan_id,
-                    job.once_amount_msat.unwrap()
+                    job.onceamount_msat.unwrap()
                 ));
             }
         }
@@ -424,7 +424,7 @@ pub async fn slingonce(
                             };
                             break;
                         }
-                        if *total_rebalanced + job.amount_msat > job.once_amount_msat.unwrap() {
+                        if *total_rebalanced + job.amount_msat > job.onceamount_msat.unwrap() {
                             log::debug!("{}/{}: Done rebalancing.", chan_id, i);
                             task.set_state(JobMessage::Balanced);
                             task.set_active(false);
