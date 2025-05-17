@@ -257,10 +257,9 @@ async fn main() -> Result<(), anyhow::Error> {
                 Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
             };
             let config = Config::new(
-                getinfo.id,
+                getinfo.clone(),
                 rpc_path,
                 sling_dir,
-                getinfo.version,
                 except_chans.clone(),
                 except_chans,
                 except_peers,

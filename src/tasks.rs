@@ -89,6 +89,16 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
 
     let mut reader = BufReader::new(gossip_file);
 
+    let interval;
+    {
+        let config = plugin.state().config.lock();
+        if config.network != "bitcoin" {
+            interval = 1;
+        } else {
+            interval = 10;
+        }
+    }
+
     loop {
         {
             let now = Instant::now();
@@ -213,7 +223,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
             }
             log::debug!("Refreshed graph in {}ms!", now.elapsed().as_millis());
         }
-        time::sleep(Duration::from_secs(10)).await;
+        time::sleep(Duration::from_secs(interval)).await;
     }
 }
 

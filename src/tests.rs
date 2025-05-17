@@ -1,4 +1,5 @@
-use cln_rpc::primitives::{PublicKey, ShortChannelId, ShortChannelIdDir};
+use cln_rpc::model::responses::GetinfoResponse;
+use cln_rpc::primitives::{Amount, PublicKey, ShortChannelId, ShortChannelIdDir};
 use sling::Job;
 
 use crate::dijkstra::dijkstra;
@@ -331,11 +332,30 @@ fn test_dijkstra_speed() {
         .as_secs()
         - 60 * 60 * 24 * 14) as u32;
 
+    let getinfo = GetinfoResponse {
+        lightning_dir: String::new(),
+        alias: None,
+        our_features: None,
+        warning_bitcoind_sync: None,
+        warning_lightningd_sync: None,
+        address: None,
+        binding: None,
+        blockheight: 1,
+        color: String::new(),
+        fees_collected_msat: Amount::from_msat(0),
+        id: rando_node,
+        network: "regtest".to_owned(),
+        num_active_channels: 1,
+        num_inactive_channels: 0,
+        num_peers: 1,
+        num_pending_channels: 0,
+        version: "v25.02".to_owned(),
+    };
+
     let mut config = Config::new(
-        rando_node,
+        getinfo,
         PathBuf::from("lightning-rpc"),
         PathBuf::from(PLUGIN_NAME),
-        "v25.02".to_owned(),
         HashSet::new(),
         HashSet::new(),
         HashSet::new(),

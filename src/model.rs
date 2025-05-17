@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::{anyhow, Error};
 use cln_rpc::{
-    model::responses::ListpeerchannelsChannels,
+    model::responses::{GetinfoResponse, ListpeerchannelsChannels},
     primitives::{Amount, PublicKey, ShortChannelId, ShortChannelIdDir},
 };
 use parking_lot::{Mutex, RwLock};
@@ -301,6 +301,7 @@ pub struct Config {
     pub rpc_path: PathBuf,
     pub sling_dir: PathBuf,
     pub version: String,
+    pub network: String,
     pub refresh_aliasmap_interval: u64,
     pub reset_liquidity_interval: u64,
     pub depleteuptopercent: f64,
@@ -323,20 +324,20 @@ pub struct Config {
 }
 impl Config {
     pub fn new(
-        pubkey: PublicKey,
+        getinfo: GetinfoResponse,
         rpc_path: PathBuf,
         sling_dir: PathBuf,
-        version: String,
         exclude_chans_pull: HashSet<ShortChannelId>,
         exclude_chans_push: HashSet<ShortChannelId>,
         exclude_peers: HashSet<PubKeyBytes>,
     ) -> Config {
         Config {
-            pubkey,
-            pubkey_bytes: PubKeyBytes::from_pubkey(&pubkey),
+            pubkey: getinfo.id,
+            pubkey_bytes: PubKeyBytes::from_pubkey(&getinfo.id),
             rpc_path,
             sling_dir,
-            version,
+            version: getinfo.version,
+            network: getinfo.network,
             refresh_aliasmap_interval: 3600,
             reset_liquidity_interval: 360,
             depleteuptopercent: 0.2,
