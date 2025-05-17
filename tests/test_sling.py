@@ -935,7 +935,7 @@ def test_once(node_factory, bitcoind, get_plugin):  # noqa: F811
                 "amount": 100_000,
                 "maxppm": 1000,
                 "outppm": 1000,
-                "total_amount": 300_000,
+                "onceamount": 300_000,
                 "paralleljobs": 3,
             },
         )
@@ -953,7 +953,7 @@ def test_once(node_factory, bitcoind, get_plugin):  # noqa: F811
             "amount": 25_000,
             "maxppm": 1000,
             "outppm": 1000,
-            "total_amount": 300_000,
+            "onceamount": 300_000,
             "paralleljobs": 1,
         },
     )
@@ -993,7 +993,7 @@ def test_once(node_factory, bitcoind, get_plugin):  # noqa: F811
             "amount": 25_000,
             "maxppm": 1000,
             "outppm": 1000,
-            "total_amount": 100_000,
+            "onceamount": 100_000,
             "paralleljobs": 4,
         },
     )
