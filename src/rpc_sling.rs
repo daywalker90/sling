@@ -81,7 +81,7 @@ pub async fn slinggo(
         serde_json::Value::Array(a) => match a.len().cmp(&(1_usize)) {
             Ordering::Greater => {
                 return Err(anyhow!(
-                    "Please provide exactly one short_channel_id or nothing"
+                    "Please provide exactly one ShortChannelId or nothing"
                 ))
             }
             Ordering::Equal => match a.first().unwrap() {
@@ -89,13 +89,22 @@ pub async fn slinggo(
                     let scid = ShortChannelId::from_str(start_id)?;
                     jobs.retain(|chanid, _j| chanid == &scid)
                 }
-                _ => return Err(anyhow!("invalid short_channel_id")),
+                _ => return Err(anyhow!("invalid ShortChannelId")),
             },
             Ordering::Less => (),
         },
+        serde_json::Value::Object(o) => {
+            if let Some(serde_json::Value::String(start_id)) = o.get("scid") {
+                let scid = ShortChannelId::from_str(start_id.as_str())?;
+                jobs.retain(|chanid, _j| chanid == &scid)
+            } else if o.is_empty() {
+            } else {
+                return Err(anyhow!("invalid scid"));
+            }
+        }
         e => {
             return Err(anyhow!(
-                "sling-go: invalid arguments, expected array, got: {}",
+                "sling-go: invalid arguments, expected array or object with `scid`, got: {}",
                 e
             ))
         }
@@ -200,83 +209,96 @@ pub async fn slingstop(
 
 async fn stop_job(plugin: Plugin<PluginState>, args: serde_json::Value) -> Result<usize, Error> {
     let mut stopped_count: usize = 0;
-    {
-        match args {
-            serde_json::Value::Array(a) => match a.len().cmp(&(1_usize)) {
-                Ordering::Greater => {
-                    return Err(anyhow!(
-                        "Please provide exactly one short_channel_id or nothing"
-                    ))
-                }
-                Ordering::Equal => match a.first().unwrap() {
-                    serde_json::Value::String(stop_id) => {
-                        let scid = ShortChannelId::from_str(stop_id)?;
-                        {
-                            let mut tasks = plugin.state().tasks.lock();
-                            let task_map = tasks.get_scid_tasks_mut(&scid);
-                            if let Some(tm) = task_map {
-                                stopped_count += tm.len();
-                                for task in tm.values_mut() {
-                                    task.set_state(JobMessage::Stopping);
-                                    task.stop();
-                                    log::debug!("{}: Stopping job...", task.get_identifier());
-                                }
-                            }
-                        }
-                        loop {
-                            {
-                                let tasks = plugin.state().tasks.lock();
-                                if !tasks.is_any_active(&scid) {
-                                    break;
-                                }
-                            }
-                            time::sleep(Duration::from_millis(200)).await;
-                        }
-                    }
-                    _ => return Err(anyhow!("invalid short_channel_id")),
-                },
-                Ordering::Less => {
-                    let mut stopped_ids = Vec::new();
-                    {
-                        let mut tasks = plugin.state().tasks.lock();
-                        let all_tasks_states = tasks.get_all_tasks_mut();
-                        for (chan_id, task_map) in all_tasks_states {
-                            stopped_count += task_map.len();
-                            stopped_ids.push(*chan_id);
-                            for task in task_map.values_mut() {
-                                task.set_state(JobMessage::Stopping);
-                                task.stop();
-                                log::debug!("{}: Stopping job...", task.get_identifier());
-                            }
-                        }
-                    }
-                    loop {
-                        {
-                            let tasks = plugin.state().tasks.lock();
-                            let mut all_stopped = true;
-                            for chan_id in stopped_ids.iter() {
-                                let active = tasks.is_any_active(chan_id);
-                                if active {
-                                    all_stopped = false;
-                                }
-                            }
-                            if all_stopped {
-                                break;
-                            }
-                        }
-                        time::sleep(Duration::from_millis(200)).await;
-                    }
-                }
-            },
-            e => {
+    let mut scid = None;
+
+    match args {
+        serde_json::Value::Array(a) => match a.len().cmp(&(1_usize)) {
+            Ordering::Greater => {
                 return Err(anyhow!(
-                    "sling-stop: invalid arguments, expected array, got: {}",
-                    e
+                    "Please provide exactly one ShortChannelId or nothing"
                 ))
             }
-        };
+            Ordering::Equal => match a.first().unwrap() {
+                serde_json::Value::String(stop_id) => {
+                    scid = Some(ShortChannelId::from_str(stop_id)?);
+                }
+                _ => return Err(anyhow!("invalid ShortChannelId")),
+            },
+            Ordering::Less => {}
+        },
+        serde_json::Value::Object(o) => match o.get("scid") {
+            Some(serde_json::Value::String(stop_id)) => {
+                scid = Some(ShortChannelId::from_str(stop_id)?);
+            }
+            None => {}
+            _ => return Err(anyhow!("invalid scid")),
+        },
+        e => {
+            return Err(anyhow!(
+                "sling-stop: invalid arguments, expected array or object with `scid`, got: {}",
+                e
+            ))
+        }
+    };
+    {
+        if let Some(s) = scid {
+            {
+                let mut tasks = plugin.state().tasks.lock();
+                let task_map = tasks.get_scid_tasks_mut(&s);
+                if let Some(tm) = task_map {
+                    stopped_count += tm.len();
+                    for task in tm.values_mut() {
+                        task.set_state(JobMessage::Stopping);
+                        task.stop();
+                        log::debug!("{}: Stopping job...", task.get_identifier());
+                    }
+                }
+            }
+            loop {
+                {
+                    let tasks = plugin.state().tasks.lock();
+                    if !tasks.is_any_active(&s) {
+                        break;
+                    }
+                }
+                log::trace!("Waiting for task to stop...");
+                time::sleep(Duration::from_millis(200)).await;
+            }
+        } else {
+            let mut stopped_ids = Vec::new();
+            {
+                let mut tasks = plugin.state().tasks.lock();
+                let all_tasks_states = tasks.get_all_tasks_mut();
+                for (chan_id, task_map) in all_tasks_states {
+                    stopped_count += task_map.len();
+                    stopped_ids.push(*chan_id);
+                    for task in task_map.values_mut() {
+                        task.set_state(JobMessage::Stopping);
+                        task.stop();
+                        log::debug!("{}: Stopping job...", task.get_identifier());
+                    }
+                }
+            }
+            loop {
+                {
+                    let tasks = plugin.state().tasks.lock();
+                    let mut all_stopped = true;
+                    for chan_id in stopped_ids.iter() {
+                        let active = tasks.is_any_active(chan_id);
+                        if active {
+                            all_stopped = false;
+                        }
+                    }
+                    if all_stopped {
+                        break;
+                    }
+                }
+                time::sleep(Duration::from_millis(200)).await;
+            }
+        }
     }
 
+    log::trace!("Stopped {} tasks", stopped_count);
     write_liquidity(plugin.clone()).await?;
     Ok(stopped_count)
 }
@@ -478,7 +500,7 @@ pub async fn slingjobsettings(
         serde_json::Value::Array(a) => {
             if a.len() > 1 {
                 return Err(anyhow!(
-                    "Please provide exactly one short_channel_id or nothing for all"
+                    "Please provide exactly one ShortChannelId or nothing for all"
                 ));
             }
             if a.is_empty() {
@@ -496,9 +518,28 @@ pub async fn slingjobsettings(
                 json_jobs.insert(scid, job.clone());
             }
         }
+        serde_json::Value::Object(o) => {
+            if o.len() > 1 {
+                return Err(anyhow!(
+                    "Please provide exactly one ShortChannelId or nothing for all"
+                ));
+            }
+            if o.is_empty() {
+                for (id, job) in jobs {
+                    json_jobs.insert(id, job);
+                }
+            } else if let Some(s) = o.get("scid") {
+                let scid_str = s.as_str().ok_or(anyhow!("invalid scid, not a string"))?;
+                let scid = ShortChannelId::from_str(scid_str)?;
+                let job = jobs.get(&scid).ok_or(anyhow!("channel not found"))?;
+                json_jobs.insert(scid, job.clone());
+            } else {
+                return Err(anyhow!("Expected object with scid field"));
+            }
+        }
         _ => {
             return Err(anyhow!(
-                "Invalid: Please provide exactly one short_channel_id or nothing for all"
+                "Invalid: Please provide exactly one ShortChannelId or nothing for all"
             ))
         }
     }
@@ -512,49 +553,63 @@ pub async fn slingdeletejob(
 ) -> Result<serde_json::Value, Error> {
     let _rpc_lock = plugin.state().rpc_lock.lock().await;
     let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
-    match args {
+    let input = match args {
         serde_json::Value::Array(a) => {
             if a.len() != 1 {
                 return Err(anyhow!(
-                    "Please provide exactly one short_channel_id or `all`"
+                    "Please provide exactly one ShortChannelId or `all`"
                 ));
             } else {
                 match a.first().unwrap() {
-                    serde_json::Value::String(i) => match i {
-                        inp if inp.eq("all") => {
-                            stop_job(plugin.clone(), serde_json::Value::Array(vec![])).await?;
-                            let jobfile = sling_dir.join(JOB_FILE_NAME);
-                            fs::remove_file(jobfile).await?;
-                            plugin.state().tasks.lock().remove_all_tasks();
-                            log::info!("Deleted all jobs");
-                            let except_chans = read_except_chans(&sling_dir).await?;
-                            let mut config = plugin.state().config.lock();
-                            config.exclude_chans_pull = except_chans.clone();
-                            config.exclude_chans_push = except_chans;
-                        }
-                        _ => {
-                            let scid = ShortChannelId::from_str(i)?;
-                            stop_job(
-                                plugin.clone(),
-                                serde_json::Value::Array(vec![serde_json::to_value(scid)?]),
-                            )
-                            .await?;
-                            write_job(plugin.clone(), sling_dir, scid, None, true).await?;
-                            plugin.state().tasks.lock().remove_task(&scid);
-                            let mut config = plugin.state().config.lock();
-                            config.exclude_chans_pull.remove(&scid);
-                            config.exclude_chans_push.remove(&scid);
-                        }
-                    },
+                    serde_json::Value::String(i) => i.clone(),
                     _ => return Err(anyhow!("invalid string for deleting job(s)")),
-                };
+                }
+            }
+        }
+        serde_json::Value::Object(o) => {
+            if o.len() != 1 {
+                return Err(anyhow!(
+                    "Please provide exactly one ShortChannelId or `all`"
+                ));
+            } else {
+                match o.get("job") {
+                    Some(serde_json::Value::String(i)) => i.clone(),
+                    _ => return Err(anyhow!("invalid string for deleting job(s)")),
+                }
             }
         }
         e => {
             return Err(anyhow!(
-                "sling-deletejob: invalid arguments, expected array, got {}",
+                "sling-deletejob: invalid arguments, expected array or object with `job`, got {}",
                 e
             ))
+        }
+    };
+
+    match input {
+        inp if inp.eq("all") => {
+            stop_job(plugin.clone(), serde_json::Value::Array(vec![])).await?;
+            let jobfile = sling_dir.join(JOB_FILE_NAME);
+            fs::remove_file(jobfile).await?;
+            plugin.state().tasks.lock().remove_all_tasks();
+            log::info!("Deleted all jobs");
+            let except_chans = read_except_chans(&sling_dir).await?;
+            let mut config = plugin.state().config.lock();
+            config.exclude_chans_pull = except_chans.clone();
+            config.exclude_chans_push = except_chans;
+        }
+        _ => {
+            let scid = ShortChannelId::from_str(&input)?;
+            stop_job(
+                plugin.clone(),
+                serde_json::Value::Array(vec![serde_json::to_value(scid)?]),
+            )
+            .await?;
+            write_job(plugin.clone(), sling_dir, scid, None, true).await?;
+            plugin.state().tasks.lock().remove_task(&scid);
+            let mut config = plugin.state().config.lock();
+            config.exclude_chans_pull.remove(&scid);
+            config.exclude_chans_push.remove(&scid);
         }
     };
 
@@ -567,82 +622,108 @@ pub async fn slingexceptchan(
 ) -> Result<serde_json::Value, Error> {
     let _rpc_lock = plugin.state().rpc_lock.lock().await;
 
-    let input_array = match args {
-        serde_json::Value::Array(a) => a,
+    let (command, scid) = match args {
+        serde_json::Value::Array(a) => {
+            if a.len() > 2 || a.is_empty() {
+                return Err(anyhow!(
+                    "Invalid amount of arguments. Please either provide `add`/`remove` \
+                    and a ShortChannelId or just `list`"
+                ));
+            }
+            let command = match a.first().unwrap() {
+                serde_json::Value::String(i) => i.clone(),
+                _ => {
+                    return Err(anyhow!(
+                        "Not a string: Use `add`/`remove` and a ShortChannelId or just `list`"
+                    ))
+                }
+            };
+            if command == "list" && a.len() == 1 {
+                (command, None)
+            } else if a.len() == 2 {
+                let scid = match a.get(1).unwrap() {
+                    serde_json::Value::String(s) => ShortChannelId::from_str(s)?,
+                    o => return Err(anyhow!("not a vaild string: {}", o)),
+                };
+                (command, Some(scid))
+            } else {
+                return Err(anyhow!(
+                    "Invalid amount of arguments. Please either provide `add`/`remove` \
+                    and a ShortChannelId or just `list`"
+                ));
+            }
+        }
+        serde_json::Value::Object(o) => {
+            let command = match o.get("command") {
+                Some(serde_json::Value::String(i)) => i.clone(),
+                _ => {
+                    return Err(anyhow!(
+                        "Not a string: Use `add`/`remove` and a ShortChannelId or just `list`"
+                    ))
+                }
+            };
+            match o.get("scid") {
+                Some(serde_json::Value::String(s)) => (command, Some(ShortChannelId::from_str(s)?)),
+                None => (command, None),
+                o => return Err(anyhow!("not a vaild string for `scid`: {:?}", o)),
+            }
+        }
         e => {
             return Err(anyhow!(
-                "sling-exceptchan: invalid arguments, expected array, got {}",
+                "sling-exceptchan: invalid arguments, expected array or object, got {}",
                 e
             ))
         }
     };
-    if input_array.len() > 2 || input_array.is_empty() {
-        return Err(anyhow!(
-            "Please either provide `add`/`remove` and a short_channel_id or just `list`"
-        ));
-    }
-    let command = match input_array.first().unwrap() {
-        serde_json::Value::String(i) => i,
-        _ => {
-            return Err(anyhow!(
-                "Use `add`/`remove` and a short_channel_id or just `list`"
-            ))
-        }
-    };
+
     let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
     let peer_channels = plugin.state().peer_channels.lock().clone();
     let mut static_excepts = read_except_chans(&sling_dir).await?;
-    if input_array.len() == 2 {
-        let scid = match input_array.get(1).unwrap() {
-            serde_json::Value::String(s) => ShortChannelId::from_str(s)?,
-            o => return Err(anyhow!("not a vaild short_channel_id: {}", o)),
-        };
+    if let Some(s) = scid {
         {
             let jobs = read_jobs(&sling_dir, plugin.clone()).await?;
             let mut config = plugin.state().config.lock();
 
             let mut contains = false;
-            if config.exclude_chans_pull.contains(&scid)
-                || config.exclude_chans_push.contains(&scid)
-            {
+            if config.exclude_chans_pull.contains(&s) || config.exclude_chans_push.contains(&s) {
                 contains = true;
             }
 
             match command {
                 opt if opt.eq("add") => {
                     if contains {
-                        return Err(anyhow!("{} is already in excepts", scid));
+                        return Err(anyhow!("{} is already in excepts", s));
                     }
-                    if jobs.contains_key(&scid) {
+                    if jobs.contains_key(&s) {
                         return Err(anyhow!(
                             "this channel has a job already and can't be an except too"
                         ));
                     }
-                    if peer_channels.contains_key(&scid) {
+                    if peer_channels.contains_key(&s) {
                         return Err(anyhow!(
                             "You can't except your own channels. Use the candidate list of a \
                             job to restrict those."
                         ));
                     }
-                    config.exclude_chans_pull.insert(scid);
-                    config.exclude_chans_push.insert(scid);
-                    static_excepts.insert(scid);
+                    config.exclude_chans_pull.insert(s);
+                    config.exclude_chans_push.insert(s);
+                    static_excepts.insert(s);
                 }
                 opt if opt.eq("remove") => {
                     if contains {
-                        config.exclude_chans_pull.remove(&scid);
-                        config.exclude_chans_push.remove(&scid);
-                        static_excepts.remove(&scid);
+                        config.exclude_chans_pull.remove(&s);
+                        config.exclude_chans_push.remove(&s);
+                        static_excepts.remove(&s);
                     } else {
                         return Err(anyhow!(
-                            "short_channel_id {} not in excepts, nothing to remove",
-                            scid
+                            "ShortChannelId {} not in excepts, nothing to remove",
+                            s
                         ));
                     }
                 }
                 _ => {
                     return Err(anyhow!(
-                        "Use `add`/`remove` and a short_channel_id or just `list`"
+                        "Use `add`/`remove` and a ShortChannelId or just `list`"
                     ))
                 }
             }
@@ -665,50 +746,75 @@ pub async fn slingexceptpeer(
 ) -> Result<serde_json::Value, Error> {
     let _rpc_lock = plugin.state().rpc_lock.lock().await;
 
-    let array = match args {
-        serde_json::Value::Array(a) => a,
+    let (command, pubkey_bytes) = match args {
+        serde_json::Value::Array(a) => {
+            if a.len() > 2 || a.is_empty() {
+                return Err(anyhow!(
+                    "Invalid amount of arguments. Either provide `add`/`remove` \
+                    and a peer `id` or just `list`"
+                ));
+            }
+            let com = match a.first().unwrap() {
+                serde_json::Value::String(c) => c.clone(),
+                _ => {
+                    return Err(anyhow!(
+                        "Not a string. Use `add`/`remove` and a peer `id` or `list`"
+                    ))
+                }
+            };
+            if com == "list" && a.len() == 1 {
+                (com, None)
+            } else if a.len() == 2 {
+                let pb = match a.get(1).unwrap() {
+                    serde_json::Value::String(s) => PubKeyBytes::from_str(s)?,
+                    o => return Err(anyhow!("node_id is not a string: {}", o)),
+                };
+                (com, Some(pb))
+            } else {
+                return Err(anyhow!(
+                    "Invalid amount of arguments. Please either provide `add`/`remove` \
+                    and a peer `id` or just `list`"
+                ));
+            }
+        }
+        serde_json::Value::Object(o) => {
+            let command = match o.get("command") {
+                Some(serde_json::Value::String(i)) => i.clone(),
+                _ => {
+                    return Err(anyhow!(
+                        "Not a string: Use `add`/`remove` and a peer `id` or just `list`"
+                    ))
+                }
+            };
+            match o.get("id") {
+                Some(serde_json::Value::String(s)) => (command, Some(PubKeyBytes::from_str(s)?)),
+                None => (command, None),
+                o => return Err(anyhow!("not a vaild string for peer `id`: {:?}", o)),
+            }
+        }
         e => {
             return Err(anyhow!(
-                "sling-exceptpeer: invalid arguments, expected array, got {}",
+                "sling-exceptpeer: invalid arguments, expected array or object, got {}",
                 e
             ))
         }
     };
-    if array.len() > 2 || array.is_empty() {
-        return Err(anyhow!(
-            "Either provide `add`/`remove` and a node_id or just `list`"
-        ));
-    }
-    let command = match array.first().unwrap() {
-        serde_json::Value::String(c) => c,
-        _ => {
-            return Err(anyhow!(
-                "Invalid command. Use `add`/`remove` <node_id> or `list`"
-            ))
-        }
-    };
+
     let _res = refresh_listpeerchannels(plugin.clone()).await;
     let peer_channels = plugin.state().peer_channels.lock().clone();
     let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
     let mut static_excepts = read_except_peers(&sling_dir).await?;
-    if array.len() == 2 {
-        let pubkey_bytes = match array.get(1).unwrap() {
-            serde_json::Value::String(s) => PubKeyBytes::from_str(s)?,
-            o => return Err(anyhow!("invaild node_id: {}", o)),
-        };
-        let pubkey = pubkey_bytes.to_pubkey();
+    if let Some(pb) = pubkey_bytes {
+        let pubkey = pb.to_pubkey();
         {
             let jobs = read_jobs(&sling_dir, plugin.clone()).await?;
             let mut config = plugin.state().config.lock();
-            if config.pubkey_bytes == pubkey_bytes {
-                return Err(anyhow!("Can't exclude yourself"));
-            };
             match command {
                 opt if opt.eq("add") => {
-                    if config.exclude_peers.contains(&pubkey_bytes) {
+                    if config.exclude_peers.contains(&pb) {
                         return Err(anyhow!("{} is already in excepts", pubkey));
                     }
-                    if config.pubkey_bytes == pubkey_bytes {
+                    if config.pubkey_bytes == pb {
                         return Err(anyhow!("Can't exclude yourself"));
                     }
                     for scid in jobs.keys() {
@@ -720,23 +826,23 @@ pub async fn slingexceptpeer(
                             }
                         };
                     }
-                    config.exclude_peers.insert(pubkey_bytes);
+                    config.exclude_peers.insert(pb);
                     static_excepts.insert(pubkey);
                 }
                 opt if opt.eq("remove") => {
                     if static_excepts.contains(&pubkey) {
                         static_excepts.remove(&pubkey);
-                        config.exclude_peers.remove(&pubkey_bytes);
+                        config.exclude_peers.remove(&pb);
                     } else {
                         return Err(anyhow!(
-                            "node_id {} not in excepts, nothing to remove",
+                            "peer `id` {} not in excepts, nothing to remove",
                             pubkey
                         ));
                     }
                 }
                 _ => {
                     return Err(anyhow!(
-                        "Unknown commmand. Use `add`/`remove` <node_id> or `list`"
+                        "Unknown commmand. Use `add`/`remove` and a peer `id` or `list`"
                     ))
                 }
             }
@@ -747,7 +853,7 @@ pub async fn slingexceptpeer(
         match command {
             opt if opt.eq("list") => Ok(json!(static_excepts)),
             _ => Err(anyhow!(
-                "unknown commmand, use `list` or forgot the node_id?"
+                "unknown commmand, use `list` or forgot the peer `id`?"
             )),
         }
     }
