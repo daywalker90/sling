@@ -307,6 +307,7 @@ pub async fn my_sleep(plugin: Plugin<PluginState>, seconds: u64, task_ident: &Ta
     log::debug!("{}: Starting sleeper for {}s", task_ident, seconds);
     let timer = Instant::now();
     while timer.elapsed() < Duration::from_secs(seconds) {
+        time::sleep(Duration::from_secs(1)).await;
         {
             if let Some(o) = plugin.state().tasks.lock().get_task(task_ident) {
                 if o.should_stop() {
@@ -316,7 +317,6 @@ pub async fn my_sleep(plugin: Plugin<PluginState>, seconds: u64, task_ident: &Ta
                 break;
             };
         }
-        time::sleep(Duration::from_secs(1)).await;
     }
 }
 
@@ -335,6 +335,9 @@ pub async fn wait_for_gossip(
                     .ok_or_else(|| anyhow!("Task not found"))?;
                 log::info!("{}: graph is still empty. Sleeping...", task);
                 task.set_state(JobMessage::GraphEmpty);
+                if task.should_stop() {
+                    break;
+                }
             } else {
                 break;
             }

@@ -66,15 +66,20 @@ fn parse_option(name: &str, value: &serde_json::Value) -> Result<options::Value,
                 Err(anyhow!("{} is not a valid string!", name))
             }
         }
-        // n if n.eq(OPT_UTF8) => {
-        //     if let Some(n_bool) = value.as_bool() {
-        //         return Ok(options::Value::Boolean(n_bool));
-        //     } else if let Some(n_str) = value.as_str() {
-        //         if let Ok(n_str_bool) = n_str.parse::<bool>() {
-        //             return Ok(options::Value::Boolean(n_str_bool));
+        // n if n.eq(OPT_INFORM_LAYERS) => {
+        //     if let Some(layers) = value.as_array() {
+        //         let mut string_array = Vec::new();
+        //         for layer in layers.iter() {
+        //             if layer.is_string() {
+        //                 string_array.push(layer.as_str().unwrap().to_owned());
+        //             } else {
+        //                 return Err(anyhow!("{} is not a valid string!", layer));
+        //             }
         //         }
+        //         Ok(options::Value::StringArray(string_array))
+        //     } else {
+        //         Err(anyhow!("{} is not a valid string array!", name))
         //     }
-        //     Err(anyhow!("{} is not a valid boolean!", name))
         // }
         _ => {
             if let Some(n_i64) = value.as_i64() {

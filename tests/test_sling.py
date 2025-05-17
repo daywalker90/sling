@@ -246,6 +246,121 @@ def test_option_errors(node_factory, get_plugin):  # noqa: F811
     )
 
 
+def test_method_args(node_factory, get_plugin):  # noqa: F811
+    l1, l2, l3 = node_factory.line_graph(
+        3,
+        wait_for_announce=True,
+        opts=[
+            {
+                "plugin": get_plugin,
+                "sling-refresh-gossmap-interval": 1,
+            },
+            {},
+            {},
+        ],
+    )
+    l1.daemon.wait_for_log(r"4 public channels")
+    scid = l1.rpc.listpeerchannels(l2.info["id"])["channels"][0]["short_channel_id"]
+    scid2 = l2.rpc.listpeerchannels(l3.info["id"])["channels"][0]["short_channel_id"]
+
+    l1.rpc.call(
+        "sling-job",
+        {
+            "scid": scid,
+            "direction": "pull",
+            "amount": 10_000,
+            "maxppm": 1000,
+            "outppm": 1000,
+        },
+    )
+
+    l1.rpc.call("sling-jobsettings", [])
+    l1.rpc.call("sling-jobsettings", [scid])
+    l1.rpc.call("sling-jobsettings", {})
+    l1.rpc.call("sling-jobsettings", {"scid": scid})
+
+    l1.rpc.call("sling-go", [])
+    l1.rpc.call("sling-stop", [])
+    l1.rpc.call("sling-go", {})
+    l1.rpc.call("sling-stop", {})
+
+    l1.rpc.call("sling-go", [scid])
+    l1.rpc.call("sling-stop", [scid])
+    l1.rpc.call("sling-go", {"scid": scid})
+    l1.rpc.call("sling-stop", {"scid": scid})
+
+    l1.rpc.call("sling-stats", [])
+    l1.rpc.call("sling-stats", [scid])
+    l1.rpc.call("sling-stats", [True])
+    l1.rpc.call("sling-stats", {})
+    l1.rpc.call("sling-stats", {"scid": scid})
+    l1.rpc.call("sling-stats", {"scid": scid, "json": True})
+    l1.rpc.call("sling-stats", {"json": True})
+
+    l1.rpc.call("sling-deletejob", ["all"])
+    l1.rpc.call(
+        "sling-job",
+        {
+            "scid": scid,
+            "direction": "pull",
+            "amount": 10_000,
+            "maxppm": 1000,
+            "outppm": 1000,
+        },
+    )
+    l1.rpc.call("sling-deletejob", [scid])
+    l1.rpc.call(
+        "sling-job",
+        {
+            "scid": scid,
+            "direction": "pull",
+            "amount": 10_000,
+            "maxppm": 1000,
+            "outppm": 1000,
+        },
+    )
+    l1.rpc.call("sling-deletejob", {"job": "all"})
+    l1.rpc.call(
+        "sling-job",
+        {
+            "scid": scid,
+            "direction": "pull",
+            "amount": 10_000,
+            "maxppm": 1000,
+            "outppm": 1000,
+        },
+    )
+    l1.rpc.call("sling-deletejob", {"job": scid})
+
+    l1.rpc.call(
+        "sling-once",
+        {
+            "scid": scid,
+            "direction": "push",
+            "amount": 10_000,
+            "maxppm": 1000,
+            "outppm": 1000,
+            "onceamount": 20_000,
+        },
+    )
+
+    l1.rpc.call("sling-except-chan", ["add", scid2])
+    l1.rpc.call("sling-except-chan", ["list"])
+    l1.rpc.call("sling-except-chan", ["remove", scid2])
+
+    l1.rpc.call("sling-except-chan", {"command": "add", "scid": scid2})
+    l1.rpc.call("sling-except-chan", {"command": "list"})
+    l1.rpc.call("sling-except-chan", {"command": "remove", "scid": scid2})
+
+    l1.rpc.call("sling-except-peer", ["add", l3.info["id"]])
+    l1.rpc.call("sling-except-peer", ["list"])
+    l1.rpc.call("sling-except-peer", ["remove", l3.info["id"]])
+
+    l1.rpc.call("sling-except-peer", {"command": "add", "id": l3.info["id"]})
+    l1.rpc.call("sling-except-peer", {"command": "list"})
+    l1.rpc.call("sling-except-peer", {"command": "remove", "id": l3.info["id"]})
+
+
 def test_maxhops_2(node_factory, bitcoind, get_plugin):  # noqa: F811
     l1, l2 = node_factory.get_nodes(
         2,

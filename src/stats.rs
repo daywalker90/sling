@@ -29,34 +29,50 @@ pub async fn slingstats(
 
     let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
 
-    let input_array = match args {
-        serde_json::Value::Array(a) => a,
+    let (scid, json_summary) = match args {
+        serde_json::Value::Array(a) => {
+            if a.len() > 1 {
+                return Err(anyhow!(
+                    "Please provide exactly one short_channel_id or a true/false \
+            for the summary to be json"
+                ));
+            }
+            if a.is_empty() {
+                (None, false)
+            } else if let Some(flag) = a.first().unwrap().as_bool() {
+                (None, flag)
+            } else {
+                let scid = match a.first().unwrap() {
+                    serde_json::Value::String(i) => ShortChannelId::from_str(i)?,
+                    _ => return Err(anyhow!("invalid short_channel_id")),
+                };
+                (Some(scid), false)
+            }
+        }
+        serde_json::Value::Object(o) => {
+            let scid = match o.get("scid") {
+                Some(serde_json::Value::String(i)) => Some(ShortChannelId::from_str(i)?),
+                None => None,
+                _ => return Err(anyhow!("invalid scid, not a string")),
+            };
+            let json_summary = match o.get("json") {
+                Some(serde_json::Value::Bool(i)) => *i,
+                None => false,
+                _ => {
+                    return Err(anyhow!(
+                        "invalid `json` flag, not a bool. Use `true` or `false`"
+                    ))
+                }
+            };
+            (scid, json_summary)
+        }
         e => {
             return Err(anyhow!(
-                "sling-stats: invalid arguments, expected array, got: {}",
+                "sling-stats: invalid arguments, expected array or object, got: {}",
                 e
             ))
         }
     };
-    if input_array.len() > 1 {
-        return Err(anyhow!(
-            "Please provide exactly one short_channel_id or a true/false for the summary to be json"
-        ));
-    }
-
-    let mut json_summary = false;
-    let is_summary;
-
-    if !input_array.is_empty() {
-        if let Some(json_flag) = input_array.first().unwrap().as_bool() {
-            json_summary = json_flag;
-            is_summary = true;
-        } else {
-            is_summary = false;
-        }
-    } else {
-        is_summary = true;
-    }
 
     let config = plugin.state().config.lock().clone();
     let stats_delete_successes_age = config.stats_delete_successes_age;
@@ -64,7 +80,47 @@ pub async fn slingstats(
 
     let peer_channels = plugin.state().peer_channels.lock().clone();
 
-    if is_summary {
+    if let Some(s) = scid {
+        let successes = SuccessReb::read_from_files(&sling_dir, Some(s))
+            .await
+            .unwrap_or_default();
+        log::debug!("successes_read: {} scid:{}", successes.len(), s);
+        let failures = FailureReb::read_from_files(&sling_dir, Some(s))
+            .await
+            .unwrap_or_default();
+        log::debug!("failures_read: {} scid:{}", successes.len(), s);
+        let alias_map = plugin.state().alias_peer_map.lock().clone();
+
+        let successes_vec = if successes.len() == 1 {
+            successes.iter().last().unwrap().1.clone()
+        } else {
+            Vec::new()
+        };
+        log::debug!("successes: {} scid:{}", successes.len(), s);
+        let failures_vec = if failures.len() == 1 {
+            failures.iter().last().unwrap().1.clone()
+        } else {
+            Vec::new()
+        };
+        log::debug!("failures: {} scid:{}", successes.len(), s);
+
+        let sling_stats = SlingStats {
+            successes_in_time_window: success_stats(
+                successes_vec,
+                stats_delete_successes_age,
+                &alias_map,
+                &peer_channels,
+            ),
+            failures_in_time_window: failure_stats(
+                failures_vec,
+                stats_delete_failures_age,
+                &alias_map,
+                &peer_channels,
+            ),
+        };
+
+        Ok(json!(sling_stats))
+    } else {
         let successes = SuccessReb::read_from_files(&sling_dir, None).await?;
         let failures = FailureReb::read_from_files(&sling_dir, None).await?;
         let jobs = read_jobs(&sling_dir, plugin.clone()).await?;
@@ -187,50 +243,6 @@ pub async fn slingstats(
             let tabled = Table::new(table);
             Ok(json!({"format-hint":"simple","result":format!("{}", tabled,)}))
         }
-    } else {
-        let scid = match input_array.first().unwrap() {
-            serde_json::Value::String(i) => ShortChannelId::from_str(i)?,
-            _ => return Err(anyhow!("invalid short_channel_id")),
-        };
-        let successes = SuccessReb::read_from_files(&sling_dir, Some(scid))
-            .await
-            .unwrap_or_default();
-        log::debug!("successes_read: {} scid:{}", successes.len(), scid);
-        let failures = FailureReb::read_from_files(&sling_dir, Some(scid))
-            .await
-            .unwrap_or_default();
-        log::debug!("failures_read: {} scid:{}", successes.len(), scid);
-        let alias_map = plugin.state().alias_peer_map.lock().clone();
-
-        let successes_vec = if successes.len() == 1 {
-            successes.iter().last().unwrap().1.clone()
-        } else {
-            Vec::new()
-        };
-        log::debug!("successes: {} scid:{}", successes.len(), scid);
-        let failures_vec = if failures.len() == 1 {
-            failures.iter().last().unwrap().1.clone()
-        } else {
-            Vec::new()
-        };
-        log::debug!("failures: {} scid:{}", successes.len(), scid);
-
-        let sling_stats = SlingStats {
-            successes_in_time_window: success_stats(
-                successes_vec,
-                stats_delete_successes_age,
-                &alias_map,
-                &peer_channels,
-            ),
-            failures_in_time_window: failure_stats(
-                failures_vec,
-                stats_delete_failures_age,
-                &alias_map,
-                &peer_channels,
-            ),
-        };
-
-        Ok(json!(sling_stats))
     }
 }
 
