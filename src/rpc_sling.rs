@@ -115,7 +115,13 @@ pub async fn slinggo(
                 .ok_or(anyhow!("other_peer: channel not found"))?
                 .peer_id,
         );
-        let parallel_jobs = job.get_paralleljobs(config.paralleljobs);
+        let parallel_jobs = match job.sat_direction {
+            sling::SatDirection::Pull => job.get_paralleljobs(config.paralleljobs),
+            sling::SatDirection::Push => std::cmp::min(
+                job.get_paralleljobs(config.paralleljobs),
+                config.max_htlc_count as u16,
+            ),
+        };
         {
             let tasks = plugin.state().tasks.lock();
             if let Some(t) = tasks.get_scid_tasks(&chan_id) {
@@ -338,7 +344,13 @@ pub async fn slingonce(
             sling::SatDirection::Pull => config.exclude_chans_pull.insert(chan_id),
             sling::SatDirection::Push => config.exclude_chans_push.insert(chan_id),
         };
-        parallel_jobs = job.get_paralleljobs(config.paralleljobs);
+        parallel_jobs = match job.sat_direction {
+            sling::SatDirection::Pull => job.get_paralleljobs(config.paralleljobs),
+            sling::SatDirection::Push => std::cmp::min(
+                job.get_paralleljobs(config.paralleljobs),
+                config.max_htlc_count as u16,
+            ),
+        };
     }
 
     for i in 1..=parallel_jobs {
