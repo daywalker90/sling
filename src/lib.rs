@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     fmt::{self, Display},
     str::FromStr,
 };
@@ -10,7 +9,6 @@ use cln_rpc::{
     primitives::{Amount, PublicKey, ShortChannelId},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq, Eq)]
 pub enum SatDirection {
@@ -47,20 +45,22 @@ pub struct Job {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub outppm: Option<u64>,
     pub maxppm: u32,
+    #[serde(alias = "candidatelist")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    candidatelist: Option<Vec<ShortChannelId>>,
+    candidates: Option<Vec<ShortChannelId>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     target: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     maxhops: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     depleteuptopercent: Option<f64>,
+    #[serde(alias = "depleteuptoamount")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    depleteuptoamount: Option<u64>,
+    depleteuptoamount_msat: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     paralleljobs: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub once_amount_msat: Option<u64>,
+    pub onceamount_msat: Option<u64>,
 }
 
 impl Display for Job {
@@ -73,9 +73,9 @@ impl Display for Job {
         if let Some(o) = self.outppm {
             parts.push(format!("outppm:{}", o));
         }
-        if let Some(c) = &self.candidatelist {
+        if let Some(c) = &self.candidates {
             parts.push(format!(
-                "candidatelist:{}",
+                "candidates:{}",
                 c.iter()
                     .map(|s| s.to_string())
                     .collect::<Vec<String>>()
@@ -91,14 +91,14 @@ impl Display for Job {
         if let Some(d) = self.depleteuptopercent {
             parts.push(format!("depleteuptopercent:{}", d));
         }
-        if let Some(d) = self.depleteuptoamount {
-            parts.push(format!("depleteuptoamount:{}", d));
+        if let Some(d) = self.depleteuptoamount_msat {
+            parts.push(format!("depleteuptoamount_msat:{}", d));
         }
         if let Some(p) = self.paralleljobs {
             parts.push(format!("paralleljobs:{}", p));
         }
-        if let Some(t) = self.once_amount_msat {
-            parts.push(format!("total_amount_msat:{}", t));
+        if let Some(t) = self.onceamount_msat {
+            parts.push(format!("onceamount_msat:{}", t));
         }
 
         write!(f, "{}", parts.join(" "))
@@ -117,17 +117,17 @@ impl Job {
             amount_msat,
             outppm,
             maxppm,
-            candidatelist: None,
+            candidates: None,
             target: None,
             maxhops: None,
             depleteuptopercent: None,
-            depleteuptoamount: None,
+            depleteuptoamount_msat: None,
             paralleljobs: None,
-            once_amount_msat: None,
+            onceamount_msat: None,
         }
     }
     pub fn add_candidates(&mut self, candidates: Vec<ShortChannelId>) {
-        self.candidatelist = Some(candidates);
+        self.candidates = Some(candidates);
     }
     pub fn add_target(&mut self, target: f64) {
         self.target = Some(target);
@@ -138,14 +138,14 @@ impl Job {
     pub fn add_depleteuptopercent(&mut self, depleteuptopercent: f64) {
         self.depleteuptopercent = Some(depleteuptopercent);
     }
-    pub fn add_depleteuptoamount(&mut self, depleteuptoamount: u64) {
-        self.depleteuptoamount = Some(depleteuptoamount);
+    pub fn add_depleteuptoamount_msat(&mut self, depleteuptoamount_msat: u64) {
+        self.depleteuptoamount_msat = Some(depleteuptoamount_msat);
     }
     pub fn add_paralleljobs(&mut self, paralleljobs: u16) {
         self.paralleljobs = Some(paralleljobs);
     }
-    pub fn add_once_amount_msat(&mut self, amount_msat: u64) {
-        self.once_amount_msat = Some(amount_msat);
+    pub fn add_onceamount_msat(&mut self, amount_msat: u64) {
+        self.onceamount_msat = Some(amount_msat);
     }
     pub fn is_balanced(
         &self,
@@ -153,7 +153,7 @@ impl Job {
         chan_id: &ShortChannelId,
     ) -> bool {
         let target_cap = self.target_cap(channel);
-        if self.once_amount_msat.is_none() {
+        if self.onceamount_msat.is_none() {
             log::debug!("{}: target: {}sats", chan_id, target_cap / 1_000);
         }
 
@@ -169,7 +169,7 @@ impl Job {
         let target = self.get_target();
 
         let total_msat = Amount::msat(&channel.total_msat.unwrap());
-        if self.once_amount_msat.is_some() {
+        if self.onceamount_msat.is_some() {
             return total_msat;
         }
         let their_reserve_msat = Amount::msat(&channel.their_reserve_msat.unwrap());
@@ -190,47 +190,6 @@ impl Job {
         }
         target_cap
     }
-    pub fn to_json(&self) -> serde_json::Value {
-        let mut result = HashMap::new();
-        result.insert("direction", self.sat_direction.to_string());
-        result.insert("amount", (self.amount_msat / 1_000).to_string());
-        result.insert("maxppm", self.maxppm.to_string());
-        match self.outppm {
-            Some(o) => result.insert("outppm", o.to_string()),
-            None => None,
-        };
-        match self.target {
-            Some(t) => result.insert("target", t.to_string()),
-            None => None,
-        };
-        match self.maxhops {
-            Some(m) => result.insert("maxhops", m.to_string()),
-            None => None,
-        };
-        match &self.candidatelist {
-            Some(c) => result.insert(
-                "candidates",
-                c.iter()
-                    .map(|y| y.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", "),
-            ),
-            None => None,
-        };
-        match self.depleteuptopercent {
-            Some(dp) => result.insert("depleteuptopercent", dp.to_string()),
-            None => None,
-        };
-        match self.depleteuptoamount {
-            Some(da) => result.insert("depleteuptoamount", (da / 1_000).to_string()),
-            None => None,
-        };
-        match self.paralleljobs {
-            Some(pj) => result.insert("paralleljobs", pj.to_string()),
-            None => None,
-        };
-        json!(result)
-    }
     pub fn get_maxhops(&self, config_maxhops: u8) -> u8 {
         if let Some(mh) = self.maxhops {
             mh + 1
@@ -241,11 +200,11 @@ impl Job {
     pub fn get_target(&self) -> f64 {
         self.target.unwrap_or(0.5)
     }
-    pub fn get_deplteuptoamount(&self, config_depleteuptoamount: u64) -> u64 {
-        if let Some(da) = self.depleteuptoamount {
+    pub fn get_depleteuptoamount_msat(&self, config_depleteuptoamount_msat: u64) -> u64 {
+        if let Some(da) = self.depleteuptoamount_msat {
             da
         } else {
-            config_depleteuptoamount
+            config_depleteuptoamount_msat
         }
     }
     pub fn get_depleteuptopercent(&self, config_depleteuptopercent: f64) -> f64 {
@@ -263,7 +222,7 @@ impl Job {
         }
     }
     pub fn get_candidates(&self) -> Vec<ShortChannelId> {
-        if let Some(c) = &self.candidatelist {
+        if let Some(c) = &self.candidates {
             c.clone()
         } else {
             Vec::new()

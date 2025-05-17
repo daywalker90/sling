@@ -147,7 +147,7 @@ pub async fn sling(
                 .tasks
                 .lock()
                 .set_state(task.get_identifier(), JobMessage::NoCandidates);
-            if job.once_amount_msat.is_some() {
+            if job.onceamount_msat.is_some() {
                 time::sleep(Duration::from_secs(1)).await;
                 break 'outer;
             }
@@ -177,7 +177,7 @@ pub async fn sling(
                     .tasks
                     .lock()
                     .set_state(&task_ident, JobMessage::NoRoute);
-                if job.once_amount_msat.is_some() {
+                if job.onceamount_msat.is_some() {
                     time::sleep(Duration::from_secs(1)).await;
                     break 'outer;
                 }
@@ -275,7 +275,7 @@ pub async fn sling(
         {
             Ok(o) => {
                 rebalanced_msat += o;
-                if job.once_amount_msat.is_some() {
+                if job.onceamount_msat.is_some() {
                     break 'outer;
                 }
                 time::sleep(Duration::from_secs(config.refresh_peers_interval)).await;
@@ -556,7 +556,7 @@ fn build_candidatelist(
     let custom_candidates = job.get_candidates();
 
     let depleteuptopercent = job.get_depleteuptopercent(config.depleteuptopercent);
-    let depleteuptoamount = job.get_deplteuptoamount(config.depleteuptoamount);
+    let depleteuptoamount = job.get_depleteuptoamount_msat(config.depleteuptoamount);
 
     for channel in peer_channels.values() {
         let scid = if let Some(scid) = channel.short_channel_id {
