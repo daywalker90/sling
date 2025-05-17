@@ -210,9 +210,6 @@ Formula is ``min(depleteuptopercent * channel_capacity, depleteuptoamount)``. If
 You can mix two methods and if you set the same option with different methods, it will pick the value from your most recently used method.
 
 # Options
-* ``sling-refresh-peers-interval``: ``sling`` periodically calls listpeers every ``refresh-peers-interval`` seconds
-and jobs use the data of the last call to check for balances etc. So this option could severely impact rebalancing target precision
-if it's value is too high. Default is ``1``s
 * ``sling-refresh-aliasmap-interval``: How often to refresh node aliases cache in seconds. Default is every ``3600``s
 * ``sling-refresh-gossmap-interval``: How often to read ``gossip_store`` updates in seconds. Default is every ``10``s
 * ``sling-reset-liquidity-interval``: After how many minutes to reset liquidity knowledge. Default is ``360``m
