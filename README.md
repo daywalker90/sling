@@ -54,10 +54,7 @@ A core lightning plugin to automatically rebalance multiple channels.
 
 * [Installation](#installation)
 * [Building](#building)
-* [Command overview](#command-overview)
-* [Pull sats into a channel](#pull-sats-into-a-channel)
-* [Push sats out of a channel](#push-sats-out-of-a-channel)
-* [Depleteformula](#depleteformula)
+* [Documentation](#documentation)
 * [How to set options](#how-to-set-options)
 * [Options](#options)
 * [Feedback](#feedback)
@@ -90,66 +87,90 @@ After that the binary will be here: ``target/release/sling``
 
 Note: Release binaries are built using ``cross`` and the ``optimized`` profile.
 
-# Command overview
+# Documentation
 
-* ``sling-version`` print the version of the plugin
-* ``sling-job`` adds a rebalancing job for a channel, you can only have one job per channel and if you add one for the same channel it gets stopped and updated inplace
-* ``sling-jobsettings`` provide a ShortChannelId (or nothing for all channels) to list the currently saved settings for the job(s)
-* ``sling-go`` start all jobs that are not already running, or the job specified by a ShortChannelId
-* ``sling-stop`` gracefully stop all running jobs or the job specified by a ShortChannelId, jobs take up to ``sling-timeoutpay`` to actually stop
-* ``sling-once`` immediately start a one time rebalance
-* ``sling-stats`` with no arguments this shows a status overview for all jobs, you can use an optional boolean argument to set the output to json: ``sling-stats true``. Otherwise you can provide a ShortChannelId to get more detailed stats for that specific job, which is always in json format.
-* ``sling-deletejob`` gracefully stops and removes all jobs by providing the keyword ``all`` or a single job by providing a ShortChannelId. Does *not* remove raw stats from disk.
-* ``sling-except-chan`` add or remove ShortChannelIds to completely avoid or alternatively list all current exceptions with keyword ``list``.
-* ``sling-except-peer`` same as ``sling-except-chan`` but with node PublicKeys
+Liquidity beliefs don't get saved if you run `lightning-cli plugin start /path/to/sling` and sling is already running! Use `lightning-cli plugin stop sling` first.
 
-# Pull sats into a channel
+## Methods
+
+* **sling-version**
+    * Print the version of the plugin.
+* **sling-job**
+    * Adds a rebalancing job for a channel. See [Pull sats into a channel](#pull-sats-into-a-channel) and [Push sats out of a channel](#push-sats-out-of-a-channel) for details.
+* **sling-jobsettings** [*scid*]
+    * List all or a specific job(s) with their settings. The settings will be from the internal representation which can differ from what you input.
+    * ***scid*** Optional ShortChannelId of a job.
+* **sling-go** [*scid*]
+    * Start all jobs that are not already running, or just the job specified by a ShortChannelId *scid*.
+    * ***scid*** Optional ShortChannelId of a job.
+* **sling-stop** [*scid*]
+    * Gracefully stop all running jobs or the job specified by a ShortChannelId, jobs take up to ``sling-timeoutpay`` to actually stop.
+    * ***scid*** Optional ShortChannelId of a job.
+* **sling-once**
+    * Immediately start a one time rebalance. See [One time rebalance with exact amount](#one-time-rebalance-with-exact-amount) for details.
+* **sling-stats** [*scid*] [*json*]
+    * With no arguments this shows a human readable status overview for all jobs.
+    * ***scid*** Optional ShortChannelId of a job to get more detailed statistics.
+    * ***json*** Optional boolean, `true` outputs json.
+* **sling-deletejob** *job*
+    * Gracefully stops and removes *job*.
+    * ***job*** Either a ShortChannelId of a job or the keyword `all` to delete all jobs.
+* **sling-except-chan** *command* [*scid*]
+    * Manage channels that will be avoided for all jobs.
+    * ***command*** Either `list` to list all current channel exceptions or `add` to add a ShortChannelId to the exceptions or `remove` to remove ShortChannelId previously added.
+    * ***scid*** The ShortChannelId to `add` or `remove`
+* **sling-except-peer** *command* [*id*]
+    * Manage entire nodes that will be avoided for all jobs.
+    * ***command*** Either `list` to list all current node id exceptions or `add` to add a node id to the exceptions or `remove` to remove a node id previously added.
+    * ***id*** The node id to `add` or `remove`
+
+## Pull sats into a channel
 To pull sats into a channel you can add a job like this:
 
-``sling-job -k scid direction amount maxppm (outppm) (target) (maxhops) (candidates) (depleteuptopercent) (depleteuptoamount) (paralleljobs)``
+**sling-job** -k *scid* *direction* *amount* *maxppm* [*outppm*] [*target*] [*maxhops*] [*candidates*] [*depleteuptopercent*] [*depleteuptoamount*] [*paralleljobs*]
 
-You can completely leave out optional (those in ``()``) arguments, with one exception: either outppm and/or candidates must be set
+You can completely leave out optional (those in ``[]``) arguments, with one exception: either outppm and/or candidates must be set.
 :warning:You must use the ``-k keyword=value`` format for ``sling-job``!
 
-* ``scid``: the ShortChannelId to which the sats should be pulled e.g. ``704776x2087x3``
-* ``direction``: set this to ``pull`` to pull the sats into the channel declared by ``scid``
-* ``amount``: the amount in sats used per rebalance operation
-* ``maxppm``: the max *effective* ppm to use for the rebalances
-* ``outppm``: while building the list of channels to pull *from*, choose only the ones where we *effectively* charge <= ``outppm``
-* ``target``: floating point between ``0`` and ``1``. E.g.: if atleast ``0.7`` * channel_capacity is on **our** side, the job stops rebalancing and goes into idle. Default is ``0.5``
-* ``maxhops``: maximum number of hops allowed in a route. A hop is a node that is not us. Default is ``8``
-* ``candidates``: a list of our scid's to use for rebalancing this channel. E.g.: ``'["704776x2087x5","702776x1087x2"]'`` You can still combine this with ``outppm``
-* ``depleteuptopercent``: how much % to leave the candidates with on the local side of the channel as a floating point between 0 and <1. Default is ``0.2``. Also see [Depleteformula](#depleteformula). You can set this globally, see [Options](#options).
-* ``depleteuptoamount``: how many sats to leave the candidates with on the local side of the channel. Default is ``2000000``sats. Also see [Depleteformula](#depleteformula). You can set this globally, see [Options](#options).
-* ``paralleljobs``: How many routes to take in parallel for this job. If you know that the route will be minimum length you should keep this at ``1``. Default is ``1``. You can set this globally, see [Options](#options).
+* **scid**: The ShortChannelId to which the sats should be pulled e.g. ``704776x2087x3``.
+* **direction**: Set this to ``pull`` to pull the sats into the channel declared by ``scid``.
+* **amount**: The amount in sats used per rebalance operation.
+* **maxppm**: The max *effective* ppm to use for the rebalances. The effective feeppm is calculated using the amount, feeppm and the base fee.
+* **outppm**: While building the list of channels to pull *from*, choose only the ones where we *effectively* charge <= ``outppm``.
+* **target**: Floating point between ``0`` and ``1``. E.g.: if atleast ``0.7 * channel_capacity`` is on **our** side, the job stops rebalancing and goes into idle. Default is ``0.5``.
+* **maxhops**: Maximum number of hops allowed in a route. A hop is a node that is not us. Default is ``8``.
+* **candidates**: Optional list of our ShortChannelId's to use for rebalancing this channel. E.g.: ``'["704776x2087x5","702776x1087x2"]'`` You can still combine this with ``outppm``.
+* **depleteuptopercent**: How much % to leave the candidates with on the **local** side of the channel as a floating point between 0 and <1. Default is ``0.2``. Also see [Depleteformula](#depleteformula). You can set this globally, see [Options](#options).
+* **depleteuptoamount**: How many sats to leave the candidates with on the **local** side of the channel. Default is ``2000000``sats. Also see [Depleteformula](#depleteformula). You can set this globally, see [Options](#options).
+* **paralleljobs**: How many routes to take in parallel for this job. If you know that the route will be minimum length you should keep this at ``1``. Default is ``1``. You can set this globally, see [Options](#options).
 
 Easy example: "Pull sats to our side on ``704776x2087x3`` in amounts of 100000 sats while paying max 300ppm and only using candidates where we charge 0ppm, use defaults (see [Options](#options)) for the rest of the parameters":
 
 ``sling-job -k scid=704776x2087x3 direction=pull amount=100000 maxppm=300 outppm=0``
 
-Advanced example: "Pull sats to our side on ``704776x2087x3`` in amounts of 100000 sats while paying max 300ppm. Idle when 0.8*capacity_of_704776x2087x3 is on our side, use max 6 hops and only these other channels i have as partners: ``704776x2087x5``, ``702776x1087x2``. Use defaults for the rest of the parameters and (because we omitted ``outppm``) ignore the ppm i charge on my candidates":
+Advanced example: "Pull sats to our side on ``704776x2087x3`` in amounts of 100000 sats while paying max 300ppm. Idle when ``0.8 * capacity_of_704776x2087x3`` is on our side, use max 6 hops and only these other channels i have as partners: ``704776x2087x5``, ``702776x1087x2``. Use defaults for the rest of the parameters and (because we omitted ``outppm``) ignore the ppm i charge on my candidates":
 
 ``sling-job -k scid=704776x2087x3 direction=pull amount=100000 maxppm=300 target=0.8 maxhops=6 candidates='["704776x2087x5","702776x1087x2"]'``
 
-# Push sats out of a channel
+## Push sats out of a channel
 To push sats out of a channel you can add a job like this:
 
-``sling-job -k scid direction amount maxppm (outppm) (target) (maxhops) (candidates) (depleteuptopercent) (depleteuptoamount) (paralleljobs)``
+**sling-job** -k *scid* *direction* *amount* *maxppm* [*outppm*] [*target*] [*maxhops*] [*candidates*] [*depleteuptopercent*] [*depleteuptoamount*] [*paralleljobs*]
 
-You can completely leave out optional (those in ``()``) arguments, with one exception: either outppm and/or candidates must be set
+You can completely leave out optional (those in ``[]``) arguments, with one exception: either outppm and/or candidates must be set.
 :warning:You must use the ``-k keyword=value`` format for ``sling-job``!
 
-* ``scid``: the ShortChannelId to push sats out of e.g. ``704776x2087x3``
-* ``direction``: set this to ``push`` to make it clear to push the sats out of the channel declared by ``scid``
-* ``amount``: the amount in sats used per rebalance operation
-* ``maxppm``: the max *effective* ppm to use for the rebalances
-* ``outppm``: while building the list of channels to push into, choose only the ones where we *effectively* charge >= ``outppm``
-* ``target``: floating point between ``0`` and ``1``. E.g.: if atleast ``0.7`` * channel_capacity is on **their** side, the job stops rebalancing and goes into idle. Default is ``0.5``
-* ``maxhops``: maximum number of hops allowed in a route. A hop is a node that is not us. Default is ``8``
-* ``candidates``: a list of our scid's to use for rebalancing this channel. E.g.: ``'["704776x2087x5","702776x1087x2"]'`` You can still combine this with ``outppm``
-* ``depleteuptopercent``: how much % to leave the candidates with on the remote side of the channel as a floating point between 0 and <1. Default is ``0.2``. Also see [Depleteformula](#depleteformula). You can set this globally, see [Options](#options).
-* ``depleteuptoamount``: how many sats to leave the candidates with on the remote side of the channel. Default is ``2000000``sats. Also see [Depleteformula](#depleteformula). You can set this globally, see [Options](#options).
-* ``paralleljobs``: How many routes to take in parallel for this job. If you know that the route will be minimum length you should keep this at ``1``. Default is ``1``.  You can set this globally, see [Options](#options).
+* **scid**: The ShortChannelId from which the sats should be pushed out e.g. ``704776x2087x3``.
+* **direction**: Set this to ``push`` to push the sats out of the channel declared by ``scid``.
+* **amount**: The amount in sats used per rebalance operation.
+* **maxppm**: The max *effective* ppm to use for the rebalances. The effective feeppm is calculated using the amount, feeppm and the base fee.
+* **outppm**: While building the list of channels to push *to*, choose only the ones where we *effectively* charge >= ``outppm``.
+* **target**: Floating point between ``0`` and ``1``. E.g.: if atleast ``0.7 * channel_capacity`` is on **their** side, the job stops rebalancing and goes into idle. Default is ``0.5``.
+* **maxhops**: Maximum number of hops allowed in a route. A hop is a node that is not us. Default is ``8``.
+* **candidates**: Optional list of our ShortChannelId's to use for rebalancing this channel. E.g.: ``'["704776x2087x5","702776x1087x2"]'`` You can still combine this with ``outppm``.
+* **depleteuptopercent**: How much % to leave the candidates with on the **remote** side of the channel as a floating point between 0 and <1. Default is ``0.2``. Also see [Depleteformula](#depleteformula). You can set this globally, see [Options](#options).
+* **depleteuptoamount**: How many sats to leave the candidates with on the **remote** side of the channel. Default is ``2000000``sats. Also see [Depleteformula](#depleteformula). You can set this globally, see [Options](#options).
+* **paralleljobs**: How many routes to take in parallel for this job. If you know that the route will be minimum length you should keep this at ``1``. Default is ``1``. You can set this globally, see [Options](#options).
 
 Easy example: "Push sats to their side on ``704776x2087x3`` in amounts of 100000 sats while paying max 300ppm and only using candidates where we charge >=600ppm, use defaults (see [Options](#options)) for the rest of the parameters":
 
@@ -159,24 +180,20 @@ Advanced example: "Push sats to their side on ``704776x2087x3`` in amounts of 10
 
 ``sling-job -k scid=704776x2087x3 direction=push amount=100000 maxppm=300 target=0.8 maxhops=6 candidates='["704776x2087x5","702776x1087x2"]'``
 
-# One time rebalance with exact amount
-If you just want to rebalance one time instead of continuously use the ``sling-once`` command. It is similar to ``sling-job``. You don't need to run ``sling-go`` or ``sling-stop`` for this command and some arguments are different. It will immediately start and then stop once the ``total_amount`` is rebalanced. A plugin restart will forget about all running ``sling-once`` commands!
+## One time rebalance with exact amount
+If you just want to rebalance one time instead of continuously use the ``sling-once`` command. It is similar to ``sling-job``. You don't need to run ``sling-go`` or ``sling-stop`` for this command and some arguments are different. It will immediately start and then stop once the ``onceamount`` is rebalanced. A plugin restart will forget about all running ``sling-once`` commands!
 
-``sling-once -k scid direction amount maxppm total_amount (outppm)(maxhops) (candidates) (depleteuptopercent) (depleteuptoamount) (paralleljobs)``
+**sling-once** -k *scid* *direction* *amount* *maxppm* *onceamount* [*outppm*] [*maxhops*] [*candidates*] [*depleteuptopercent*] [*depleteuptoamount*] [*paralleljobs*]
 
-* ``scid``: the ShortChannelId to push sats out of e.g. ``704776x2087x3``
-* ``direction``: set this to ``push`` to make it clear to push the sats out of the channel declared by ``scid``
-* ``amount``: the amount in sats used per rebalance operation (not to be confused with the total amount you want to rebalance: ``total_amount``)
-* ``maxppm``: the max *effective* ppm to use for the rebalances
-* ``total_amount``: total amount of sats you want to rebalance, must be a multiple of ``amount``
-* ``outppm``: while building the list of channels to push into, choose only the ones where we *effectively* charge >= ``outppm``
-* ``maxhops``: maximum number of hops allowed in a route. A hop is a node that is not us. Default is ``8``
-* ``candidates``: a list of our scid's to use for rebalancing this channel. E.g.: ``'["704776x2087x5","702776x1087x2"]'`` You can still combine this with ``outppm``
-* ``depleteuptopercent``: how much % to leave the candidates with on the remote side of the channel as a floating point between 0 and <1. Default is ``0.2``. Also see [Depleteformula](#depleteformula). You can set this globally, see [Options](#options).
-* ``depleteuptoamount``: how many sats to leave the candidates with on the remote side of the channel. Default is ``2000000``sats. Also see [Depleteformula](#depleteformula). You can set this globally, see [Options](#options).
-* ``paralleljobs``: How many routes to take in parallel for this job. If you know that the route will be minimum length you should keep this at ``1``. Default is ``1``.  You can set this globally, see [Options](#options).
+You can completely leave out optional (those in ``[]``) arguments, with one exception: either outppm and/or candidates must be set.
+:warning:You must use the ``-k keyword=value`` format for ``sling-once``!
 
-# Depleteformula
+These are the differences to ``sling-job``:
+
+* **onceamount**: Total amount of sats you want to rebalance, must be a multiple of ``amount``.
+* **target**: Not allowed here.
+
+## Depleteformula
 Formula is ``min(depleteuptopercent * channel_capacity, depleteuptoamount)``. If you don't set one or both, the global default will be used for one or both respectively instead. You can change the global defaults here: [Options](#options)
 
 # How to set options
@@ -196,9 +213,9 @@ You can mix two methods and if you set the same option with different methods, i
 * ``sling-refresh-peers-interval``: ``sling`` periodically calls listpeers every ``refresh-peers-interval`` seconds
 and jobs use the data of the last call to check for balances etc. So this option could severely impact rebalancing target precision
 if it's value is too high. Default is ``1``s
-* ``sling-refresh-aliasmap-interval``: How often to refresh node aliases in seconds. Default is every ``3600``s
+* ``sling-refresh-aliasmap-interval``: How often to refresh node aliases cache in seconds. Default is every ``3600``s
 * ``sling-refresh-gossmap-interval``: How often to read ``gossip_store`` updates in seconds. Default is every ``10``s
-* ``sling-reset-liquidity-interval``: After how many minutes to reset liquidity knowledge. Default is ``60``m
+* ``sling-reset-liquidity-interval``: After how many minutes to reset liquidity knowledge. Default is ``360``m
 * ``sling-depleteuptopercent``: Up to what percent to pull/push sats from/to candidate channels as floating point between 0 and <1. Also see [Depleteformula](#depleteformula). Default is ``0.2``
 * ``sling-depleteuptoamount``: Up to what amount to pull/push sats from/to candidate channels. Also see [Depleteformula](#depleteformula). Default is ``2000000``sats
 * ``sling-maxhops``: Maximum number of hops allowed in a route. A hop is a node that is not us. Default is ``8``
