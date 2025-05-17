@@ -122,11 +122,17 @@ pub async fn parse_job(
                 ),
                 None => None,
             };
-            if let Some(h) = paralleljobs {
-                if h < 1 {
+            if let Some(pj) = paralleljobs {
+                if pj < 1 {
                     return Err(anyhow!("paralleljobs must be atleast 1"));
                 }
-                job.add_paralleljobs(h);
+                if job.sat_direction == SatDirection::Push && pj > (config.max_htlc_count as u16) {
+                    return Err(anyhow!(
+                        "In a push job it doesn't make sense to have more \
+                    paralleljobs than your max_htlc_count"
+                    ));
+                }
+                job.add_paralleljobs(pj);
             }
 
             let candidatelist = {
@@ -354,11 +360,17 @@ pub async fn parse_once_job(
                 ),
                 None => None,
             };
-            if let Some(h) = paralleljobs {
-                if h < 1 {
+            if let Some(pj) = paralleljobs {
+                if pj < 1 {
                     return Err(anyhow!("paralleljobs must be atleast 1"));
                 }
-                job.add_paralleljobs(h);
+                if job.sat_direction == SatDirection::Push && pj > (config.max_htlc_count as u16) {
+                    return Err(anyhow!(
+                        "In a push job it doesn't make sense to have more \
+                    paralleljobs than your max_htlc_count"
+                    ));
+                }
+                job.add_paralleljobs(pj);
             }
 
             let candidatelist = {
