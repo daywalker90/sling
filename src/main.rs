@@ -42,7 +42,6 @@ mod util;
 #[cfg(test)]
 mod tests;
 
-const OPT_REFRESH_PEERS_INTERVAL: &str = "sling-refresh-peers-interval";
 const OPT_REFRESH_ALIASMAP_INTERVAL: &str = "sling-refresh-aliasmap-interval";
 const OPT_REFRESH_GOSSMAP_INTERVAL: &str = "sling-refresh-gossmap-interval";
 const OPT_RESET_LIQUIDITY_INTERVAL: &str = "sling-reset-liquidity-interval";
@@ -68,13 +67,6 @@ async fn main() -> Result<(), anyhow::Error> {
     log_panics::init();
     let state;
     let confplugin;
-    let opt_refresh_peers_interval: DefaultIntegerConfigOption =
-        ConfigOption::new_i64_with_default(
-            OPT_REFRESH_PEERS_INTERVAL,
-            1,
-            "Refresh interval for listpeers task. Default is `1`",
-        )
-        .dynamic();
     let opt_refresh_aliasmap_interval: DefaultIntegerConfigOption =
         ConfigOption::new_i64_with_default(
             OPT_REFRESH_ALIASMAP_INTERVAL,
@@ -175,7 +167,6 @@ async fn main() -> Result<(), anyhow::Error> {
     match Builder::new(tokio::io::stdin(), tokio::io::stdout())
         .hook("htlc_accepted", htlc_handler)
         .subscribe("block_added", block_added)
-        .option(opt_refresh_peers_interval)
         .option(opt_refresh_aliasmap_interval)
         .option(opt_refresh_gossmap_interval)
         .option(opt_reset_liquidity_interval)

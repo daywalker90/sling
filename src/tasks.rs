@@ -50,15 +50,10 @@ pub async fn refresh_aliasmap(plugin: Plugin<PluginState>) -> Result<(), Error> 
 
 pub async fn refresh_listpeerchannels_loop(plugin: Plugin<PluginState>) -> Result<(), Error> {
     loop {
-        let interval;
-        {
-            let config = plugin.state().config.lock();
-            interval = config.refresh_peers_interval;
-        }
         {
             refresh_listpeerchannels(plugin.clone()).await?;
         }
-        time::sleep(Duration::from_secs(interval)).await;
+        time::sleep(Duration::from_secs(1)).await;
     }
 }
 
