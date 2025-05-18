@@ -233,7 +233,7 @@ pub fn get_total_htlc_count(channel: &ListpeerchannelsChannels) -> u64 {
 }
 
 pub fn edge_cost(edge: &ShortChannelIdDirState, amount: u64) -> u64 {
-    feeppm_effective(edge.fee_per_millionth, edge.base_fee_millisatoshi, amount) + 10
+    feeppm_effective(edge.fee_per_millionth, edge.base_fee_millisatoshi, amount) + 2
 }
 
 pub fn feeppm_effective(feeppm: u32, basefee_msat: u32, amount_msat: u64) -> u64 {
