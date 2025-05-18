@@ -9,6 +9,7 @@ use cln_rpc::{
     primitives::{Amount, PublicKey, ShortChannelId},
 };
 use serde::{Deserialize, Serialize};
+use tabled::Tabled;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq, Eq)]
 pub enum SatDirection {
@@ -237,11 +238,34 @@ pub struct ChannelPartnerStats {
     pub sats: u64,
 }
 
+impl Display for ChannelPartnerStats {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{:25} {:18} {:10}sats",
+            self.alias.replace(|c: char| !c.is_ascii(), "?"),
+            self.scid.to_string(),
+            self.sats
+        )
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PeerPartnerStats {
     pub peer_id: PublicKey,
     pub alias: String,
     pub count: u32,
+}
+impl Display for PeerPartnerStats {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{:25} {} fails: {:5}",
+            self.alias.replace(|c: char| !c.is_ascii(), "?"),
+            self.peer_id,
+            self.count
+        )
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
@@ -249,20 +273,52 @@ pub struct FailureReasonCount {
     pub failure_reason: String,
     pub failure_count: u32,
 }
+impl Display for FailureReasonCount {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.failure_reason, self.failure_count)
+    }
+}
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Tabled)]
 pub struct FailuresInTimeWindow {
     pub time_window_days: String,
     pub total_amount_tried_sats: u64,
+    #[tabled(display("Self::display_fail_reasons"))]
     pub top_5_failure_reasons: Vec<FailureReasonCount>,
+    #[tabled(display("Self::display_fail_nodes"))]
     pub top_5_fail_nodes: Vec<PeerPartnerStats>,
+    #[tabled(display("Self::display_chan_partners"))]
     pub top_5_channel_partners: Vec<ChannelPartnerStats>,
+    #[tabled(display("tabled::derive::display::option", "N/A"))]
     pub most_common_hop_count: Option<u8>,
     pub time_of_last_attempt: String,
     pub total_rebalances_tried: u64,
 }
+impl FailuresInTimeWindow {
+    pub fn display_fail_reasons(top_5_failure_reasons: &[FailureReasonCount]) -> String {
+        top_5_failure_reasons
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<String>>()
+            .join("\n")
+    }
+    pub fn display_fail_nodes(top_5_fail_nodes: &[PeerPartnerStats]) -> String {
+        top_5_fail_nodes
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<String>>()
+            .join("\n")
+    }
+    pub fn display_chan_partners(top_5_channel_partners: &[ChannelPartnerStats]) -> String {
+        top_5_channel_partners
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<String>>()
+            .join("\n")
+    }
+}
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Tabled)]
 pub struct SuccessesInTimeWindow {
     pub time_window_days: String,
     pub total_amount_sats: u64,
@@ -271,11 +327,23 @@ pub struct SuccessesInTimeWindow {
     pub feeppm_max: u32,
     pub feeppm_median: u32,
     pub feeppm_90th_percentile: u32,
+    #[tabled(display("Self::display_partners"))]
     pub top_5_channel_partners: Vec<ChannelPartnerStats>,
+    #[tabled(display("tabled::derive::display::option", "N/A"))]
     pub most_common_hop_count: Option<u8>,
     pub time_of_last_rebalance: String,
     pub total_rebalances: u64,
     pub total_spent_sats: u64,
+}
+impl SuccessesInTimeWindow {
+    pub fn display_partners(top_5_channel_partners: &[ChannelPartnerStats]) -> String {
+        top_5_channel_partners
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<String>>()
+            .join("\n")
+            .to_string()
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]

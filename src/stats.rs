@@ -15,6 +15,7 @@ use sling::{
     ChannelPartnerStats, FailureReasonCount, FailuresInTimeWindow, PeerPartnerStats, SlingStats,
     SuccessesInTimeWindow,
 };
+use tabled::settings::{Panel, Rotate};
 use tabled::Table;
 
 use crate::model::{FailureReb, JobMessage, SuccessReb};
@@ -31,10 +32,9 @@ pub async fn slingstats(
 
     let (scid, json_summary) = match args {
         serde_json::Value::Array(a) => {
-            if a.len() > 1 {
+            if a.len() > 2 {
                 return Err(anyhow!(
-                    "Please provide exactly one short_channel_id or a true/false \
-            for the summary to be json"
+                    "Too many arguments, please only provide `scid` and/or `json`"
                 ));
             }
             if a.is_empty() {
@@ -46,7 +46,16 @@ pub async fn slingstats(
                     serde_json::Value::String(i) => ShortChannelId::from_str(i)?,
                     _ => return Err(anyhow!("invalid short_channel_id")),
                 };
-                (Some(scid), false)
+                let json_flag = match a.get(1) {
+                    Some(serde_json::Value::Bool(i)) => *i,
+                    None => false,
+                    _ => {
+                        return Err(anyhow!(
+                            "invalid `json` flag, not a bool. Use `true` or `false`"
+                        ))
+                    }
+                };
+                (Some(scid), json_flag)
             }
         }
         serde_json::Value::Object(o) => {
@@ -104,22 +113,46 @@ pub async fn slingstats(
         };
         log::debug!("failures: {} scid:{}", successes.len(), s);
 
-        let sling_stats = SlingStats {
-            successes_in_time_window: success_stats(
-                successes_vec,
-                stats_delete_successes_age,
-                &alias_map,
-                &peer_channels,
-            ),
-            failures_in_time_window: failure_stats(
-                failures_vec,
-                stats_delete_failures_age,
-                &alias_map,
-                &peer_channels,
-            ),
-        };
+        let success_stats = success_stats(
+            successes_vec,
+            stats_delete_successes_age,
+            &alias_map,
+            &peer_channels,
+        );
+        let failure_stats = failure_stats(
+            failures_vec,
+            stats_delete_failures_age,
+            &alias_map,
+            &peer_channels,
+        );
 
-        Ok(json!(sling_stats))
+        if json_summary {
+            let sling_stats = SlingStats {
+                successes_in_time_window: success_stats,
+                failures_in_time_window: failure_stats,
+            };
+
+            Ok(json!(sling_stats))
+        } else {
+            let succ_str = if let Some(ss) = success_stats {
+                let mut succ_tabled = Table::new(vec![ss]);
+                succ_tabled.with(Rotate::Left);
+                succ_tabled.with(Panel::header("Successes in time window"));
+                succ_tabled.to_string()
+            } else {
+                String::new()
+            };
+            let fail_str = if let Some(fs) = failure_stats {
+                let mut fail_tabled = Table::new(vec![fs]);
+                fail_tabled.with(Rotate::Left);
+                fail_tabled.with(Panel::header("Failures in time window"));
+                fail_tabled.to_string()
+            } else {
+                String::new()
+            };
+
+            Ok(json!({"format-hint":"simple","result":format!("{}\n{}", succ_str, fail_str)}))
+        }
     } else {
         let successes = SuccessReb::read_from_files(&sling_dir, None).await?;
         let failures = FailureReb::read_from_files(&sling_dir, None).await?;
@@ -432,7 +465,7 @@ fn failure_stats(
                 peer_id: *node,
                 alias: alias_map
                     .get(node)
-                    .unwrap_or(&"NOT_FOUND".to_string())
+                    .unwrap_or(&"ALIAS_NOT_FOUND".to_string())
                     .clone(),
                 count: *count,
             })

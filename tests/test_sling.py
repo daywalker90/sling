@@ -267,6 +267,7 @@ def test_method_args(node_factory, get_plugin):  # noqa: F811
     l1.rpc.call("sling-stats", [])
     l1.rpc.call("sling-stats", [scid])
     l1.rpc.call("sling-stats", [True])
+    l1.rpc.call("sling-stats", [scid, True])
     l1.rpc.call("sling-stats", {})
     l1.rpc.call("sling-stats", {"scid": scid})
     l1.rpc.call("sling-stats", {"scid": scid, "json": True})
@@ -633,7 +634,7 @@ def test_stats(node_factory, bitcoind, get_plugin):  # noqa: F811
     LOGGER.info(stats_summary)
     assert cl2 in stats_summary["result"]
 
-    stats_chan = l1.rpc.call("sling-stats", [cl2])
+    stats_chan = l1.rpc.call("sling-stats", [cl2, True])
     LOGGER.info(stats_chan)
     assert (
         cl1
@@ -924,11 +925,11 @@ def test_private_candidates(node_factory, bitcoind, get_plugin):  # noqa: F811
 
     wait_for(
         lambda: len(
-            l1.rpc.call("sling-stats", [scid_l1_l3])["successes_in_time_window"]
+            l1.rpc.call("sling-stats", [scid_l1_l3, True])["successes_in_time_window"]
         )
         is not None
     )
-    stats = l1.rpc.call("sling-stats", [scid_l1_l3])["successes_in_time_window"]
+    stats = l1.rpc.call("sling-stats", [scid_l1_l3, True])["successes_in_time_window"]
     for chan_partner in stats["top_5_channel_partners"]:
         assert chan_partner["scid"] == l1_l2_chan_aliases[0]
 
@@ -1003,7 +1004,7 @@ def test_once(node_factory, bitcoind, get_plugin):  # noqa: F811
     l1.rpc.call("sling-go", [])
     l1.daemon.wait_for_log(r"Rebalance SUCCESSFULL after")
     l1.daemon.wait_for_log(r"already balanced. Taking a break")
-    stats = l1.rpc.call("sling-stats", [scid_l3])["successes_in_time_window"]
+    stats = l1.rpc.call("sling-stats", [scid_l3, True])["successes_in_time_window"]
     assert stats["total_amount_sats"] == 100_000
     stats = l1.rpc.call("sling-stats", [True])
     assert len(stats) == 1
@@ -1062,7 +1063,7 @@ def test_once(node_factory, bitcoind, get_plugin):  # noqa: F811
     wait_for(lambda: l1.rpc.call("sling-stats", [True])[0]["status"] == ["1:Stopped"])
 
     assert (
-        l1.rpc.call("sling-stats", [scid_l3])["successes_in_time_window"][
+        l1.rpc.call("sling-stats", [scid_l3, True])["successes_in_time_window"][
             "total_amount_sats"
         ]
         == 125_000
@@ -1104,7 +1105,7 @@ def test_once(node_factory, bitcoind, get_plugin):  # noqa: F811
     )
 
     assert (
-        l1.rpc.call("sling-stats", [scid_l3])["successes_in_time_window"][
+        l1.rpc.call("sling-stats", [scid_l3, True])["successes_in_time_window"][
             "total_amount_sats"
         ]
         == 225_000
@@ -1135,7 +1136,7 @@ def test_once(node_factory, bitcoind, get_plugin):  # noqa: F811
     l1.rpc.call("sling-go", [])
     l1.daemon.wait_for_log(r"Rebalance SUCCESSFULL after")
     l1.daemon.wait_for_log(r"already balanced. Taking a break")
-    stats = l1.rpc.call("sling-stats", [scid_l3])["successes_in_time_window"]
+    stats = l1.rpc.call("sling-stats", [scid_l3, True])["successes_in_time_window"]
     assert stats["total_amount_sats"] == 425_000
 
 
