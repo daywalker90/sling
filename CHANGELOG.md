@@ -9,6 +9,7 @@
 
 ### Added
 - `sling-once`: new command to rebalance a specific amount once
+- `sling-stats`: added human readable table view for when you provide a ShortChannelId, json flag can still be set
 
 ### Changed
 - optimized gossip file reader to be ~18x faster with similar memory usage
