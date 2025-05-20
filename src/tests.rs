@@ -407,14 +407,16 @@ fn test_dijkstra_speed() {
         //     );
         // }
         // println!("----------------------------------");
-        excepts.push(ShortChannelIdDir {
-            short_channel_id: route.first().unwrap().channel,
-            direction: 0,
-        });
-        excepts.push(ShortChannelIdDir {
-            short_channel_id: route.first().unwrap().channel,
-            direction: 1,
-        });
+        if let Some(hop) = route.first() {
+            excepts.push(ShortChannelIdDir {
+                short_channel_id: hop.channel,
+                direction: 0,
+            });
+            excepts.push(ShortChannelIdDir {
+                short_channel_id: hop.channel,
+                direction: 1,
+            });
+        }
         vec_len.push(route.len());
         vec_times.push(elapsed);
     }
