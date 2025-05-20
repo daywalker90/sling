@@ -70,14 +70,14 @@ pub fn read_gossip_file(
         // Read and check the version
         let mut gossip_ver_buffer = vec![0u8; 1];
         reader.read_exact(&mut gossip_ver_buffer)?;
-        log::debug!("read_gossip_file: checking gossip_store version...");
+        log::trace!("read_gossip_file: checking gossip_store version...");
         if (gossip_ver_buffer[0] & 0b1110_0000) != 0b0000_0000 {
             log::warn!("read_gossip_file: Unsupported gossip_store version!");
             return Err(anyhow!(
                 "read_gossip_file: Unsupported gossip_store version!"
             ));
         }
-        log::debug!("read_gossip_file: gossip_store version is good");
+        log::trace!("read_gossip_file: gossip_store version is good");
     }
 
     let mut gossip_file = vec![0u8; CHUNK_SIZE];
@@ -104,7 +104,7 @@ pub fn read_gossip_file(
             graph,
             incomplete_channels,
         )?;
-        log::debug!(
+        log::trace!(
             "read_gossip_file: gossip_store read chunk {} in: {}ms",
             bytes_read,
             test_now.elapsed().as_millis()
@@ -114,11 +114,11 @@ pub fn read_gossip_file(
         }
         *offset = 0;
     }
-    log::debug!(
+    log::trace!(
         "read_gossip_file: gossip_store read in: {}ms",
         now.elapsed().as_millis()
     );
-    log::debug!(
+    log::trace!(
         "read_gossip_file: found {} potential channels",
         incomplete_channels.len(),
     );
@@ -129,11 +129,11 @@ pub fn read_gossip_file(
 
     *is_start_up = false;
 
-    log::debug!(
+    log::trace!(
         "read_gossip_file: post_processing_time: {}ms",
         post_now.elapsed().as_millis()
     );
-    log::debug!(
+    log::trace!(
         "read_gossip_file: found {} actual channels and {} incomplete channels",
         graph.public_channel_count(),
         incomplete_channels.len()
@@ -147,7 +147,7 @@ fn read_gossip_file_chunk(
     graph: &mut LnGraph,
     incomplete_channels: &mut IncompleteChannels,
 ) -> Result<(), anyhow::Error> {
-    log::debug!(
+    log::trace!(
         "read_gossip_file_chunk: reading gossip_store chunk of size {}",
         gossip_file.len()
     );
