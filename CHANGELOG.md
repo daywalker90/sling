@@ -3,21 +3,21 @@
 ## [4.0.0] - Unreleased
 
 ### Removed
-- :warning: make sure to comment out any removed options in your config
-- ``sling-refresh-peers-interval`` lowering it from the default 1 doesn't help much and if you must set it higher your node is probably too slow anyways
-- ``sling-refresh-gossmap-interval`` gossip reader is so fast now there is no good reason to keep it
+- :warning: Make sure to comment out any removed options in your config
+- ``sling-refresh-peers-interval``: Lowering it from the default 1 doesn't help much and if you must set it higher your node is probably too slow anyways
+- ``sling-refresh-gossmap-interval``: Gossip reader is so fast now there is no good reason to keep it
 
 ### Added
-- `sling-once`: new command to rebalance a specific amount once
-- `sling-stats`: added human readable table view for when you provide a ShortChannelId, json flag can still be set
+- `sling-once`: New command to rebalance a specific amount once
+- `sling-stats`: Added human readable table view for when you provide a ShortChannelId, json flag can still be set
 
 ### Changed
-- optimized gossip file reader to be ~18x faster with similar memory usage
-- optimized route search to be ~2x faster
-- make use of the new trace level logging
-- if possible show node alias in failure log message instead of id
-- ``sling-reset-liquidity-interval`` default value increased to 360m again, if liquidity beliefs are forgotten too quickly it may result in an infinite loop of trying the very cheapest, never succeeding paths
-- slightly increased the minimum channel cost in pathfinding
+- Optimized gossip file reader to be ~20x faster with similar memory usage. On my system it can read a fully synced gossip file in ~110ms.
+- Optimized route search to be ~2x faster
+- Make use of the new trace level logging
+- If possible show node alias in failure log message instead of id
+- ``sling-reset-liquidity-interval``: Default value increased to 360m again, if liquidity beliefs are forgotten too quickly it may result in an infinite loop of trying the very cheapest, never succeeding paths
+- Slightly increased the minimum channel cost in pathfinding
 
 ### Fixed
 - you can no longer add your own channels or your own node id to exceptions, for candidate control use candidatelist/outppm
