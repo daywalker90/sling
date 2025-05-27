@@ -3,6 +3,7 @@
 ## [4.0.0] - Unreleased
 
 ### Removed
+- Dropped support for `CLN <= v24.02`, upgrade your node!
 - :warning: Make sure to comment out any removed options in your config
 - ``sling-refresh-peers-interval``: Lowering it from the default 1 doesn't help much and if you must set it higher your node is probably too slow anyways
 - ``sling-refresh-gossmap-interval``: Gossip reader is so fast now there is no good reason to keep it
@@ -10,17 +11,21 @@
 ### Added
 - `sling-once`: New command to rebalance a specific amount once
 - `sling-stats`: Added human readable table view for when you provide a ShortChannelId, json flag can still be set
+- Sling now also periodically reads constraint information from the ``xpay`` layer in ``CLN >= v24.11``
 
 ### Changed
-- Optimized gossip file reader to be ~20x faster with similar memory usage. On my system it can read a fully synced gossip file in ~110ms.
-- Optimized route search to be ~2x faster
-- Make use of the new trace level logging
+- Optimized gossip file reader to be ~20x faster with similar memory usage. On my system it can read a fully synced gossip file in ~110ms and periodical checks for updates are now instant: ~0ms.
+- Optimized route search to be ~2x faster, on my system down from ~25ms to ~13ms.
+- Make use of the new trace level logging, some debug logs are now trace
 - If possible show node alias in failure log message instead of id
 - ``sling-reset-liquidity-interval``: Default value increased to 360m again, if liquidity beliefs are forgotten too quickly it may result in an infinite loop of trying the very cheapest, never succeeding paths
 - Slightly increased the minimum channel cost in pathfinding
+- Use actual default options so they show up in CLN's ``listconfigs``
+- Refactor to show method usage in CLN's ``help``
 
 ### Fixed
-- you can no longer add your own channels or your own node id to exceptions, for candidate control use candidatelist/outppm
+- You can no longer add your own channels or your own node id to exceptions, for candidate control use ``candidatelist``/``outppm``
+- Jobstates are now sorted properly in the stats view
 
 ## [3.0.6] - 2025-05-03
 
