@@ -12,7 +12,7 @@ use cln_plugin::options::{
     ConfigOption, DefaultIntegerConfigOption, DefaultStringArrayConfigOption,
     DefaultStringConfigOption,
 };
-use cln_plugin::Builder;
+use cln_plugin::{Builder, RpcMethodBuilder};
 use config::*;
 use htlc::block_added;
 use htlc::htlc_handler;
@@ -174,54 +174,63 @@ async fn main() -> Result<(), anyhow::Error> {
         .option(opt_stats_delete_successes_size)
         .option(opt_inform_layers)
         .setconfig_callback(setconfig_callback)
-        .rpcmethod(
-            &(PLUGIN_NAME.to_string() + "-job"),
-            "add sling job",
-            slingjob,
+        .rpcmethod_from_builder(
+            RpcMethodBuilder::new(&(PLUGIN_NAME.to_string() + "-job"), slingjob)
+                .description("Add a sling job")
+                .usage(
+                    "-k scid direction amount maxppm [outppm] [target] [maxhops] \
+                [candidates] [depleteuptopercent] [depleteuptoamount] [paralleljobs]",
+                ),
         )
-        .rpcmethod(
-            &(PLUGIN_NAME.to_string() + "-jobsettings"),
-            "show job settings",
-            slingjobsettings,
+        .rpcmethod_from_builder(
+            RpcMethodBuilder::new(
+                &(PLUGIN_NAME.to_string() + "-jobsettings"),
+                slingjobsettings,
+            )
+            .description("Show settings of sling job(s)")
+            .usage("[scid]"),
         )
-        .rpcmethod(
-            &(PLUGIN_NAME.to_string() + "-deletejob"),
-            "delete sling job",
-            slingdeletejob,
+        .rpcmethod_from_builder(
+            RpcMethodBuilder::new(&(PLUGIN_NAME.to_string() + "-deletejob"), slingdeletejob)
+                .description("Delete sling job(s)")
+                .usage("job"),
         )
-        .rpcmethod(
-            &(PLUGIN_NAME.to_string() + "-go"),
-            "start sling jobs",
-            slinggo,
+        .rpcmethod_from_builder(
+            RpcMethodBuilder::new(&(PLUGIN_NAME.to_string() + "-go"), slinggo)
+                .description("Start sling job(s)")
+                .usage("[scid]"),
         )
-        .rpcmethod(
-            &(PLUGIN_NAME.to_string() + "-stop"),
-            "stop sling jobs",
-            slingstop,
+        .rpcmethod_from_builder(
+            RpcMethodBuilder::new(&(PLUGIN_NAME.to_string() + "-stop"), slingstop)
+                .description("Stop sling job(s)")
+                .usage("[scid]"),
         )
-        .rpcmethod(
-            &(PLUGIN_NAME.to_string() + "-once"),
-            "run sling rebalacnce once",
-            slingonce,
+        .rpcmethod_from_builder(
+            RpcMethodBuilder::new(&(PLUGIN_NAME.to_string() + "-once"), slingonce)
+                .description("Run sling rebalance once with fixed amount")
+                .usage(
+                    "-k scid direction amount maxppm onceamount [outppm] [maxhops] \
+        [candidates] [depleteuptopercent] [depleteuptoamount] [paralleljobs]",
+                ),
         )
-        .rpcmethod(
-            &(PLUGIN_NAME.to_string() + "-stats"),
-            "show stats on channel(s)",
-            slingstats,
+        .rpcmethod_from_builder(
+            RpcMethodBuilder::new(&(PLUGIN_NAME.to_string() + "-stats"), slingstats)
+                .description("Show stats on channel(s)")
+                .usage("[scid] [json]"),
         )
-        .rpcmethod(
-            &(PLUGIN_NAME.to_string() + "-except-chan"),
-            "channels to avoid for all jobs",
-            slingexceptchan,
+        .rpcmethod_from_builder(
+            RpcMethodBuilder::new(&(PLUGIN_NAME.to_string() + "-except-chan"), slingexceptchan)
+                .description("Manage channels to avoid for all jobs")
+                .usage("command [scid]"),
         )
-        .rpcmethod(
-            &(PLUGIN_NAME.to_string() + "-except-peer"),
-            "peers to avoid for all jobs",
-            slingexceptpeer,
+        .rpcmethod_from_builder(
+            RpcMethodBuilder::new(&(PLUGIN_NAME.to_string() + "-except-peer"), slingexceptpeer)
+                .description("Manage peers to avoid for all jobs")
+                .usage("command [id]"),
         )
         .rpcmethod(
             &(PLUGIN_NAME.to_string() + "-version"),
-            "print version",
+            "Print sling plugin version",
             slingversion,
         )
         .subscribe("shutdown", shutdown_handler)
