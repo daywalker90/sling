@@ -9,6 +9,6 @@ jobs:
     call-ci:
         uses: ./.github/workflows/ci.yml
         with:
-            cln-version: "v25.05rc1"
-            pyln-version: "25.2.2"
+            cln-version: "v25.05"
+            pyln-version: "25.5"
             tagged-release: true
