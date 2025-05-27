@@ -1,25 +1,26 @@
 use std::{
-    collections::HashMap,
+    collections::hash_map,
+    fs::File,
+    io::BufReader,
     path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use anyhow::Error;
+use anyhow::{anyhow, Error};
 use cln_plugin::Plugin;
 use cln_rpc::{
-    model::requests::{ListnodesRequest, ListpeerchannelsRequest},
-    primitives::{Amount, ChannelState, ShortChannelId},
+    model::requests::{AskrenelistlayersRequest, ListnodesRequest, ListpeerchannelsRequest},
+    primitives::{Amount, ChannelState, ShortChannelIdDir},
     ClnRpc,
 };
 
-use sling::DirectedChannel;
 use tokio::{
     fs::OpenOptions,
     io::AsyncWriteExt,
     time::{self, Instant},
 };
 
-use crate::{gossip::read_gossip_store, model::*, util::*};
+use crate::{gossip::read_gossip_store, model::*};
 
 pub async fn refresh_aliasmap(plugin: Plugin<PluginState>) -> Result<(), Error> {
     loop {
@@ -49,19 +50,14 @@ pub async fn refresh_aliasmap(plugin: Plugin<PluginState>) -> Result<(), Error> 
 
 pub async fn refresh_listpeerchannels_loop(plugin: Plugin<PluginState>) -> Result<(), Error> {
     loop {
-        let interval;
         {
-            let config = plugin.state().config.lock();
-            interval = config.refresh_peers_interval;
+            refresh_listpeerchannels(plugin.clone()).await?;
         }
-        {
-            refresh_listpeerchannels(&plugin).await?;
-        }
-        time::sleep(Duration::from_secs(interval)).await;
+        time::sleep(Duration::from_secs(1)).await;
     }
 }
 
-pub async fn refresh_listpeerchannels(plugin: &Plugin<PluginState>) -> Result<(), Error> {
+pub async fn refresh_listpeerchannels(plugin: Plugin<PluginState>) -> Result<(), Error> {
     let rpc_path;
     {
         let config = plugin.state().config.lock();
@@ -71,38 +67,44 @@ pub async fn refresh_listpeerchannels(plugin: &Plugin<PluginState>) -> Result<()
 
     let now = Instant::now();
     *plugin.state().peer_channels.lock() = rpc
-        .call_typed(&ListpeerchannelsRequest { id: None })
+        .call_typed(&ListpeerchannelsRequest {
+            id: None,
+            short_channel_id: None,
+        })
         .await?
         .channels
         .into_iter()
         .filter_map(|channel| channel.short_channel_id.map(|id| (id, channel)))
         .collect();
-    log::debug!("Peerchannels refreshed in {}ms", now.elapsed().as_millis());
+    log::trace!("Peerchannels refreshed in {}ms", now.elapsed().as_millis());
     Ok(())
 }
 
 pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
-    let my_pubkey;
-    let sling_dir;
-    let mut offset = 0;
+    let my_pubkey = plugin.state().config.lock().pubkey_bytes;
+    let mut is_startup = true;
+
+    let gossip_file =
+        File::open(Path::new(&plugin.configuration().lightning_dir).join("gossip_store"))?;
+
+    let mut reader = BufReader::new(gossip_file);
+
+    let interval;
     {
         let config = plugin.state().config.lock();
-        my_pubkey = config.pubkey;
-        sling_dir = config.sling_dir.clone();
+        if config.network != "bitcoin" {
+            interval = 1;
+        } else {
+            interval = 10;
+        }
     }
-    *plugin.state().graph.lock() = read_graph(&sling_dir).await?;
 
     loop {
-        let interval;
         {
             let now = Instant::now();
             {
-                let config = plugin.state().config.lock();
-                interval = config.refresh_gossmap_interval;
-            }
-            {
                 log::debug!("Getting all channels in gossip_store...");
-                read_gossip_store(plugin.clone(), &mut offset).await?;
+                read_gossip_store(plugin.clone(), &mut reader, &mut is_startup).await?;
                 log::debug!(
                     "Reading gossip store done after {}ms!",
                     now.elapsed().as_millis()
@@ -111,12 +113,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                 let mut lngraph = plugin.state().graph.lock();
                 log::debug!(
                     "{} public channels in sling graph after {}ms!",
-                    lngraph
-                        .graph
-                        .values()
-                        .flatten()
-                        .filter(|(_, y)| !y.private)
-                        .count(),
+                    lngraph.public_channel_count(),
                     now.elapsed().as_millis()
                 );
 
@@ -140,122 +137,89 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     if !private {
                         continue;
                     }
+                    if !(chan.state == ChannelState::CHANNELD_NORMAL
+                        || chan.state == ChannelState::CHANNELD_AWAITING_SPLICE)
+                    {
+                        continue;
+                    }
                     let local_alias = chan.alias.as_ref().and_then(|l| l.local);
                     let remote_alias = chan.alias.as_ref().and_then(|l| l.remote);
                     let updates = if let Some(upd) = &chan.updates {
                         upd
                     } else {
-                        // pre 24.02 versions don't have this and
-                        // get private channel gossip from gossip_store
-                        // but we don't get the alias there
-                        if let Some(dir_chans) = lngraph.graph.get_mut(&my_pubkey) {
-                            let dir_chan = DirectedChannel {
-                                short_channel_id: chan.short_channel_id.unwrap(),
-                                direction: chan.direction.unwrap(),
-                            };
-                            if let Some(dir_chan_state) = dir_chans.get_mut(&dir_chan) {
-                                dir_chan_state.scid_alias = local_alias;
-                                dir_chan_state.private = true;
-                            }
-                        }
-                        if let Some(dir_chans) = lngraph.graph.get_mut(&chan.peer_id) {
-                            let dir_chan = DirectedChannel {
-                                short_channel_id: chan.short_channel_id.unwrap(),
-                                direction: chan.direction.unwrap() ^ 1,
-                            };
-                            if let Some(dir_chan_state) = dir_chans.get_mut(&dir_chan) {
-                                dir_chan_state.scid_alias = remote_alias;
-                                dir_chan_state.private = true;
-                            }
-                        }
+                        log::debug!(
+                            "{} is missing updates field",
+                            chan.short_channel_id.unwrap()
+                        );
                         continue;
                     };
-                    if chan.state == ChannelState::CHANNELD_NORMAL
-                        || chan.state == ChannelState::CHANNELD_AWAITING_SPLICE
-                    {
-                        lngraph.graph.entry(my_pubkey).or_default().insert(
-                            DirectedChannel {
+
+                    lngraph.insert(
+                        ShortChannelIdDir {
+                            short_channel_id: chan.short_channel_id.unwrap(),
+                            direction: chan.direction.unwrap(),
+                        },
+                        ShortChannelIdDirState {
+                            source: my_pubkey,
+                            destination: PubKeyBytes::from_pubkey(&chan.peer_id),
+                            scid_alias: local_alias,
+                            fee_per_millionth: updates.local.fee_proportional_millionths,
+                            base_fee_millisatoshi: Amount::msat(&updates.local.fee_base_msat)
+                                as u32,
+                            htlc_maximum_msat: updates.local.htlc_maximum_msat,
+                            htlc_minimum_msat: updates.local.htlc_minimum_msat,
+                            delay: updates.local.cltv_expiry_delta,
+                            active: chan.peer_connected,
+                            last_update: timestamp as u32,
+                            private: true,
+                        },
+                    );
+
+                    if let Some(remote_updates) = &updates.remote {
+                        lngraph.insert(
+                            ShortChannelIdDir {
                                 short_channel_id: chan.short_channel_id.unwrap(),
-                                direction: chan.direction.unwrap(),
+                                direction: chan.direction.unwrap() ^ 1,
                             },
-                            DirectedChannelState {
-                                source: my_pubkey,
-                                destination: chan.peer_id,
-                                scid_alias: local_alias,
-                                fee_per_millionth: updates.local.fee_proportional_millionths,
-                                base_fee_millisatoshi: Amount::msat(&updates.local.fee_base_msat)
+                            ShortChannelIdDirState {
+                                source: PubKeyBytes::from_pubkey(&chan.peer_id),
+                                destination: my_pubkey,
+                                scid_alias: remote_alias,
+                                fee_per_millionth: remote_updates.fee_proportional_millionths,
+                                base_fee_millisatoshi: Amount::msat(&remote_updates.fee_base_msat)
                                     as u32,
-                                htlc_maximum_msat: updates.local.htlc_maximum_msat,
-                                htlc_minimum_msat: updates.local.htlc_minimum_msat,
-                                amount_msat: chan.total_msat.unwrap(),
-                                delay: updates.local.cltv_expiry_delta,
+                                htlc_maximum_msat: remote_updates.htlc_maximum_msat,
+                                htlc_minimum_msat: remote_updates.htlc_minimum_msat,
+                                delay: remote_updates.cltv_expiry_delta,
                                 active: chan.peer_connected,
                                 last_update: timestamp as u32,
-                                liquidity: chan.spendable_msat.unwrap().msat(),
-                                liquidity_age: timestamp,
                                 private: true,
                             },
                         );
-
-                        if let Some(remote_updates) = &updates.remote {
-                            lngraph.graph.entry(chan.peer_id).or_default().insert(
-                                DirectedChannel {
-                                    short_channel_id: chan.short_channel_id.unwrap(),
-                                    direction: chan.direction.unwrap() ^ 1,
-                                },
-                                DirectedChannelState {
-                                    source: chan.peer_id,
-                                    destination: my_pubkey,
-                                    scid_alias: remote_alias,
-                                    fee_per_millionth: remote_updates.fee_proportional_millionths,
-                                    base_fee_millisatoshi: Amount::msat(
-                                        &remote_updates.fee_base_msat,
-                                    )
-                                        as u32,
-                                    htlc_maximum_msat: remote_updates.htlc_maximum_msat,
-                                    htlc_minimum_msat: remote_updates.htlc_minimum_msat,
-                                    amount_msat: chan.total_msat.unwrap(),
-                                    delay: remote_updates.cltv_expiry_delta,
-                                    active: chan.peer_connected,
-                                    last_update: timestamp as u32,
-                                    liquidity: chan.receivable_msat.unwrap().msat(),
-                                    liquidity_age: timestamp,
-                                    private: true,
-                                },
-                            );
-                        } else {
-                            log::debug!(
-                                "No remote gossip found for private channel {:?}, \
-                            not adding to graph",
-                                chan.short_channel_id
-                            );
-                        }
+                    } else {
+                        log::debug!(
+                            "No remote gossip found for private channel {}, \
+                            not adding that direction to graph",
+                            chan.short_channel_id.unwrap()
+                        );
                     }
                 }
-                for channels in lngraph.graph.values_mut() {
-                    channels.retain(|k, v| {
-                        !v.private
-                            || if let Some(c) = local_channels.get(&k.short_channel_id) {
-                                c.state == ChannelState::CHANNELD_NORMAL
-                                    || c.state == ChannelState::CHANNELD_AWAITING_SPLICE
-                            } else {
-                                false
-                            }
-                    })
-                }
+
+                lngraph.retain(|k, v| {
+                    !v.private
+                        || if let Some(c) = local_channels.get(&k.short_channel_id) {
+                            c.state == ChannelState::CHANNELD_NORMAL
+                                || c.state == ChannelState::CHANNELD_AWAITING_SPLICE
+                        } else {
+                            false
+                        }
+                });
 
                 log::debug!(
                     "{} private channels in sling graph after {}ms!",
-                    lngraph
-                        .graph
-                        .values()
-                        .flatten()
-                        .filter(|(_, y)| y.private)
-                        .count(),
+                    lngraph.private_channel_count(),
                     now.elapsed().as_millis()
                 );
-
-                lngraph.graph.retain(|_, v| !v.is_empty());
             }
             log::debug!("Refreshed graph in {}ms!", now.elapsed().as_millis());
         }
@@ -268,8 +232,17 @@ pub async fn refresh_liquidity(plugin: Plugin<PluginState>) -> Result<(), Error>
         {
             let interval = plugin.state().config.lock().reset_liquidity_interval;
             let now = Instant::now();
-            plugin.state().graph.lock().refresh_liquidity(interval);
-            log::info!("Refreshed Liquidity in {}ms!", now.elapsed().as_millis());
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            let mut liquidity = plugin.state().liquidity.lock();
+            liquidity.retain(|_, v| v.liquidity_age > timestamp - interval * 60);
+            log::info!(
+                "Refreshed {} liquidity beliefs in {}ms!",
+                liquidity.len(),
+                now.elapsed().as_millis()
+            );
         }
         time::sleep(Duration::from_secs(120)).await;
     }
@@ -295,36 +268,9 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
     loop {
         {
             let now = Instant::now();
-            let mut successes = HashMap::new();
-            let mut failures = HashMap::new();
-            refresh_joblists(plugin.clone()).await?;
-            let pull_jobs = plugin.state().pull_jobs.lock().clone();
-            let push_jobs = plugin.state().push_jobs.lock().clone();
-            let mut all_jobs: Vec<ShortChannelId> =
-                pull_jobs.into_iter().chain(push_jobs.into_iter()).collect();
+            let successes = SuccessReb::read_from_files(&sling_dir, None).await?;
+            let failures = FailureReb::read_from_files(&sling_dir, None).await?;
 
-            let scid_peer_map;
-            {
-                let peer_channels = plugin.state().peer_channels.lock();
-                scid_peer_map = get_all_normal_channels_from_listpeerchannels(&peer_channels);
-            }
-
-            all_jobs.retain(|c| scid_peer_map.contains_key(c));
-            for scid in &all_jobs {
-                match SuccessReb::read_from_file(&sling_dir, scid).await {
-                    Ok(o) => {
-                        successes.insert(scid, o);
-                    }
-                    Err(e) => log::debug!("{}: probably no success stats yet: {:?}", scid, e),
-                };
-
-                match FailureReb::read_from_file(&sling_dir, scid).await {
-                    Ok(o) => {
-                        failures.insert(scid, o);
-                    }
-                    Err(e) => log::debug!("{}: probably no failure stats yet: {:?}", scid, e),
-                };
-            }
             let stats_delete_successes_age =
                 plugin.state().config.lock().stats_delete_successes_age;
             let stats_delete_failures_age = plugin.state().config.lock().stats_delete_failures_age;
@@ -378,7 +324,7 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     .write(true)
                     .create(true)
                     .truncate(true)
-                    .open(sling_dir.join(chan_id.to_string() + SUCCESSES_SUFFIX))
+                    .open(sling_dir.join(chan_id.to_string() + "_" + SUCCESSES_SUFFIX))
                     .await?;
                 file.write_all(&content).await?;
             }
@@ -422,12 +368,82 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     .write(true)
                     .create(true)
                     .truncate(true)
-                    .open(sling_dir.join(chan_id.to_string() + FAILURES_SUFFIX))
+                    .open(sling_dir.join(chan_id.to_string() + "_" + FAILURES_SUFFIX))
                     .await?;
                 file.write_all(&content).await?;
             }
             log::debug!("Pruned stats successfully in {}s!", now.elapsed().as_secs());
         }
         time::sleep(Duration::from_secs(21_600)).await;
+    }
+}
+
+pub async fn read_askrene_liquidity(plugin: Plugin<PluginState>) -> Result<(), Error> {
+    let rpc_path = plugin.state().config.lock().rpc_path.clone();
+    let interval = plugin.state().config.lock().reset_liquidity_interval * 60;
+    let mut rpc = ClnRpc::new(&rpc_path).await?;
+    loop {
+        {
+            let now = Instant::now();
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            let xpay_layer_resp = rpc
+                .call_typed(&AskrenelistlayersRequest {
+                    layer: Some("xpay".to_owned()),
+                })
+                .await?;
+
+            let xpay_layer = xpay_layer_resp
+                .layers
+                .first()
+                .ok_or_else(|| anyhow!("no xpay layer"))?;
+            let mut liquidity = plugin.state().liquidity.lock();
+            let mut counter = 0;
+            for belief in xpay_layer.constraints.iter() {
+                let scid_dir = if let Some(sd) = belief.short_channel_id_dir {
+                    sd
+                } else {
+                    continue;
+                };
+                let belief_timestamp = if let Some(ts) = belief.timestamp {
+                    ts
+                } else {
+                    continue;
+                };
+                let belief_maximum_msat = if let Some(mm) = belief.maximum_msat {
+                    mm.msat()
+                } else {
+                    continue;
+                };
+                if belief_timestamp < timestamp - interval {
+                    continue;
+                }
+                counter += 1;
+                match liquidity.entry(scid_dir) {
+                    hash_map::Entry::Occupied(mut occupied_entry) => {
+                        if occupied_entry.get().liquidity_age < belief_timestamp {
+                            *occupied_entry.get_mut() = Liquidity {
+                                liquidity_msat: belief_maximum_msat,
+                                liquidity_age: belief_timestamp,
+                            };
+                        }
+                    }
+                    hash_map::Entry::Vacant(vacant_entry) => {
+                        vacant_entry.insert(Liquidity {
+                            liquidity_msat: belief_maximum_msat,
+                            liquidity_age: belief_timestamp,
+                        });
+                    }
+                };
+            }
+            log::info!(
+                "Read {} askerene liquidity constraints in {}ms!",
+                counter,
+                now.elapsed().as_millis()
+            );
+        }
+        time::sleep(Duration::from_secs(60)).await;
     }
 }

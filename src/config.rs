@@ -10,9 +10,9 @@ use serde_json::json;
 use crate::{
     at_or_above_version, model::PluginState, Config, OPT_CANDIDATES_MIN_AGE, OPT_DEPLETEUPTOAMOUNT,
     OPT_DEPLETEUPTOPERCENT, OPT_INFORM_LAYERS, OPT_MAXHOPS, OPT_MAX_HTLC_COUNT, OPT_PARALLELJOBS,
-    OPT_REFRESH_ALIASMAP_INTERVAL, OPT_REFRESH_GOSSMAP_INTERVAL, OPT_REFRESH_PEERS_INTERVAL,
-    OPT_RESET_LIQUIDITY_INTERVAL, OPT_STATS_DELETE_FAILURES_AGE, OPT_STATS_DELETE_FAILURES_SIZE,
-    OPT_STATS_DELETE_SUCCESSES_AGE, OPT_STATS_DELETE_SUCCESSES_SIZE, OPT_TIMEOUTPAY,
+    OPT_REFRESH_ALIASMAP_INTERVAL, OPT_RESET_LIQUIDITY_INTERVAL, OPT_STATS_DELETE_FAILURES_AGE,
+    OPT_STATS_DELETE_FAILURES_SIZE, OPT_STATS_DELETE_SUCCESSES_AGE,
+    OPT_STATS_DELETE_SUCCESSES_SIZE, OPT_TIMEOUTPAY,
 };
 
 pub async fn setconfig_callback(
@@ -66,15 +66,20 @@ fn parse_option(name: &str, value: &serde_json::Value) -> Result<options::Value,
                 Err(anyhow!("{} is not a valid string!", name))
             }
         }
-        // n if n.eq(OPT_UTF8) => {
-        //     if let Some(n_bool) = value.as_bool() {
-        //         return Ok(options::Value::Boolean(n_bool));
-        //     } else if let Some(n_str) = value.as_str() {
-        //         if let Ok(n_str_bool) = n_str.parse::<bool>() {
-        //             return Ok(options::Value::Boolean(n_str_bool));
+        // n if n.eq(OPT_INFORM_LAYERS) => {
+        //     if let Some(layers) = value.as_array() {
+        //         let mut string_array = Vec::new();
+        //         for layer in layers.iter() {
+        //             if layer.is_string() {
+        //                 string_array.push(layer.as_str().unwrap().to_owned());
+        //             } else {
+        //                 return Err(anyhow!("{} is not a valid string!", layer));
+        //             }
         //         }
+        //         Ok(options::Value::StringArray(string_array))
+        //     } else {
+        //         Err(anyhow!("{} is not a valid string array!", name))
         //     }
-        //     Err(anyhow!("{} is not a valid boolean!", name))
         // }
         _ => {
             if let Some(n_i64) = value.as_i64() {
@@ -160,14 +165,8 @@ pub async fn get_startup_options(
     config.cltv_delta = cltv_delta;
     config.at_or_above_24_11 = at_or_above_version(&config.version, "24.11")?;
 
-    if let Some(rpi) = plugin.option_str(OPT_REFRESH_PEERS_INTERVAL)? {
-        check_option(&mut config, OPT_REFRESH_PEERS_INTERVAL, &rpi)?;
-    };
     if let Some(rai) = plugin.option_str(OPT_REFRESH_ALIASMAP_INTERVAL)? {
         check_option(&mut config, OPT_REFRESH_ALIASMAP_INTERVAL, &rai)?;
-    };
-    if let Some(rgi) = plugin.option_str(OPT_REFRESH_GOSSMAP_INTERVAL)? {
-        check_option(&mut config, OPT_REFRESH_GOSSMAP_INTERVAL, &rgi)?;
     };
     if let Some(rli) = plugin.option_str(OPT_RESET_LIQUIDITY_INTERVAL)? {
         check_option(&mut config, OPT_RESET_LIQUIDITY_INTERVAL, &rli)?;
@@ -214,21 +213,9 @@ pub async fn get_startup_options(
 
 fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Result<(), Error> {
     match name {
-        n if n.eq(OPT_REFRESH_PEERS_INTERVAL) => {
-            config.refresh_peers_interval =
-                options_value_to_u64(OPT_REFRESH_PEERS_INTERVAL, value.as_i64().unwrap(), 1, None)?
-        }
         n if n.eq(OPT_REFRESH_ALIASMAP_INTERVAL) => {
             config.refresh_aliasmap_interval = options_value_to_u64(
                 OPT_REFRESH_ALIASMAP_INTERVAL,
-                value.as_i64().unwrap(),
-                1,
-                None,
-            )?
-        }
-        n if n.eq(OPT_REFRESH_GOSSMAP_INTERVAL) => {
-            config.refresh_gossmap_interval = options_value_to_u64(
-                OPT_REFRESH_GOSSMAP_INTERVAL,
                 value.as_i64().unwrap(),
                 1,
                 None,
@@ -286,7 +273,7 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
             )?)?
         }
         n if n.eq(OPT_PARALLELJOBS) => {
-            config.paralleljobs = u8::try_from(options_value_to_u64(
+            config.paralleljobs = u16::try_from(options_value_to_u64(
                 OPT_PARALLELJOBS,
                 value.as_i64().unwrap(),
                 1,

@@ -1,38 +1,45 @@
-use crate::model::{DijkstraNode, ExcludeGraph, LnGraph, PublicKeyPair};
+use crate::model::{Config, DijkstraNode, JobMessage, Liquidity, LnGraph, PubKeyBytes, Task};
 use crate::util::{edge_cost, fee_total_msat_precise};
-use anyhow::Error;
+use anyhow::{anyhow, Error};
 use cln_rpc::model::requests::SendpayRoute;
 use cln_rpc::primitives::*;
-use sling::{DirectedChannel, Job, SatDirection};
+use sling::{Job, SatDirection};
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::BinaryHeap;
+
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
 };
-#[allow(clippy::too_many_arguments)]
 pub fn dijkstra(
-    my_pubkey: &PublicKey,
+    config: &Config,
     lngraph: &LnGraph,
-    start: &PublicKey,
-    goal: &PublicKey,
-    slingchan: &DijkstraNode,
     job: &Job,
-    candidatelist: &[ShortChannelId],
-    max_hops: u8,
-    exclude_graph: &ExcludeGraph,
-    last_delay: u32,
-    tempbans: &HashMap<ShortChannelId, u64>,
-    parallel_bans: &[DirectedChannel],
+    task: &mut Task,
+    actual_candidates: &[ShortChannelId],
+    excepts: &[ShortChannelIdDir],
+    liquidity: &HashMap<ShortChannelIdDir, Liquidity>,
 ) -> Result<Vec<SendpayRoute>, Error> {
-    let mut visited = HashSet::with_capacity(lngraph.graph.len());
+    let two_weeks_ago = (SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        - 60 * 60 * 24 * 14) as u32;
+
+    let mut visited = HashSet::with_capacity(lngraph.node_count());
     let mut scores = HashMap::new();
     let mut predecessor = HashMap::new();
     let mut visit_next = BinaryHeap::new();
     let zero_score = u64::default();
 
-    scores.insert(*start, *slingchan);
-    visit_next.push(MinScored(zero_score, *start));
+    let (start, goal) = match job.sat_direction {
+        SatDirection::Pull => (config.pubkey_bytes, task.other_pubkey),
+        SatDirection::Push => (task.other_pubkey, config.pubkey_bytes),
+    };
+    let slingchan = construct_first_node(task, config, lngraph, job.sat_direction, start)?;
+    scores.insert(&start, slingchan);
+    visit_next.push(MinScored(zero_score, &start));
     while let Some(MinScored(node_score, node)) = visit_next.pop() {
         if visited.contains(&node) {
             // debug!(
@@ -42,7 +49,7 @@ pub fn dijkstra(
             // );
             continue;
         }
-        if goal == &node {
+        if &goal == node {
             // debug!(
             //     "{}: arrived at goal: {}  {}",
             //     slingchan.channel.short_channel_id.to_string(),
@@ -52,22 +59,19 @@ pub fn dijkstra(
             break;
         }
         let current_hops = scores.get(&node).unwrap().hops;
-        if current_hops + 2 > max_hops {
+        if current_hops + 2 > job.get_maxhops(config.maxhops) {
             continue;
         }
         for (scid, edge) in lngraph.edges(
-            &PublicKeyPair {
-                my_pubkey: *my_pubkey,
-                other_pubkey: node,
-            },
-            exclude_graph,
+            node,
+            two_weeks_ago,
+            actual_candidates,
+            config,
             job,
-            candidatelist,
-            tempbans,
-            parallel_bans,
+            excepts,
+            liquidity,
         ) {
-            let next = edge.destination;
-            if visited.contains(&next) {
+            if visited.contains(&edge.destination) {
                 // debug!(
                 //     "{}: already visited: {}",
                 //     slingchan.channel.short_channel_id.to_string(),
@@ -75,7 +79,7 @@ pub fn dijkstra(
                 // );
                 continue;
             }
-            let next_score = if edge.source == *my_pubkey {
+            let next_score = if edge.source == config.pubkey_bytes {
                 0
             } else {
                 node_score + edge_cost(edge, job.amount_msat)
@@ -87,14 +91,8 @@ pub fn dijkstra(
             //     &node_score,
             //     &next_score
             // );
-            let dijkstra_node = DijkstraNode {
-                score: next_score,
-                channel_state: edge,
-                destination: next,
-                hops: current_hops + 1,
-                short_channel_id: scid.short_channel_id,
-            };
-            match scores.entry(next) {
+
+            match scores.entry(&edge.destination) {
                 Occupied(ent) => {
                     if next_score < ent.get().score {
                         // debug!(
@@ -102,9 +100,16 @@ pub fn dijkstra(
                         //     slingchan.channel.short_channel_id.to_string(),
                         //     &next
                         // );
+                        let dijkstra_node = DijkstraNode {
+                            score: next_score,
+                            channel_state: *edge,
+                            destination: edge.destination,
+                            hops: current_hops + 1,
+                            short_channel_id: scid.short_channel_id,
+                        };
                         *ent.into_mut() = dijkstra_node;
-                        visit_next.push(MinScored(next_score, next));
-                        predecessor.insert(next, node);
+                        visit_next.push(MinScored(next_score, &edge.destination));
+                        predecessor.insert(&edge.destination, node);
                     }
                 }
                 Vacant(ent) => {
@@ -114,9 +119,16 @@ pub fn dijkstra(
                     //     &next,
                     //     &edge.channel.short_channel_id.to_string()
                     // );
+                    let dijkstra_node = DijkstraNode {
+                        score: next_score,
+                        channel_state: *edge,
+                        destination: edge.destination,
+                        hops: current_hops + 1,
+                        short_channel_id: scid.short_channel_id,
+                    };
                     ent.insert(dijkstra_node);
-                    visit_next.push(MinScored(next_score, next));
-                    predecessor.insert(next, node);
+                    visit_next.push(MinScored(next_score, &edge.destination));
+                    predecessor.insert(&edge.destination, node);
                 }
             }
         }
@@ -125,29 +137,29 @@ pub fn dijkstra(
 
     build_route(
         &predecessor,
-        goal,
+        &goal,
         &scores,
         job,
-        start,
-        slingchan,
-        last_delay,
+        &start,
+        &slingchan,
+        config,
     )
 }
 
 fn build_route(
-    predecessor: &HashMap<PublicKey, PublicKey>,
-    goal: &PublicKey,
-    scores: &HashMap<PublicKey, DijkstraNode>,
+    predecessor: &HashMap<&PubKeyBytes, &PubKeyBytes>,
+    goal: &PubKeyBytes,
+    scores: &HashMap<&PubKeyBytes, DijkstraNode>,
     job: &Job,
-    start: &PublicKey,
+    start: &PubKeyBytes,
     slingchan: &DijkstraNode,
-    last_delay: u32,
+    config: &Config,
 ) -> Result<Vec<SendpayRoute>, Error> {
     let mut dijkstra_path = Vec::new();
     // debug!("predecssors: {:?}", predecessor);
     let mut prev;
     match predecessor.get(goal) {
-        Some(node) => prev = node,
+        Some(node) => prev = *node,
         None => return Ok(vec![]),
     };
     dijkstra_path.push(*scores.get(goal).unwrap());
@@ -171,7 +183,7 @@ fn build_route(
     let mut sendpay_route = Vec::new();
     let mut prev_amount_msat;
     let mut amount_msat = Amount::from_msat(0);
-    let mut delay = last_delay;
+    let mut delay = config.cltv_delta;
 
     let first_hop = if !dijkstra_path.is_empty() {
         dijkstra_path.first().unwrap()
@@ -190,7 +202,7 @@ fn build_route(
                 0,
                 SendpayRoute {
                     amount_msat: Amount::from_msat(job.amount_msat),
-                    id: dijkstra_path.first().unwrap().destination,
+                    id: dijkstra_path.first().unwrap().destination.to_pubkey(),
                     delay,
                     channel: routing_scid,
                 },
@@ -205,7 +217,7 @@ fn build_route(
                 0,
                 SendpayRoute {
                     amount_msat,
-                    id: hop.destination,
+                    id: hop.destination.to_pubkey(),
                     delay,
                     channel: routing_scid,
                 },
@@ -224,6 +236,53 @@ fn build_route(
         delay += hop.channel_state.delay;
     }
     Ok(sendpay_route)
+}
+
+fn construct_first_node(
+    task: &mut Task,
+    config: &Config,
+    lngraph: &LnGraph,
+    sat_direction: SatDirection,
+    destination: PubKeyBytes,
+) -> Result<DijkstraNode, Error> {
+    match sat_direction {
+        SatDirection::Pull => {
+            let (_scid_dir, slingchan_inc) =
+                match lngraph.get_state_no_direction(&task.other_pubkey, &task.get_chan_id()) {
+                    Ok(in_chan) => in_chan,
+                    Err(_) => {
+                        log::warn!("{}: channel not found in graph!", task);
+                        task.set_state(JobMessage::ChanNotInGraph);
+                        return Err(anyhow!("channel not found in graph"));
+                    }
+                };
+            Ok(DijkstraNode {
+                score: 0,
+                channel_state: *slingchan_inc,
+                destination,
+                short_channel_id: task.get_chan_id(),
+                hops: 0,
+            })
+        }
+        SatDirection::Push => {
+            let (_scid_dir, slingchan_out) =
+                match lngraph.get_state_no_direction(&config.pubkey_bytes, &task.get_chan_id()) {
+                    Ok(in_chan) => in_chan,
+                    Err(_) => {
+                        log::warn!("{}: channel not found in graph!", task);
+                        task.set_state(JobMessage::ChanNotInGraph);
+                        return Err(anyhow!("channel not found in graph"));
+                    }
+                };
+            Ok(DijkstraNode {
+                score: 0,
+                channel_state: *slingchan_out,
+                destination,
+                short_channel_id: task.get_chan_id(),
+                hops: 0,
+            })
+        }
+    }
 }
 
 /// `MinScored<K, T>` holds a score `K` and a scored object `T` in

@@ -15,59 +15,148 @@ use sling::{
     ChannelPartnerStats, FailureReasonCount, FailuresInTimeWindow, PeerPartnerStats, SlingStats,
     SuccessesInTimeWindow,
 };
+use tabled::settings::{Panel, Rotate};
 use tabled::Table;
 
-use crate::model::{FailureReb, SuccessReb};
-use crate::model::{JobState, PluginState, StatSummary, NO_ALIAS_SET, PLUGIN_NAME};
-use crate::util::{get_all_normal_channels_from_listpeerchannels, refresh_joblists};
+use crate::model::{FailureReb, JobMessage, SuccessReb};
+use crate::model::{PluginState, StatSummary, NO_ALIAS_SET, PLUGIN_NAME};
+use crate::util::{get_all_normal_channels_from_listpeerchannels, read_jobs};
 
 pub async fn slingstats(
     plugin: Plugin<PluginState>,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, Error> {
+    let _rpc_lock = plugin.state().rpc_lock.lock().await;
+
     let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
 
-    let input_array = match args {
-        serde_json::Value::Array(a) => a,
+    let (scid, json_summary) = match args {
+        serde_json::Value::Array(a) => {
+            if a.len() > 2 {
+                return Err(anyhow!(
+                    "Too many arguments, please only provide `scid` and/or `json`"
+                ));
+            }
+            if a.is_empty() {
+                (None, false)
+            } else if let Some(flag) = a.first().unwrap().as_bool() {
+                (None, flag)
+            } else {
+                let scid = match a.first().unwrap() {
+                    serde_json::Value::String(i) => ShortChannelId::from_str(i)?,
+                    _ => return Err(anyhow!("invalid short_channel_id")),
+                };
+                let json_flag = match a.get(1) {
+                    Some(serde_json::Value::Bool(i)) => *i,
+                    None => false,
+                    _ => {
+                        return Err(anyhow!(
+                            "invalid `json` flag, not a bool. Use `true` or `false`"
+                        ))
+                    }
+                };
+                (Some(scid), json_flag)
+            }
+        }
+        serde_json::Value::Object(o) => {
+            let scid = match o.get("scid") {
+                Some(serde_json::Value::String(i)) => Some(ShortChannelId::from_str(i)?),
+                None => None,
+                _ => return Err(anyhow!("invalid scid, not a string")),
+            };
+            let json_summary = match o.get("json") {
+                Some(serde_json::Value::Bool(i)) => *i,
+                None => false,
+                _ => {
+                    return Err(anyhow!(
+                        "invalid `json` flag, not a bool. Use `true` or `false`"
+                    ))
+                }
+            };
+            (scid, json_summary)
+        }
         e => {
             return Err(anyhow!(
-                "sling-stats: invalid arguments, expected array, got: {}",
+                "sling-stats: invalid arguments, expected array or object, got: {}",
                 e
             ))
         }
     };
-    if input_array.len() > 1 {
-        return Err(anyhow!(
-            "Please provide exactly one short_channel_id or a true/false for the summary to be json"
-        ));
-    }
 
-    let mut json_summary = false;
-    let is_summary;
+    let config = plugin.state().config.lock().clone();
+    let stats_delete_successes_age = config.stats_delete_successes_age;
+    let stats_delete_failures_age = config.stats_delete_failures_age;
 
-    if !input_array.is_empty() {
-        if let Some(json_flag) = input_array.first().unwrap().as_bool() {
-            json_summary = json_flag;
-            is_summary = true;
-        } else {
-            is_summary = false;
-        }
-    } else {
-        is_summary = true;
-    }
-
-    let stats_delete_successes_age = plugin.state().config.lock().stats_delete_successes_age;
-    let stats_delete_failures_age = plugin.state().config.lock().stats_delete_failures_age;
     let peer_channels = plugin.state().peer_channels.lock().clone();
 
-    if is_summary {
-        let mut successes = HashMap::new();
-        let mut failures = HashMap::new();
-        refresh_joblists(plugin.clone()).await?;
-        let pull_jobs = plugin.state().pull_jobs.lock().clone();
-        let push_jobs = plugin.state().push_jobs.lock().clone();
-        let mut all_jobs: Vec<ShortChannelId> =
-            pull_jobs.into_iter().chain(push_jobs.into_iter()).collect();
+    if let Some(s) = scid {
+        let successes = SuccessReb::read_from_files(&sling_dir, Some(s))
+            .await
+            .unwrap_or_default();
+        log::debug!("successes_read: {} scid:{}", successes.len(), s);
+        let failures = FailureReb::read_from_files(&sling_dir, Some(s))
+            .await
+            .unwrap_or_default();
+        log::debug!("failures_read: {} scid:{}", successes.len(), s);
+        let alias_map = plugin.state().alias_peer_map.lock().clone();
+
+        let successes_vec = if successes.len() == 1 {
+            successes.iter().last().unwrap().1.clone()
+        } else {
+            Vec::new()
+        };
+        log::debug!("successes: {} scid:{}", successes.len(), s);
+        let failures_vec = if failures.len() == 1 {
+            failures.iter().last().unwrap().1.clone()
+        } else {
+            Vec::new()
+        };
+        log::debug!("failures: {} scid:{}", successes.len(), s);
+
+        let success_stats = success_stats(
+            successes_vec,
+            stats_delete_successes_age,
+            &alias_map,
+            &peer_channels,
+        );
+        let failure_stats = failure_stats(
+            failures_vec,
+            stats_delete_failures_age,
+            &alias_map,
+            &peer_channels,
+        );
+
+        if json_summary {
+            let sling_stats = SlingStats {
+                successes_in_time_window: success_stats,
+                failures_in_time_window: failure_stats,
+            };
+
+            Ok(json!(sling_stats))
+        } else {
+            let succ_str = if let Some(ss) = success_stats {
+                let mut succ_tabled = Table::new(vec![ss]);
+                succ_tabled.with(Rotate::Left);
+                succ_tabled.with(Panel::header("Successes in time window"));
+                succ_tabled.to_string()
+            } else {
+                String::new()
+            };
+            let fail_str = if let Some(fs) = failure_stats {
+                let mut fail_tabled = Table::new(vec![fs]);
+                fail_tabled.with(Rotate::Left);
+                fail_tabled.with(Panel::header("Failures in time window"));
+                fail_tabled.to_string()
+            } else {
+                String::new()
+            };
+
+            Ok(json!({"format-hint":"simple","result":format!("{}\n{}", succ_str, fail_str)}))
+        }
+    } else {
+        let successes = SuccessReb::read_from_files(&sling_dir, None).await?;
+        let failures = FailureReb::read_from_files(&sling_dir, None).await?;
+        let jobs = read_jobs(&sling_dir, plugin.clone()).await?;
 
         let scid_peer_map = get_all_normal_channels_from_listpeerchannels(&peer_channels);
 
@@ -84,41 +173,37 @@ pub async fn slingstats(
                 );
             }
         }
-        all_jobs.retain(|c| normal_channels_alias.contains_key(c));
-        for scid in &all_jobs {
-            match SuccessReb::read_from_file(&sling_dir, scid).await {
-                Ok(o) => {
-                    successes.insert(scid, o);
-                }
-                Err(e) => log::debug!("probably no success stats yet: {:?}", e),
-            };
-
-            match FailureReb::read_from_file(&sling_dir, scid).await {
-                Ok(o) => {
-                    failures.insert(scid, o);
-                }
-                Err(e) => log::debug!("probably no failure stats yet: {:?}", e),
-            };
-        }
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
         let mut table = Vec::new();
-        let jobstates = plugin.state().job_state.lock().clone();
 
-        for job in &all_jobs {
+        let tasks = plugin.state().tasks.lock().clone();
+
+        let mut job_scids: Vec<&ShortChannelId> = jobs.keys().collect();
+        for (scid, tasks) in tasks.get_all_tasks() {
+            if tasks.values().any(|t| t.is_once()) {
+                job_scids.push(scid);
+            }
+        }
+
+        for scid in job_scids {
+            let tasks = tasks.get_scid_tasks(scid);
+            let mut task_states: Vec<String> = if let Some(task) = tasks {
+                task.iter()
+                    .map(|(id, jt)| id.to_string() + ":" + &jt.get_state().to_string())
+                    .collect()
+            } else {
+                vec!["1".to_string() + ":" + JobMessage::NotStarted.to_string().as_str()]
+            };
+            task_states.sort();
+
             let mut total_amount_msat = 0;
             let mut most_recent_completed_at = 0;
             let mut weighted_fee_ppm = 0;
-            let jobstate: Vec<String> = jobstates
-                .get(job)
-                .unwrap_or(&vec![JobState::missing()])
-                .iter()
-                .map(|jt| jt.id().to_string() + ":" + &jt.state().to_string())
-                .collect();
-            for success_reb in successes.get(&job).unwrap_or(&Vec::new()) {
+            for success_reb in successes.get(scid).unwrap_or(&Vec::new()) {
                 if stats_delete_successes_age == 0
                     || success_reb.completed_at >= now - stats_delete_successes_age * 24 * 60 * 60
                 {
@@ -132,11 +217,11 @@ pub async fn slingstats(
                 weighted_fee_ppm /= total_amount_msat;
             }
 
-            let last_route_failure = match failures.get(&job).unwrap_or(&Vec::new()).last() {
+            let last_route_failure = match failures.get(scid).unwrap_or(&Vec::new()).last() {
                 Some(o) => o.created_at,
                 None => 0,
             };
-            let last_route_success = match successes.get(&job).unwrap_or(&Vec::new()).last() {
+            let last_route_success = match successes.get(scid).unwrap_or(&Vec::new()).last() {
                 Some(o) => o.completed_at,
                 None => 0,
             };
@@ -163,20 +248,21 @@ pub async fn slingstats(
             };
             table.push(StatSummary {
                 alias: normal_channels_alias
-                    .get(&job.clone())
+                    .get(scid)
                     .unwrap_or(&NO_ALIAS_SET.to_string())
                     .clone()
                     .replace(|c: char| !c.is_ascii(), "?"),
-                scid: *job,
-                pubkey: *scid_peer_map.get(&job.clone()).unwrap(),
-                status: jobstate.clone(),
-                status_str: jobstate.join("\n"),
+                scid: *scid,
+                pubkey: *scid_peer_map.get(scid).unwrap(),
+                status: task_states.clone(),
+                status_str: task_states.join("\n"),
                 rebamount: (total_amount_msat / 1_000).to_formatted_string(&Locale::en),
                 w_feeppm: weighted_fee_ppm,
                 last_route_taken,
                 last_success_reb,
             })
         }
+
         table.sort_by_key(|x| {
             x.alias
                 .chars()
@@ -190,43 +276,6 @@ pub async fn slingstats(
             let tabled = Table::new(table);
             Ok(json!({"format-hint":"simple","result":format!("{}", tabled,)}))
         }
-    } else {
-        let scid = match input_array.first().unwrap() {
-            serde_json::Value::String(i) => ShortChannelId::from_str(i)?,
-            _ => return Err(anyhow!("invalid short_channel_id")),
-        };
-        let successes = match SuccessReb::read_from_file(&sling_dir, &scid).await {
-            Ok(o) => o,
-            Err(e) => {
-                log::info!("Could not get any successes: {}", e);
-                Vec::new()
-            }
-        };
-        let failures = match FailureReb::read_from_file(&sling_dir, &scid).await {
-            Ok(o) => o,
-            Err(e) => {
-                log::info!("Could not get any failures: {}", e);
-                Vec::new()
-            }
-        };
-        let alias_map = plugin.state().alias_peer_map.lock().clone();
-
-        let sling_stats = SlingStats {
-            successes_in_time_window: success_stats(
-                successes,
-                stats_delete_successes_age,
-                &alias_map,
-                &peer_channels,
-            ),
-            failures_in_time_window: failure_stats(
-                failures,
-                stats_delete_failures_age,
-                &alias_map,
-                &peer_channels,
-            ),
-        };
-
-        Ok(json!(sling_stats))
     }
 }
 
@@ -416,7 +465,7 @@ fn failure_stats(
                 peer_id: *node,
                 alias: alias_map
                     .get(node)
-                    .unwrap_or(&"NOT_FOUND".to_string())
+                    .unwrap_or(&"ALIAS_NOT_FOUND".to_string())
                     .clone(),
                 count: *count,
             })
