@@ -191,14 +191,19 @@ pub async fn slingstats(
 
         for scid in job_scids {
             let tasks = tasks.get_scid_tasks(scid);
-            let mut task_states: Vec<String> = if let Some(task) = tasks {
+            let mut task_states: Vec<(u16, String)> = if let Some(task) = tasks {
                 task.iter()
-                    .map(|(id, jt)| id.to_string() + ":" + &jt.get_state().to_string())
+                    .map(|(id, jt)| (*id, id.to_string() + ":" + &jt.get_state().to_string()))
                     .collect()
             } else {
-                vec!["1".to_string() + ":" + JobMessage::NotStarted.to_string().as_str()]
+                vec![(
+                    1,
+                    "1".to_string() + ":" + JobMessage::NotStarted.to_string().as_str(),
+                )]
             };
-            task_states.sort();
+            task_states.sort_by(|a, b| a.0.cmp(&b.0));
+            let task_states: Vec<String> =
+                task_states.into_iter().map(|(_id, state)| state).collect();
 
             let mut total_amount_msat = 0;
             let mut most_recent_completed_at = 0;
