@@ -24,10 +24,10 @@ jobs:
     strategy:
         fail-fast: false
         matrix:
-            bitcoind-version: ["28.0"]
+            bitcoind-version: ["29.0"]
             experimental: [1]
             deprecated: [0]
-            python-version: ["3.8", "3.11"]
+            python-version: ["3.9", "3.12"]
             os: ["ubuntu-24.04"]
 
     runs-on: ${{ matrix.os }}
@@ -100,7 +100,7 @@ jobs:
       if: ${{ contains(matrix.os, 'ubuntu') &&  steps.cache-cln.outputs.cache-hit != 'true' }}
       run: |
           url=$(curl -s https://api.github.com/repos/ElementsProject/lightning/releases/tags/${{ inputs.cln-version }} \
-            | jq '.assets[] | select(.name | contains("22.04")) | .browser_download_url' \
+            | jq '.assets[] | select(.name | contains("24.04")) | .browser_download_url' \
             | tr -d '\"')
           wget $url
           sudo tar -xvf ${url##*/} -C /usr/local --strip-components=2
@@ -170,6 +170,7 @@ jobs:
           if [ -d "proto" ]; then
             python -m grpc_tools.protoc --proto_path="proto" --python_out="tests" --grpc_python_out="tests" proto/*.proto
           fi
+
           cargo build
         fi
 

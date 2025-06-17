@@ -1,4 +1,4 @@
-name: main on CLN v24.11
+name: main on CLN v24.11.x
 
 on:
     push:
@@ -19,6 +19,6 @@ jobs:
     call-ci:
         uses: ./.github/workflows/ci.yml
         with:
-            cln-version: "v24.11"
-            pyln-version: "24.11"
+            cln-version: "v24.11.2"
+            pyln-version: "24.11.1"
             tagged-release: false
