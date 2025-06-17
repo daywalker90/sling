@@ -576,7 +576,7 @@ def test_private_channel_node(node_factory, bitcoind, get_plugin):  # noqa: F811
             "amount": 100_000,
             "maxppm": 1000,
             "outppm": 1000,
-            "target": 0.4,
+            "target": 0.3,
         },
     )
 
@@ -596,7 +596,7 @@ def test_private_channel_node(node_factory, bitcoind, get_plugin):  # noqa: F811
             "amount": 100_000,
             "maxppm": 1000,
             "outppm": 0,
-            "target": 0.7,
+            "target": 0.5,
             "depleteuptoamount": 0,
         },
     )
