@@ -18,7 +18,7 @@ cln-rpc = { path="../lightning/cln-rpc/", version = "^0.4" }
 # cln-plugin = "0.4"
 cln-plugin = { path="../lightning/plugins/", version = "^0.4" }
 
-tabled = "0.19"
+tabled = "0.20"
 num-format = "0.4"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"]}
 rand = "0.9"
@@ -27,8 +27,7 @@ bitcoin = "0.31"
 
 log-panics = "2"
 
-[target.'cfg(not(target_env = "msvc"))'.dependencies]
-tikv-jemallocator = "0.6"
+mimalloc = "0.1"
 
 [profile.optimized]
 inherits = "release"
