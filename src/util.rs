@@ -93,11 +93,11 @@ pub async fn write_job(
         }
     }
     if remove {
-        log::info!("{} job for {}", job_change, &chan_id);
+        log::info!("{job_change} job for {chan_id}");
     } else {
         my_job = job.unwrap();
-        log::info!("{} job for {}:", job_change, &chan_id);
-        log::info!("{}", my_job);
+        log::info!("{job_change} job for {chan_id}:");
+        log::info!("{my_job}");
         jobs.insert(chan_id, my_job);
     }
     let peer_channels = plugin.state().peer_channels.lock().clone();
@@ -176,7 +176,7 @@ pub async fn read_liquidity(
             liquidity = match serde_json::from_str(&file) {
                 Ok(o) => o,
                 Err(e) => {
-                    log::warn!("could not read liquidity: {}", e);
+                    log::warn!("could not read liquidity: {e}");
                     HashMap::new()
                 }
             }
@@ -304,7 +304,7 @@ pub fn get_all_normal_channels_from_listpeerchannels(
 }
 
 pub async fn my_sleep(plugin: Plugin<PluginState>, seconds: u64, task_ident: &TaskIdentifier) {
-    log::debug!("{}: Starting sleeper for {}s", task_ident, seconds);
+    log::debug!("{task_ident}: Starting sleeper for {seconds}s");
     let timer = Instant::now();
     while timer.elapsed() < Duration::from_secs(seconds) {
         time::sleep(Duration::from_secs(1)).await;
@@ -333,7 +333,7 @@ pub async fn wait_for_gossip(
                 let task = tasks
                     .get_task_mut(task_ident)
                     .ok_or_else(|| anyhow!("Task not found"))?;
-                log::info!("{}: graph is still empty. Sleeping...", task);
+                log::info!("{task}: graph is still empty. Sleeping...");
                 task.set_state(JobMessage::GraphEmpty);
                 if task.should_stop() {
                     break;
@@ -428,10 +428,9 @@ async fn parse_excepts<T: FromStr + std::hash::Hash + Eq>(
             Ok(id) => {
                 excepts.insert(id);
             }
-            Err(_e) => log::warn!(
-                "excepts file contains invalid short_channel_id/node_id: {}",
-                except
-            ),
+            Err(_e) => {
+                log::warn!("excepts file contains invalid short_channel_id/node_id: {except}")
+            }
         }
     }
     Ok(excepts)

@@ -15,7 +15,7 @@ pub async fn htlc_handler(
                 let ph_str = ph.as_str().unwrap();
                 if pays.contains_key(ph_str) {
                     let pi = pays.remove(ph_str).unwrap();
-                    log::debug!("{}: resolving htlc. payment_hash: {}", PLUGIN_NAME, ph_str);
+                    log::debug!("{PLUGIN_NAME}: resolving htlc. payment_hash: {ph_str}");
                     Ok(json!({"result":"resolve","payment_key":pi}))
                 } else {
                     Ok(json!({"result": "continue"}))

@@ -317,7 +317,7 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
                 let mut content: Vec<u8> = vec![];
                 for reb in &pruned_rebs {
                     let serialized = serde_json::to_string(&reb)?;
-                    content.extend(format!("{}\n", serialized).as_bytes());
+                    content.extend(format!("{serialized}\n").as_bytes());
                 }
 
                 let mut file = OpenOptions::new()
@@ -361,7 +361,7 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
                 let mut content: Vec<u8> = vec![];
                 for reb in &pruned_rebs {
                     let serialized = serde_json::to_string(&reb)?;
-                    content.extend(format!("{}\n", serialized).as_bytes());
+                    content.extend(format!("{serialized}\n").as_bytes());
                 }
 
                 let mut file = OpenOptions::new()

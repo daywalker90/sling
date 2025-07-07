@@ -172,12 +172,7 @@ pub async fn waitsendpay_response(
                     err if err.eq("WIRE_INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS")
                         && ws_error.erring_node == config.pubkey =>
                     {
-                        log::warn!(
-                            "{}: PAYMENT DETAILS ERROR:{:?} {:?}",
-                            task_ident,
-                            err,
-                            route
-                        );
+                        log::warn!("{task_ident}: PAYMENT DETAILS ERROR:{err:?} {route:?}");
                         special_stop = true;
                     }
                     _ => (),
@@ -340,10 +335,7 @@ pub async fn sendpay_response(
         }
         Err(e) => {
             if e.to_string().contains("First peer not ready") {
-                log::info!(
-                    "{}: First peer not ready, banning it for now...",
-                    task_ident
-                );
+                log::info!("{task_ident}: First peer not ready, banning it for now...");
                 plugin.state().tempbans.lock().insert(
                     route.first().unwrap().channel,
                     SystemTime::now()

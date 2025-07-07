@@ -72,7 +72,7 @@ impl Display for Job {
         parts.push(format!("maxppm:{}", self.maxppm));
 
         if let Some(o) = self.outppm {
-            parts.push(format!("outppm:{}", o));
+            parts.push(format!("outppm:{o}"));
         }
         if let Some(c) = &self.candidates {
             parts.push(format!(
@@ -84,22 +84,22 @@ impl Display for Job {
             ));
         }
         if let Some(t) = self.target {
-            parts.push(format!("target:{}", t));
+            parts.push(format!("target:{t}"));
         }
         if let Some(m) = self.maxhops {
-            parts.push(format!("maxhops:{}", m));
+            parts.push(format!("maxhops:{m}"));
         }
         if let Some(d) = self.depleteuptopercent {
-            parts.push(format!("depleteuptopercent:{}", d));
+            parts.push(format!("depleteuptopercent:{d}"));
         }
         if let Some(d) = self.depleteuptoamount_msat {
-            parts.push(format!("depleteuptoamount_msat:{}", d));
+            parts.push(format!("depleteuptoamount_msat:{d}"));
         }
         if let Some(p) = self.paralleljobs {
-            parts.push(format!("paralleljobs:{}", p));
+            parts.push(format!("paralleljobs:{p}"));
         }
         if let Some(t) = self.onceamount_msat {
-            parts.push(format!("onceamount_msat:{}", t));
+            parts.push(format!("onceamount_msat:{t}"));
         }
 
         write!(f, "{}", parts.join(" "))
