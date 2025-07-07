@@ -241,27 +241,27 @@ async fn main() -> Result<(), anyhow::Error> {
                 .join(plugin.configuration().rpc_file);
             let mut rpc = match ClnRpc::new(&rpc_path).await {
                 Ok(o) => o,
-                Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
+                Err(e) => return plugin.disable(format!("{e}").as_str()).await,
             };
             let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
             let getinfo = match rpc.call_typed(&GetinfoRequest {}).await {
                 Ok(o) => o,
-                Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
+                Err(e) => return plugin.disable(format!("{e}").as_str()).await,
             };
             let except_chans = match read_except_chans(&sling_dir).await {
                 Ok(o) => o,
-                Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
+                Err(e) => return plugin.disable(format!("{e}").as_str()).await,
             };
             let except_peers = match read_except_peers(&sling_dir).await {
                 Ok(o) => o
                     .into_iter()
                     .map(|p| PubKeyBytes::from_pubkey(&p))
                     .collect(),
-                Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
+                Err(e) => return plugin.disable(format!("{e}").as_str()).await,
             };
             let liquidity = match read_liquidity(&sling_dir).await {
                 Ok(o) => o,
-                Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
+                Err(e) => return plugin.disable(format!("{e}").as_str()).await,
             };
             let config = Config::new(
                 getinfo.clone(),
@@ -277,7 +277,7 @@ async fn main() -> Result<(), anyhow::Error> {
             }
             match get_startup_options(&plugin, state.clone()).await {
                 Ok(()) => &(),
-                Err(e) => return plugin.disable(format!("{}", e).as_str()).await,
+                Err(e) => return plugin.disable(format!("{e}").as_str()).await,
             };
             log::info!("read startup options");
             confplugin = plugin;
@@ -290,7 +290,7 @@ async fn main() -> Result<(), anyhow::Error> {
         tokio::spawn(async move {
             match tasks::refresh_listpeerchannels_loop(peersclone.clone()).await {
                 Ok(()) => (),
-                Err(e) => log::warn!("Error in refresh_listpeers thread: {:?}", e),
+                Err(e) => log::warn!("Error in refresh_listpeers thread: {e:?}"),
             };
             let _res = peersclone.shutdown();
         });
@@ -298,7 +298,7 @@ async fn main() -> Result<(), anyhow::Error> {
         tokio::spawn(async move {
             match tasks::refresh_graph(channelsclone.clone()).await {
                 Ok(()) => (),
-                Err(e) => log::warn!("Error in refresh_graph thread: {:?}", e),
+                Err(e) => log::warn!("Error in refresh_graph thread: {e:?}"),
             };
             let _res = channelsclone.shutdown();
         });
@@ -306,7 +306,7 @@ async fn main() -> Result<(), anyhow::Error> {
         tokio::spawn(async move {
             match tasks::refresh_aliasmap(aliasclone.clone()).await {
                 Ok(()) => (),
-                Err(e) => log::warn!("Error in refresh_aliasmap thread: {:?}", e),
+                Err(e) => log::warn!("Error in refresh_aliasmap thread: {e:?}"),
             };
             let _res = aliasclone.shutdown();
         });
@@ -314,7 +314,7 @@ async fn main() -> Result<(), anyhow::Error> {
         tokio::spawn(async move {
             match tasks::refresh_liquidity(liquidityclone.clone()).await {
                 Ok(()) => (),
-                Err(e) => log::warn!("Error in refresh_liquidity thread: {:?}", e),
+                Err(e) => log::warn!("Error in refresh_liquidity thread: {e:?}"),
             };
             let _res = liquidityclone.shutdown();
         });
@@ -322,7 +322,7 @@ async fn main() -> Result<(), anyhow::Error> {
         tokio::spawn(async move {
             match tasks::clear_tempbans(tempbanclone.clone()).await {
                 Ok(()) => (),
-                Err(e) => log::warn!("Error in clear_tempbans thread: {:?}", e),
+                Err(e) => log::warn!("Error in clear_tempbans thread: {e:?}"),
             };
             let _res = tempbanclone.shutdown();
         });
@@ -330,7 +330,7 @@ async fn main() -> Result<(), anyhow::Error> {
         tokio::spawn(async move {
             match tasks::clear_stats(clearstatsclone.clone()).await {
                 Ok(()) => (),
-                Err(e) => log::warn!("Error in clear_stats thread: {:?}", e),
+                Err(e) => log::warn!("Error in clear_stats thread: {e:?}"),
             };
             let _res = clearstatsclone.shutdown();
         });
@@ -339,7 +339,7 @@ async fn main() -> Result<(), anyhow::Error> {
             tokio::spawn(async move {
                 match tasks::read_askrene_liquidity(askrene_clone.clone()).await {
                     Ok(()) => (),
-                    Err(e) => log::warn!("Error in read_askrene_liquidity thread: {:?}", e),
+                    Err(e) => log::warn!("Error in read_askrene_liquidity thread: {e:?}"),
                 };
                 let _res = askrene_clone.shutdown();
             });

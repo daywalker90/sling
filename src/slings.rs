@@ -43,7 +43,7 @@ pub async fn sling(
                 .clone();
         }
         if task.should_stop() {
-            log::info!("{}: Stopped job!", task_ident);
+            log::info!("{task_ident}: Stopped job!");
             let mut tasks = plugin.state().tasks.lock();
             tasks.set_state(&task_ident, JobMessage::Stopped);
             tasks.set_active(&task_ident, false);
@@ -139,8 +139,7 @@ pub async fn sling(
         }
         if actual_candidates.is_empty() {
             log::info!(
-                "{}: No candidates found. Adjust out_ppm or wait for liquidity. Sleeping...",
-                task,
+                "{task}: No candidates found. Adjust out_ppm or wait for liquidity. Sleeping...",
             );
             plugin
                 .state()
@@ -168,10 +167,7 @@ pub async fn sling(
                 &actual_candidates,
             );
             if nr.is_err() || nr.as_ref().unwrap().is_empty() {
-                log::info!(
-                    "{}: could not find a dijkstra route. Sleeping...",
-                    task_ident
-                );
+                log::info!("{task_ident}: could not find a dijkstra route. Sleeping...");
                 plugin
                     .state()
                     .tasks
@@ -215,7 +211,7 @@ pub async fn sling(
         }
 
         if fee_ppm_effective > job.maxppm {
-            log::info!("{}: route not cheap enough! Sleeping...", task_ident);
+            log::info!("{task_ident}: route not cheap enough! Sleeping...");
             plugin
                 .state()
                 .tasks
@@ -251,7 +247,7 @@ pub async fn sling(
                 let mut tasks = plugin.state().tasks.lock();
                 tasks.set_state(&task_ident, JobMessage::Error);
                 tasks.set_active(&task_ident, false);
-                log::warn!("{}", e);
+                log::warn!("{e}");
                 break 'outer;
             }
         };
@@ -284,7 +280,7 @@ pub async fn sling(
                 let mut tasks = plugin.state().tasks.lock();
                 tasks.set_state(&task_ident, JobMessage::Error);
                 tasks.set_active(&task_ident, false);
-                log::warn!("{}", e);
+                log::warn!("{e}");
                 break 'outer;
             }
         };
@@ -469,7 +465,7 @@ async fn health_check(
         match get_normal_channel_from_listpeerchannels(peer_channels, &task_ident.get_chan_id()) {
             Ok(o) => o,
             Err(e) => {
-                log::warn!("{}: {}. Stopping Job.", task_ident, e);
+                log::warn!("{task_ident}: {e}. Stopping Job.");
                 let mut tasks = plugin.state().tasks.lock();
                 tasks.set_state(task_ident, JobMessage::ChanNotNormal);
                 tasks.set_active(task_ident, false);
@@ -483,7 +479,7 @@ async fn health_check(
             SatDirection::Push => Amount::msat(&channel.spendable_msat.unwrap()) < job.amount_msat,
         }
     {
-        log::info!("{}: already balanced. Taking a break...", task_ident);
+        log::info!("{task_ident}: already balanced. Taking a break...");
         plugin
             .state()
             .tasks
@@ -511,7 +507,7 @@ async fn health_check(
         {
             Some(p) => {
                 if !p.peer_connected {
-                    log::info!("{}: not connected. Taking a break...", task_ident);
+                    log::info!("{task_ident}: not connected. Taking a break...");
                     plugin
                         .state()
                         .tasks
@@ -520,7 +516,7 @@ async fn health_check(
                     my_sleep(plugin.clone(), 60, task_ident).await;
                     Ok(Some(true))
                 } else if tempbans.contains_key(&task_ident.get_chan_id()) {
-                    log::info!("{}: Job peer not ready. Taking a break...", task_ident);
+                    log::info!("{task_ident}: Job peer not ready. Taking a break...");
                     plugin
                         .state()
                         .tasks
@@ -536,7 +532,7 @@ async fn health_check(
                 let mut tasks = plugin.state().tasks.lock();
                 tasks.set_state(task_ident, JobMessage::PeerNotFound);
                 tasks.set_active(task_ident, false);
-                log::warn!("{}: peer not found. Stopping job.", task_ident);
+                log::warn!("{task_ident}: peer not found. Stopping job.");
                 Ok(Some(false))
             }
         }
@@ -577,11 +573,7 @@ fn build_candidatelist(
 
         if !custom_candidates.is_empty() {
             if custom_candidates.contains(&scid) {
-                log::trace!(
-                    "{}: build_candidatelist: found custom candidate {}",
-                    task_ident,
-                    scid
-                );
+                log::trace!("{task_ident}: build_candidatelist: found custom candidate {scid}");
             } else {
                 continue;
             }
@@ -594,11 +586,7 @@ fn build_candidatelist(
                     direction,
                 };
                 if excepts.contains(&scid_dir) {
-                    log::trace!(
-                        "{}: build_candidatelist: {} is in excepts",
-                        task_ident,
-                        scid_dir,
-                    );
+                    log::trace!("{task_ident}: build_candidatelist: {scid_dir} is in excepts",);
                     continue;
                 }
             }
@@ -608,32 +596,19 @@ fn build_candidatelist(
                     direction: direction ^ 1,
                 };
                 if excepts.contains(&scid_dir) {
-                    log::trace!(
-                        "{}: build_candidatelist: {} is in excepts",
-                        task_ident,
-                        scid_dir,
-                    );
+                    log::trace!("{task_ident}: build_candidatelist: {scid_dir} is in excepts",);
                     continue;
                 }
             }
         }
 
         if let Err(e) = is_channel_normal(channel) {
-            log::trace!(
-                "{}: build_candidatelist: {} is not normal: {}",
-                task_ident,
-                scid,
-                e
-            );
+            log::trace!("{task_ident}: build_candidatelist: {scid} is not normal: {e}");
             continue;
         }
 
         if !channel.peer_connected {
-            log::trace!(
-                "{}: build_candidatelist: {} is not connected",
-                task_ident,
-                scid
-            );
+            log::trace!("{task_ident}: build_candidatelist: {scid} is not connected");
             continue;
         }
 
@@ -652,10 +627,7 @@ fn build_candidatelist(
             Ok(o) => o,
             Err(e) => {
                 log::trace!(
-                    "{}: build_candidatelist: could not get remote feeppm for {}: {}",
-                    task_ident,
-                    scid,
-                    e
+                    "{task_ident}: build_candidatelist: could not get remote feeppm for {scid}: {e}"
                 );
                 continue;
             }
@@ -680,22 +652,16 @@ fn build_candidatelist(
                 );
                 if to_us_msat <= liquidity_target {
                     log::trace!(
-                        "{}: build_candidatelist: {} does not have enough liquidity: {}<={}",
-                        task_ident,
-                        scid,
-                        to_us_msat,
-                        liquidity_target
+                        "{task_ident}: build_candidatelist: {scid} does not have enough \
+                        liquidity: {to_us_msat}<={liquidity_target}"
                     );
                     continue;
                 }
                 if let Some(outppm) = job.outppm {
                     if chan_out_ppm > outppm {
                         log::trace!(
-                            "{}: build_candidatelist: {} outppm is too high: {}>{}",
-                            task_ident,
-                            scid,
-                            chan_out_ppm,
-                            outppm
+                            "{task_ident}: build_candidatelist: {scid} outppm is too \
+                            high: {chan_out_ppm}>{outppm}"
                         );
                         continue;
                     }
@@ -722,11 +688,8 @@ fn build_candidatelist(
                 if let Some(outppm) = job.outppm {
                     if chan_out_ppm < outppm {
                         log::trace!(
-                            "{}: build_candidatelist: {} outppm is too low: {}<{}",
-                            task_ident,
-                            scid,
-                            chan_out_ppm,
-                            outppm
+                            "{task_ident}: build_candidatelist: {scid} outppm is too \
+                            low: {chan_out_ppm}<{outppm}"
                         );
                         continue;
                     }
@@ -745,11 +708,7 @@ fn build_candidatelist(
         };
 
         if get_total_htlc_count(channel) > config.max_htlc_count {
-            log::trace!(
-                "{}: build_candidatelist: {} has too many pending htlcs",
-                task_ident,
-                scid
-            );
+            log::trace!("{task_ident}: build_candidatelist: {scid} has too many pending htlcs");
             continue;
         }
 

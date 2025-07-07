@@ -135,7 +135,7 @@ pub async fn slinggo(
             let tasks = plugin.state().tasks.lock();
             if let Some(t) = tasks.get_scid_tasks(&chan_id) {
                 if t.values().any(|ta| ta.is_once()) && tasks.is_any_active(&chan_id) {
-                    log::info!("Once-job is currently running for {}", chan_id);
+                    log::info!("Once-job is currently running for {chan_id}");
                     spawn_fail_count += parallel_jobs;
                     continue;
                 }
@@ -151,7 +151,7 @@ pub async fn slinggo(
                     let plugin = plugin.clone();
                     let job_clone = job.clone();
                     spawn_count += 1;
-                    log::debug!("{}/{}: Spawning job.", chan_id, i);
+                    log::debug!("{chan_id}/{i}: Spawning job.");
                     match task {
                         Some(jts) => {
                             jts.set_state(JobMessage::Starting);
@@ -168,7 +168,7 @@ pub async fn slinggo(
                     tokio::spawn(async move {
                         match sling(&job_clone, task_ident, plugin.clone()).await {
                             Ok(_o) => {
-                                log::info!("{}/{}: Spawned job exited.", chan_id, i);
+                                log::info!("{chan_id}/{i}: Spawned job exited.");
                                 let mut tasks = plugin.state().tasks.lock();
                                 let task = tasks.get_task_mut(&task_ident);
                                 if let Some(t) = task {
@@ -177,7 +177,7 @@ pub async fn slinggo(
                                 }
                             }
                             Err(e) => {
-                                log::warn!("{}/{}: Error in job: {}", chan_id, i, e);
+                                log::warn!("{chan_id}/{i}: Error in job: {e}");
                                 let mut tasks = plugin.state().tasks.lock();
                                 let task = tasks.get_task_mut(&task_ident);
                                 if let Some(t) = task {
@@ -298,7 +298,7 @@ async fn stop_job(plugin: Plugin<PluginState>, args: serde_json::Value) -> Resul
         }
     }
 
-    log::trace!("Stopped {} tasks", stopped_count);
+    log::trace!("Stopped {stopped_count} tasks");
     write_liquidity(plugin.clone()).await?;
     Ok(stopped_count)
 }
@@ -418,7 +418,7 @@ pub async fn slingonce(
                                 ) {
                                     Ok(_) => {}
                                     Err(e) => {
-                                        log::error!("Error inserting task: {}", e);
+                                        log::error!("Error inserting task: {e}");
                                         return;
                                     }
                                 };
@@ -432,7 +432,7 @@ pub async fn slingonce(
                         let task = tasks.get_task_mut(&task_ident).unwrap();
                         let mut total_rebalanced = total_rebalanced.lock();
                         if task.should_stop() {
-                            log::debug!("{}/{}: Spawned once-job exited.", chan_id, i);
+                            log::debug!("{chan_id}/{i}: Spawned once-job exited.");
                             task.set_state(JobMessage::Stopped);
                             task.set_active(false);
                             let mut config = plugin.state().config.lock();
@@ -447,7 +447,7 @@ pub async fn slingonce(
                             break;
                         }
                         if *total_rebalanced + job.amount_msat > job.onceamount_msat.unwrap() {
-                            log::debug!("{}/{}: Done rebalancing.", chan_id, i);
+                            log::debug!("{chan_id}/{i}: Done rebalancing.");
                             task.set_state(JobMessage::Balanced);
                             task.set_active(false);
                             let mut config = plugin.state().config.lock();
@@ -464,7 +464,7 @@ pub async fn slingonce(
                             *total_rebalanced += job.amount_msat;
                         }
                     }
-                    log::debug!("{}/{}: Spawning once-job.", chan_id, i);
+                    log::debug!("{chan_id}/{i}: Spawning once-job.");
                     match sling(&job_clone, task_ident, plugin.clone()).await {
                         Ok(o) => {
                             if o == 0 {
@@ -472,7 +472,7 @@ pub async fn slingonce(
                             }
                         }
                         Err(e) => {
-                            log::warn!("{}/{}: Error in once-job: {}", chan_id, e, i);
+                            log::warn!("{chan_id}/{e}: Error in once-job: {i}");
                             let mut tasks = plugin.state().tasks.lock();
                             let task = tasks.get_task_mut(&task_ident).unwrap();
                             task.set_state(JobMessage::Error);

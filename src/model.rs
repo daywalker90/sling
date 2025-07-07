@@ -196,7 +196,7 @@ impl Serialize for PubKeyBytes {
         let mut hex = String::with_capacity(66);
         for byte in self.0.iter() {
             use std::fmt::Write;
-            write!(&mut hex, "{:02x}", byte).unwrap();
+            write!(&mut hex, "{byte:02x}").unwrap();
         }
         serializer.serialize_str(&hex)
     }
@@ -862,8 +862,7 @@ impl SuccessReb {
             .create(true)
             .open(sling_dir.join(chan_id.to_string() + "_" + SUCCESSES_SUFFIX))
             .await?;
-        file.write_all(format!("{}\n", serialized).as_bytes())
-            .await?;
+        file.write_all(format!("{serialized}\n").as_bytes()).await?;
         Ok(())
     }
 
@@ -961,8 +960,7 @@ impl FailureReb {
             .create(true)
             .open(sling_dir.join(chan_id.to_string() + "_" + FAILURES_SUFFIX))
             .await?;
-        file.write_all(format!("{}\n", serialized).as_bytes())
-            .await?;
+        file.write_all(format!("{serialized}\n").as_bytes()).await?;
         Ok(())
     }
 

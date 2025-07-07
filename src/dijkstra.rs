@@ -251,7 +251,7 @@ fn construct_first_node(
                 match lngraph.get_state_no_direction(&task.other_pubkey, &task.get_chan_id()) {
                     Ok(in_chan) => in_chan,
                     Err(_) => {
-                        log::warn!("{}: channel not found in graph!", task);
+                        log::warn!("{task}: channel not found in graph!");
                         task.set_state(JobMessage::ChanNotInGraph);
                         return Err(anyhow!("channel not found in graph"));
                     }
@@ -269,7 +269,7 @@ fn construct_first_node(
                 match lngraph.get_state_no_direction(&config.pubkey_bytes, &task.get_chan_id()) {
                     Ok(in_chan) => in_chan,
                     Err(_) => {
-                        log::warn!("{}: channel not found in graph!", task);
+                        log::warn!("{task}: channel not found in graph!");
                         task.set_state(JobMessage::ChanNotInGraph);
                         return Err(anyhow!("channel not found in graph"));
                     }
