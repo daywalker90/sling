@@ -22,6 +22,7 @@
 - Slightly increased the minimum channel cost in pathfinding
 - Use actual default options so they show up in CLN's ``listconfigs``
 - Refactor to show method usage in CLN's ``help``
+- switch from jemalloc to mimalloc for compatibility on systems using page sizes >4k
 
 ### Fixed
 - You can no longer add your own channels or your own node id to exceptions, for candidate control use ``candidatelist``/``outppm``
