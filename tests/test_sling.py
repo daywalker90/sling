@@ -1241,6 +1241,12 @@ def test_gossip(node_factory, bitcoind, get_plugin):  # noqa: F811
     sling_liquidity = os.path.join(l1.info["lightning-dir"], "sling", "liquidity.json")
     assert os.path.getsize(sling_liquidity) == 2
 
+    # 24.08 has a bug in gossip store where it will return 7 public channels after a
+    # restart, so we abort here
+    version = l1.rpc.call("getinfo", {})["version"]
+    if version.startswith("v24.08"):
+        return
+
     l1.restart()
     l1.rpc.connect(l2.info["id"] + "@localhost:" + str(l2.port))
     l1.rpc.connect(l3.info["id"] + "@localhost:" + str(l3.port))
