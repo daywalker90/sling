@@ -99,7 +99,7 @@ jobs:
     - name: Download Core Lightning ${{ inputs.cln-version }} & install binaries
       if: ${{ contains(matrix.os, 'ubuntu') &&  steps.cache-cln.outputs.cache-hit != 'true' }}
       run: |
-          url=$(curl -s https://api.github.com/repos/ElementsProject/lightning/releases/tags/${{ inputs.cln-version }} \
+          url=$(curl --retry 3 --retry-delay 3 https://api.github.com/repos/ElementsProject/lightning/releases/tags/${{ inputs.cln-version }} \
             | jq '.assets[] | select(.name | contains("24.04")) | .browser_download_url' \
             | tr -d '\"')
           wget $url
