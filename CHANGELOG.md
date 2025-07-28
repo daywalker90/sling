@@ -1,6 +1,6 @@
 # Changelog
 
-## [4.0.0] - Unreleased
+## [4.0.0] - 2025-07-28
 
 ### Removed
 - Dropped support for `CLN <= v24.02`, upgrade your node!
