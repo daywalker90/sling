@@ -27,8 +27,8 @@ jobs:
             bitcoind-version: ["29.0"]
             experimental: [1]
             deprecated: [0]
-            python-version: ["3.9", "3.12"]
-            os: ["ubuntu-24.04"]
+            python-version: ["3.9", "3.13"]
+            os: ["ubuntu-latest"]
 
     runs-on: ${{ matrix.os }}
 
@@ -58,43 +58,45 @@ jobs:
         echo "OS version: $OS_VERSION"
         echo "os_version=$OS_VERSION" >> $GITHUB_OUTPUT
 
-    - name: Cache CLN
+    - name: Restore CLN cache
       id: cache-cln
-      uses: actions/cache@v4
+      uses: actions/cache/restore@v4
       with:
         path: |
           /usr/local/bin/lightning*
           /usr/local/libexec/c-lightning
         key: cache-cln-${{ inputs.cln-version }}-${{ steps.exact_versions.outputs.os_version }}
 
-    - name: Cache bitcoind
+    - name: Restore bitcoind cache
       id: cache-bitcoind
-      uses: actions/cache@v4
+      uses: actions/cache/restore@v4
       with:
         path: /usr/local/bin/bitcoin*
         key: cache-bitcoind-${{ matrix.bitcoind-version }}-${{ steps.exact_versions.outputs.os_version }}
 
-    - name: Cache python dependencies
-      id: cache-python
-      uses: actions/cache@v4
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
       with:
-        path: venv
-        key: cache-python-${{ steps.exact_versions.outputs.python_version }}-${{ steps.exact_versions.outputs.os_version }}-${{ inputs.pyln-version }}-${{ hashFiles('tests/requirements.txt') }}
+        enable-cache: true
+        cache-dependency-glob: "**/pyproject.toml"
 
     - name: Download Bitcoin ${{ matrix.bitcoind-version }} & install binaries
       if: ${{ steps.cache-bitcoind.outputs.cache-hit != 'true' }}
       run: |
         export BITCOIND_VERSION=${{ matrix.bitcoind-version }}
-        if [[ "${{ matrix.os }}" =~ "ubuntu" ]]; then
-          export TARGET_ARCH="x86_64-linux-gnu"
-        fi
-        if [[ "${{ matrix.os }}" =~ "macos" ]]; then
-          export TARGET_ARCH="x86_64-apple-darwin"
-        fi
+        export TARGET_ARCH="x86_64-linux-gnu"
         wget https://bitcoincore.org/bin/bitcoin-core-${BITCOIND_VERSION}/bitcoin-${BITCOIND_VERSION}-${TARGET_ARCH}.tar.gz
         tar -xzf bitcoin-${BITCOIND_VERSION}-${TARGET_ARCH}.tar.gz
         sudo mv bitcoin-${BITCOIND_VERSION}/bin/* /usr/local/bin
         rm -rf bitcoin-${BITCOIND_VERSION}-${TARGET_ARCH}.tar.gz bitcoin-${BITCOIND_VERSION}
+
+    - name: Save bitcoind cache
+      id: save-cache-bitcoind
+      if : ${{ always() && steps.cache-bitcoind.outputs.cache-hit != 'true'}}
+      uses: actions/cache/save@v4
+      with:
+        path: /usr/local/bin/bitcoin*
+        key: ${{ steps.cache-bitcoind.outputs.cache-primary-key }}
 
     - name: Download Core Lightning ${{ inputs.cln-version }} & install binaries
       if: ${{ contains(matrix.os, 'ubuntu') &&  steps.cache-cln.outputs.cache-hit != 'true' }}
@@ -106,69 +108,35 @@ jobs:
           sudo tar -xvf ${url##*/} -C /usr/local --strip-components=2
           echo "CLN_VERSION=$(lightningd --version)" >> "$GITHUB_OUTPUT"
 
+    - name: Save CLN cache
+      id: save-cache-cln
+      if : ${{ always() && steps.cache-cln.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          /usr/local/bin/lightning*
+          /usr/local/libexec/c-lightning
+        key: ${{ steps.cache-cln.outputs.cache-primary-key }}
+
     - name: Set up Rust
       if:  ${{ inputs.tagged-release == false}}
       uses: dtolnay/rust-toolchain@stable
 
     - name: Set up protoc
-      if: ${{ inputs.tagged-release == false}} || contains(matrix.os, 'macos') && ${{ steps.cache-cln.outputs.cache-hit != 'true' }}
+      if: ${{ inputs.tagged-release == false}} && ${{ steps.cache-cln.outputs.cache-hit != 'true' }}
       uses: arduino/setup-protoc@v3
       with:
         repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Checkout Core Lightning ${{ inputs.cln-version }}
-      if: ${{ contains(matrix.os, 'macos') && steps.cache-cln.outputs.cache-hit != 'true' }}
-      uses: actions/checkout@v4
-      with:
-        repository: 'ElementsProject/lightning'
-        path: 'lightning'
-        ref: ${{ inputs.cln-version }}
-        submodules: 'recursive'
-
-    - name: Install System dependencies
-      run: |
-        if [[ "${{ matrix.os }}" =~ "macos" ]]; then
-          brew install autoconf automake libtool gnu-sed gettext libsodium sqlite
-        fi
-
-    - name: Install Python dependencies
-      if: ${{ steps.cache-python.outputs.cache-hit != 'true' }}
-      run: |
-        python -m venv venv
-        source venv/bin/activate
-        python -m pip install -U pip poetry wheel
-        pip3 install "pyln-proto<=${{ inputs.pyln-version }}" "pyln-client<=${{ inputs.pyln-version }}" "pyln-testing<=${{ inputs.pyln-version }}"
-        pip3 install pytest-xdist pytest-test-groups pytest-timeout
-        if [ -f "tests/requirements.txt" ]; then
-          pip3 install -r tests/requirements.txt
-        fi
-
-    - name: Compile Core Lightning ${{ inputs.cln-version }} & install binaries
-      if: ${{ contains(matrix.os, 'macos') && steps.cache-cln.outputs.cache-hit != 'true' }}
-      run: |
-        export EXPERIMENTAL_FEATURES=${{ matrix.experimental }}
-        export COMPAT=${{ matrix.deprecated }}
-        export VALGRIND=0
-        source venv/bin/activate
-
-        cd lightning
-
-        poetry lock
-        poetry install
-        ./configure --disable-valgrind
-        poetry run make
-        sudo make install
-
     - name: Get plugin binary
       run: |
-        source venv/bin/activate
         if ${{ inputs.tagged-release }}; then
           cd tests
           ./setup.sh
           cd ..
         else
           if [ -d "proto" ]; then
-            python -m grpc_tools.protoc --proto_path="proto" --python_out="tests" --grpc_python_out="tests" proto/*.proto
+            uv run python -m grpc_tools.protoc --proto_path="proto" --python_out="tests" --grpc_python_out="tests" proto/*.proto
           fi
 
           cargo build
@@ -184,5 +152,5 @@ jobs:
         export TRAVIS=1
         export VALGRIND=0
         export PYTEST_TIMEOUT=600
-        source venv/bin/activate
-        pytest -n=5 tests/test_*.py
+
+        uv run pytest -n=10 tests/test_*.py
