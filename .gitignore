@@ -1,5 +1,5 @@
 /target/
 /tests/__pycache__/
 /venv/
-/result/
+result
 gossip_store*
