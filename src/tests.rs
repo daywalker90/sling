@@ -180,6 +180,7 @@ fn get_current_rss() -> Option<u64> {
     Some(resident_pages * 4096) // Convert pages to bytes (4KB page size)
 }
 #[test]
+#[ignore = "requires a gossip_store file"]
 fn test_gossip_file_reader() {
     let iterations = 5;
     let mut vec_times = Vec::new();
@@ -273,6 +274,7 @@ fn test_gossip_file_reader() {
 }
 
 #[test]
+#[ignore = "requires a gossip_store file"]
 fn test_dijkstra_speed() {
     let iterations = 100;
     let mut vec_times = Vec::new();
