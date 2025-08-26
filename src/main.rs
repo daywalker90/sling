@@ -191,7 +191,7 @@ async fn main() -> Result<(), anyhow::Error> {
         .rpcmethod_from_builder(
             RpcMethodBuilder::new(&(PLUGIN_NAME.to_string() + "-deletejob"), slingdeletejob)
                 .description("Delete sling job(s)")
-                .usage("job"),
+                .usage("job [delete_stats]"),
         )
         .rpcmethod_from_builder(
             RpcMethodBuilder::new(&(PLUGIN_NAME.to_string() + "-go"), slinggo)

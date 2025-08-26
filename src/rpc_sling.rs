@@ -13,7 +13,7 @@ use tokio::{fs, time};
 
 use crate::{
     get_normal_channel_from_listpeerchannels,
-    model::{PubKeyBytes, TaskIdentifier},
+    model::{PubKeyBytes, TaskIdentifier, FAILURES_SUFFIX, SUCCESSES_SUFFIX},
     parse::{parse_job, parse_once_job},
     read_jobs,
     slings::sling,
@@ -553,30 +553,46 @@ pub async fn slingdeletejob(
 ) -> Result<serde_json::Value, Error> {
     let _rpc_lock = plugin.state().rpc_lock.lock().await;
     let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
-    let input = match args {
+    let (input, delete_stats) = match args {
         serde_json::Value::Array(a) => {
-            if a.len() != 1 {
+            if a.len() < 1 || a.len() > 2 {
                 return Err(anyhow!(
-                    "Please provide exactly one ShortChannelId or `all`"
+                    "Invalid amount of arguments: Please provide exactly one \
+                    ShortChannelId or `all` and optionally \
+                    if you want to delete the stats"
                 ));
             } else {
-                match a.first().unwrap() {
+                let i = match a.first().unwrap() {
                     serde_json::Value::String(i) => i.clone(),
                     _ => return Err(anyhow!("invalid string for deleting job(s)")),
-                }
+                };
+                let del_s = match a.get(1) {
+                    Some(ds) => match ds {
+                        serde_json::Value::Null => false,
+                        serde_json::Value::Bool(b) => *b,
+                        serde_json::Value::String(bs) => bs.parse()?,
+                        _ => return Err(anyhow!("invalid type for deleting stats boolean")),
+                    },
+                    None => false,
+                };
+                (i, del_s)
             }
         }
         serde_json::Value::Object(o) => {
-            if o.len() != 1 {
-                return Err(anyhow!(
-                    "Please provide exactly one ShortChannelId or `all`"
-                ));
-            } else {
-                match o.get("job") {
-                    Some(serde_json::Value::String(i)) => i.clone(),
-                    _ => return Err(anyhow!("invalid string for deleting job(s)")),
-                }
-            }
+            let i = match o.get("job") {
+                Some(serde_json::Value::String(i)) => i.clone(),
+                _ => return Err(anyhow!("invalid string for deleting job(s)")),
+            };
+            let del_s = match o.get("delete_stats") {
+                Some(ds) => match ds {
+                    serde_json::Value::Null => false,
+                    serde_json::Value::Bool(b) => *b,
+                    serde_json::Value::String(bs) => bs.parse()?,
+                    _ => return Err(anyhow!("invalid type for deleting stats boolean")),
+                },
+                None => false,
+            };
+            (i, del_s)
         }
         e => {
             return Err(anyhow!(
@@ -594,6 +610,17 @@ pub async fn slingdeletejob(
             plugin.state().tasks.lock().remove_all_tasks();
             log::info!("Deleted all jobs");
             let except_chans = read_except_chans(&sling_dir).await?;
+            if delete_stats {
+                let jobs = read_jobs(&sling_dir, plugin.clone()).await?;
+                for scid in jobs.keys() {
+                    let _remove_succ_res =
+                        fs::remove_file(sling_dir.join(scid.to_string() + "_" + SUCCESSES_SUFFIX))
+                            .await;
+                    let _remove_fail_res =
+                        fs::remove_file(sling_dir.join(scid.to_string() + "_" + FAILURES_SUFFIX))
+                            .await;
+                }
+            }
             let mut config = plugin.state().config.lock();
             config.exclude_chans_pull = except_chans.clone();
             config.exclude_chans_push = except_chans;
@@ -605,7 +632,14 @@ pub async fn slingdeletejob(
                 serde_json::Value::Array(vec![serde_json::to_value(scid)?]),
             )
             .await?;
-            write_job(plugin.clone(), sling_dir, scid, None, true).await?;
+            write_job(plugin.clone(), sling_dir.clone(), scid, None, true).await?;
+            if delete_stats {
+                let _remove_succ_res =
+                    fs::remove_file(sling_dir.join(scid.to_string() + "_" + SUCCESSES_SUFFIX))
+                        .await;
+                let _remove_fail_res =
+                    fs::remove_file(sling_dir.join(scid.to_string() + "_" + FAILURES_SUFFIX)).await;
+            }
             plugin.state().tasks.lock().remove_task(&scid);
             let mut config = plugin.state().config.lock();
             config.exclude_chans_pull.remove(&scid);

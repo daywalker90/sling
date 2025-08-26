@@ -1,5 +1,11 @@
 # Changelog
 
+## [4.1.0] - 2025-08-26
+
+### Added
+- ``sling-deletejob``: add an optional boolean argument `delete_stats` which defaults to false. If set to true it will delete the stats of the job(s) aswell.
+
+
 ## [4.0.0] - 2025-07-28
 
 ### Removed

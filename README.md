@@ -112,9 +112,10 @@ Liquidity beliefs don't get saved if you run `lightning-cli plugin start /path/t
     * With no arguments this shows a human readable status overview for all jobs.
     * ***scid*** Optional ShortChannelId of a job to get more detailed statistics.
     * ***json*** Optional boolean, `true` outputs json.
-* **sling-deletejob** *job*
+* **sling-deletejob** *job* [*delete_stats*]
     * Gracefully stops and removes *job*.
     * ***job*** Either a ShortChannelId of a job or the keyword `all` to delete all jobs.
+    * **delete_stats** Boolean that defaults to false. If set to true it will delete the stats of the job(s) aswell.
 * **sling-except-chan** *command* [*scid*]
     * Manage channels that will be avoided for all jobs.
     * ***command*** Either `list` to list all current channel exceptions or `add` to add a ShortChannelId to the exceptions or `remove` to remove ShortChannelId previously added.
