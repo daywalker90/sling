@@ -5,6 +5,9 @@
 ### Added
 - ``sling-deletejob``: add an optional boolean argument `delete_stats` which defaults to false. If set to true it will delete the stats of the job(s) aswell.
 
+### Changed
+- raised MSRV to 1.85 since both CLN and debian stable now support it
+
 
 ## [4.0.0] - 2025-07-28
 
