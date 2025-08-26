@@ -225,6 +225,7 @@ You can mix two methods and if you set the same option with different methods, i
 * ``sling-stats-delete-failures-size``: Max number of failure stats per channel. Default is ``10000``, use ``0`` to never delete stats based on count
 * ``sling-stats-delete-successes-size``: Max number of successes stats per channel. Default is ``10000``, use ``0`` to never delete stats based on count
 * ``sling-inform-layers``: Inform these layers about information gained by failed rebalances. State multiple times if you want to inform more than one layer. Defaults to ``xpay``'s ``xpay`` layer. Not a dynamic option.
+* ``sling-autogo``: If set to ``true`` it will automatically start all rebalance jobs upon sling startup. Defaults to `false`
 
 # Feedback
 You can report issues, feedback etc. here on github or join this telegram channel: [Telegram](https://t.me/+9UKAom1Jam9hYTY6)

@@ -7,8 +7,8 @@ static GLOBAL: MiMalloc = MiMalloc;
 
 use anyhow::anyhow;
 use cln_plugin::options::{
-    ConfigOption, DefaultIntegerConfigOption, DefaultStringArrayConfigOption,
-    DefaultStringConfigOption,
+    ConfigOption, DefaultBooleanConfigOption, DefaultIntegerConfigOption,
+    DefaultStringArrayConfigOption, DefaultStringConfigOption,
 };
 use cln_plugin::{Builder, RpcMethodBuilder};
 use config::*;
@@ -17,6 +17,7 @@ use htlc::htlc_handler;
 use model::*;
 use notifications::*;
 use rpc_sling::*;
+use serde_json::json;
 use stats::*;
 use std::path::Path;
 use tokio::{self};
@@ -54,6 +55,11 @@ const OPT_STATS_DELETE_FAILURES_SIZE: &str = "sling-stats-delete-failures-size";
 const OPT_STATS_DELETE_SUCCESSES_AGE: &str = "sling-stats-delete-successes-age";
 const OPT_STATS_DELETE_SUCCESSES_SIZE: &str = "sling-stats-delete-successes-size";
 const OPT_INFORM_LAYERS: &str = "sling-inform-layers";
+const OPT_AUTOGO: DefaultBooleanConfigOption = ConfigOption::new_bool_with_default(
+    "sling-autogo",
+    false,
+    "Automatically start all jobs on startup. Default is `false`",
+);
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
@@ -171,6 +177,7 @@ async fn main() -> Result<(), anyhow::Error> {
         .option(opt_stats_delete_successes_age)
         .option(opt_stats_delete_successes_size)
         .option(opt_inform_layers)
+        .option(OPT_AUTOGO)
         .setconfig_callback(setconfig_callback)
         .rpcmethod_from_builder(
             RpcMethodBuilder::new(&(PLUGIN_NAME.to_string() + "-job"), slingjob)
@@ -343,6 +350,10 @@ async fn main() -> Result<(), anyhow::Error> {
                 };
                 let _res = askrene_clone.shutdown();
             });
+        }
+
+        if plugin.option(&OPT_AUTOGO).unwrap() {
+            slinggo(plugin.clone(), json!({})).await?;
         }
 
         plugin.join().await?;

@@ -3,7 +3,8 @@
 ## [4.1.0] - 2025-08-26
 
 ### Added
-- ``sling-deletejob``: add an optional boolean argument `delete_stats` which defaults to false. If set to true it will delete the stats of the job(s) aswell.
+- ``sling-deletejob``: add an optional boolean argument `delete_stats` which defaults to ``false``. If set to ``true`` it will delete the stats of the job(s) aswell.
+- ``sling-autogo``: new option that defaults to ``false``. If set to ``true`` it will automatically start all rebalance jobs upon sling startup.
 
 ### Changed
 - raised MSRV to 1.85 since both CLN and debian stable now support it
