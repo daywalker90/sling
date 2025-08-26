@@ -7,7 +7,6 @@ description = "python dependencies for running tests"
 [dependency-groups]
 dev = [
     "pytest>=8.4,<9",
-    "pytest-asyncio>=0.23.8,<2",
     "pytest-xdist>=3.7,<4",
     "pytest-timeout>=2.4,<3",
     "pyln-testing>=25.5",
