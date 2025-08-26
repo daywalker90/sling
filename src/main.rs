@@ -20,7 +20,8 @@ use rpc_sling::*;
 use serde_json::json;
 use stats::*;
 use std::path::Path;
-use tokio::{self};
+use std::time::Duration;
+use tokio::{self, time};
 use util::*;
 
 mod config;
@@ -353,7 +354,8 @@ async fn main() -> Result<(), anyhow::Error> {
         }
 
         if plugin.option(&OPT_AUTOGO).unwrap() {
-            slinggo(plugin.clone(), json!({})).await?;
+            time::sleep(Duration::from_secs(5)).await;
+            let _go_res = slinggo(plugin.clone(), json!({})).await;
         }
 
         plugin.join().await?;
