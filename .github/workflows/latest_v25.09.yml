@@ -1,4 +1,4 @@
-name: Latest release on CLN v24.08.x
+name: Latest release on CLN v25.09.x
 
 on:
     release:
@@ -9,6 +9,6 @@ jobs:
     call-ci:
         uses: ./.github/workflows/ci.yml
         with:
-            cln-version: "v24.08.2"
-            pyln-version: "24.8.2"
+            cln-version: "v25.09"
+            pyln-version: "25.9"
             tagged-release: true
