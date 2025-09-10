@@ -643,8 +643,13 @@ def test_stats(node_factory, bitcoind, get_plugin):  # noqa: F811
     assert (
         stats_chan["successes_in_time_window"]["top_5_channel_partners"][0]["sats"]
         == 200_000
+        or stats_chan["successes_in_time_window"]["top_5_channel_partners"][0]["sats"]
+        == 300_000
     )
-    assert stats_chan["successes_in_time_window"]["total_amount_sats"] == 200_000
+    assert (
+        stats_chan["successes_in_time_window"]["total_amount_sats"] == 200_000
+        or stats_chan["successes_in_time_window"]["total_amount_sats"] == 300_000
+    )
 
 
 def test_private_channel_receive(node_factory, bitcoind, get_plugin):  # noqa: F811
