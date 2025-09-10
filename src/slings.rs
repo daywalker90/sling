@@ -15,7 +15,7 @@ use std::time::Duration;
 use tokio::time::{self, Instant};
 
 use crate::dijkstra::dijkstra;
-use crate::model::{Config, JobMessage, PluginState, PubKeyBytes, TaskIdentifier};
+use crate::model::{Config, JobMessage, PayResolveInfo, PluginState, PubKeyBytes, TaskIdentifier};
 use crate::response::{sendpay_response, waitsendpay_response};
 use crate::util::{
     feeppm_effective, feeppm_effective_from_amts, get_normal_channel_from_listpeerchannels,
@@ -52,7 +52,8 @@ pub async fn sling(
 
         let config = plugin.state().config.lock().clone();
 
-        let tempbans = plugin.state().tempbans.lock().clone();
+        let temp_chan_bans = plugin.state().temp_chan_bans.lock().clone();
+        let bad_fwd_nodes = plugin.state().bad_fwd_nodes.lock().clone();
         let peer_channels = plugin.state().peer_channels.lock().clone();
 
         if let Some(r) = health_check(
@@ -62,7 +63,8 @@ pub async fn sling(
             &task_ident,
             job,
             task.other_pubkey,
-            &tempbans,
+            &temp_chan_bans,
+            &bad_fwd_nodes,
         )
         .await?
         {
@@ -78,7 +80,7 @@ pub async fn sling(
             .lock()
             .set_state(&task_ident, JobMessage::Rebalancing);
 
-        let mut excepts = build_excepts(&tempbans, &config, job);
+        let mut excepts = build_except_chans(&temp_chan_bans, &config, job);
 
         let actual_candidates = build_candidatelist(
             plugin.clone(),
@@ -86,6 +88,7 @@ pub async fn sling(
             task.get_identifier(),
             job,
             &excepts,
+            &bad_fwd_nodes,
             &config,
         )?;
 
@@ -98,13 +101,13 @@ pub async fn sling(
                 .collect::<Vec<String>>()
                 .join(", ")
         );
-        if !tempbans.is_empty() {
+        if !temp_chan_bans.is_empty() {
             log::debug!(
                 "{}: Tempbans: {}",
                 task,
                 plugin
                     .state()
-                    .tempbans
+                    .temp_chan_bans
                     .lock()
                     .clone()
                     .keys()
@@ -224,11 +227,53 @@ pub async fn sling(
 
         let (preimage, payment_hash) = get_preimage_paymend_hash_pair();
 
+        let last_scid = route.last().unwrap().channel;
+
+        let last_hop = if let Some(l_hop) = peer_channels.get(&last_scid) {
+            Some(l_hop)
+        } else {
+            let mut find_hop = None;
+            for channel in peer_channels.values() {
+                if let Some(alias) = &channel.alias {
+                    if let Some(r_alias) = alias.remote {
+                        if r_alias == last_scid {
+                            if find_hop.is_some() {
+                                let mut tasks = plugin.state().tasks.lock();
+                                tasks.set_state(&task_ident, JobMessage::Error);
+                                tasks.set_active(&task_ident, false);
+                                log::warn!(
+                                    "{}: Found multiple matching last hops via alias",
+                                    task_ident
+                                );
+                                break 'outer;
+                            }
+                            find_hop = Some(channel)
+                        }
+                    }
+                }
+            }
+            find_hop
+        };
+
+        if last_hop.is_none() {
+            let mut tasks = plugin.state().tasks.lock();
+            tasks.set_state(&task_ident, JobMessage::Error);
+            tasks.set_active(&task_ident, false);
+            log::warn!("{}: Could not find last hop", task_ident);
+            break 'outer;
+        }
+
+        let pay_resolve_info = PayResolveInfo {
+            preimage,
+            incoming_scid: last_hop.unwrap().short_channel_id.unwrap(),
+            incoming_alias: last_hop.unwrap().alias.as_ref().and_then(|a| a.remote),
+        };
+
         let send_response = match sendpay_response(
             plugin.clone(),
             &config,
             payment_hash,
-            preimage,
+            pay_resolve_info,
             &task_ident,
             job,
             &route,
@@ -296,7 +341,7 @@ pub async fn sling(
     Ok(rebalanced_msat)
 }
 
-fn build_excepts(
+fn build_except_chans(
     tempbans: &HashMap<ShortChannelId, u64>,
     config: &Config,
     job: &Job,
@@ -459,7 +504,8 @@ async fn health_check(
     task_ident: &TaskIdentifier,
     job: &Job,
     other_peer: PubKeyBytes,
-    tempbans: &HashMap<ShortChannelId, u64>,
+    temp_chan_bans: &HashMap<ShortChannelId, u64>,
+    bad_fwd_nodes: &HashMap<PublicKey, u64>,
 ) -> Result<Option<bool>, Error> {
     let channel =
         match get_normal_channel_from_listpeerchannels(peer_channels, &task_ident.get_chan_id()) {
@@ -515,14 +561,25 @@ async fn health_check(
                         .set_state(task_ident, JobMessage::Disconnected);
                     my_sleep(plugin.clone(), 60, task_ident).await;
                     Ok(Some(true))
-                } else if tempbans.contains_key(&task_ident.get_chan_id()) {
-                    log::info!("{task_ident}: Job peer not ready. Taking a break...");
+                } else if temp_chan_bans.contains_key(&task_ident.get_chan_id()) {
+                    log::info!("{task_ident}: Job peer channel not ready. Taking a break...");
                     plugin
                         .state()
                         .tasks
                         .lock()
                         .set_state(task_ident, JobMessage::PeerNotReady);
                     my_sleep(plugin.clone(), 20, task_ident).await;
+                    Ok(Some(true))
+                } else if job.sat_direction == SatDirection::Pull
+                    && bad_fwd_nodes.contains_key(&other_peer.to_pubkey())
+                {
+                    log::info!("{task_ident}: Job peer node not ready. Taking a break...");
+                    plugin
+                        .state()
+                        .tasks
+                        .lock()
+                        .set_state(task_ident, JobMessage::PeerBad);
+                    my_sleep(plugin.clone(), 60, task_ident).await;
                     Ok(Some(true))
                 } else {
                     Ok(None)
@@ -545,6 +602,7 @@ fn build_candidatelist(
     task_ident: &TaskIdentifier,
     job: &Job,
     excepts: &[ShortChannelIdDir],
+    bad_fwd_nodes: &HashMap<PublicKey, u64>,
     config: &Config,
 ) -> Result<Vec<ShortChannelId>, Error> {
     let blockheight = *plugin.state().blockheight.lock();
@@ -597,6 +655,13 @@ fn build_candidatelist(
                 };
                 if excepts.contains(&scid_dir) {
                     log::trace!("{task_ident}: build_candidatelist: {scid_dir} is in excepts",);
+                    continue;
+                }
+                if bad_fwd_nodes.contains_key(&channel.peer_id) {
+                    log::trace!(
+                        "{task_ident}: build_candidatelist: {} is a bad fwd node",
+                        channel.peer_id
+                    );
                     continue;
                 }
             }

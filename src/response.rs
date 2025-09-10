@@ -19,7 +19,7 @@ use tokio::time::Instant;
 use crate::{
     errors::WaitsendpayErrorData,
     feeppm_effective_from_amts,
-    model::{Liquidity, TaskIdentifier},
+    model::{Liquidity, PayResolveInfo, TaskIdentifier},
     my_sleep,
     util::get_direction_from_nodes,
     Config, FailureReb, PluginState, SuccessReb,
@@ -206,10 +206,18 @@ pub async fn waitsendpay_response(
                         task_ident,
                         ws_error.failcodename
                     );
+
+                    let last_hop = route.get(route.len() - 2).unwrap().id;
                     if err.message.contains("Too many HTLCs") {
                         my_sleep(plugin.clone(), 3, task_ident).await;
+                    } else if plugin.state().bad_fwd_nodes.lock().contains_key(&last_hop) {
+                        log::debug!(
+                            "{}: Last hop {} got temp banned because of bad forwarding",
+                            task_ident,
+                            last_hop
+                        );
                     } else {
-                        plugin.state().tempbans.lock().insert(
+                        plugin.state().temp_chan_bans.lock().insert(
                             route.last().unwrap().channel,
                             SystemTime::now()
                                 .duration_since(UNIX_EPOCH)
@@ -222,7 +230,7 @@ pub async fn waitsendpay_response(
                     if err.message.contains("Too many HTLCs") {
                         my_sleep(plugin.clone(), 3, task_ident).await;
                     } else {
-                        plugin.state().tempbans.lock().insert(
+                        plugin.state().temp_chan_bans.lock().insert(
                             route.first().unwrap().channel,
                             SystemTime::now()
                                 .duration_since(UNIX_EPOCH)
@@ -302,7 +310,7 @@ pub async fn sendpay_response(
     plugin: Plugin<PluginState>,
     config: &Config,
     payment_hash: Sha256,
-    preimage: String,
+    pay_resolve_info: PayResolveInfo,
     task_ident: &TaskIdentifier,
     job: &Job,
     route: &[SendpayRoute],
@@ -330,13 +338,13 @@ pub async fn sendpay_response(
                 .state()
                 .pays
                 .write()
-                .insert(payment_hash.to_string(), preimage);
+                .insert(payment_hash.to_string(), pay_resolve_info);
             Ok(Some(resp))
         }
         Err(e) => {
             if e.to_string().contains("First peer not ready") {
                 log::info!("{task_ident}: First peer not ready, banning it for now...");
-                plugin.state().tempbans.lock().insert(
+                plugin.state().temp_chan_bans.lock().insert(
                     route.first().unwrap().channel,
                     SystemTime::now()
                         .duration_since(UNIX_EPOCH)

@@ -37,9 +37,10 @@ pub struct PluginState {
     pub graph: Arc<Mutex<LnGraph>>,
     pub incomplete_channels: Arc<Mutex<IncompleteChannels>>,
     pub liquidity: Arc<Mutex<HashMap<ShortChannelIdDir, Liquidity>>>,
-    pub pays: Arc<RwLock<HashMap<String, String>>>,
+    pub pays: Arc<RwLock<HashMap<String, PayResolveInfo>>>,
     pub alias_peer_map: Arc<Mutex<HashMap<PublicKey, String>>>,
-    pub tempbans: Arc<Mutex<HashMap<ShortChannelId, u64>>>,
+    pub temp_chan_bans: Arc<Mutex<HashMap<ShortChannelId, u64>>>,
+    pub bad_fwd_nodes: Arc<Mutex<HashMap<PublicKey, u64>>>,
     pub tasks: Arc<Mutex<Tasks>>,
     pub blockheight: Arc<Mutex<u32>>,
     pub rpc_lock: Arc<tokio::sync::Mutex<()>>,
@@ -54,12 +55,20 @@ impl PluginState {
             liquidity: Arc::new(Mutex::new(liquidity)),
             pays: Arc::new(RwLock::new(HashMap::new())),
             alias_peer_map: Arc::new(Mutex::new(HashMap::new())),
-            tempbans: Arc::new(Mutex::new(HashMap::new())),
+            temp_chan_bans: Arc::new(Mutex::new(HashMap::new())),
+            bad_fwd_nodes: Arc::new(Mutex::new(HashMap::new())),
             tasks: Arc::new(Mutex::new(Tasks::new())),
             blockheight: Arc::new(Mutex::new(0)),
             rpc_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct PayResolveInfo {
+    pub preimage: String,
+    pub incoming_scid: ShortChannelId,
+    pub incoming_alias: Option<ShortChannelId>,
 }
 
 #[derive(Clone, Debug)]
@@ -371,6 +380,7 @@ pub enum JobMessage {
     Disconnected,
     PeerNotFound,
     PeerNotReady,
+    PeerBad,
     ChanNotNormal,
     GraphEmpty,
     ChanNotInGraph,
@@ -392,6 +402,7 @@ impl Display for JobMessage {
             JobMessage::Disconnected => write!(f, "Disconnected"),
             JobMessage::PeerNotFound => write!(f, "PeerNotFound"),
             JobMessage::PeerNotReady => write!(f, "PeerNotReady"),
+            JobMessage::PeerBad => write!(f, "PeerBad"),
             JobMessage::ChanNotNormal => write!(f, "ChanNotNormal"),
             JobMessage::GraphEmpty => write!(f, "GraphEmpty"),
             JobMessage::ChanNotInGraph => write!(f, "ChanNotInGraph"),

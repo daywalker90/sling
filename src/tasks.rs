@@ -251,13 +251,20 @@ pub async fn refresh_liquidity(plugin: Plugin<PluginState>) -> Result<(), Error>
 pub async fn clear_tempbans(plugin: Plugin<PluginState>) -> Result<(), Error> {
     loop {
         {
-            plugin.state().tempbans.lock().retain(|_c, t| {
+            plugin.state().temp_chan_bans.lock().retain(|_c, t| {
                 *t > SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
                     .as_secs()
                     - 600
-            })
+            });
+            plugin.state().bad_fwd_nodes.lock().retain(|_c, t| {
+                *t > SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs()
+                    - 3_600
+            });
         }
         time::sleep(Duration::from_secs(100)).await;
     }

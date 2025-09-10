@@ -1366,3 +1366,119 @@ def test_splice(node_factory, bitcoind, get_plugin):  # noqa: F811
     )
     l1.rpc.call("sling-go", [])
     l1.daemon.wait_for_log(r"Rebalance SUCCESSFULL after")
+
+
+def test_bad_forwarder_push(node_factory, bitcoind, get_plugin):  # noqa: F811
+    l1, l2 = node_factory.get_nodes(
+        2,
+        opts=[
+            {
+                "plugin": get_plugin,
+            },
+            {
+                "plugin": os.path.join(
+                    os.path.dirname(__file__), "htlc_accepted-fwdto.py"
+                )
+            },
+        ],
+    )
+    nodes = [l1, l2]
+    l1.fundwallet(10_000_000)
+    l2.fundwallet(10_000_000)
+    l1.rpc.connect(l2.info["id"], "localhost", l2.port)
+    l1.rpc.fundchannel(
+        l2.info["id"], 1_000_000, mindepth=1, announce=True, push_msat=500_000_000
+    )
+    l2.rpc.fundchannel(
+        l1.info["id"], 1_000_000, mindepth=1, announce=True, push_msat=500_000_000
+    )
+
+    bitcoind.generate_block(6)
+    sync_blockheight(bitcoind, nodes)
+
+    peer_channels = l1.rpc.listpeerchannels()["channels"]
+    ch1_scid = peer_channels[0]["short_channel_id"]
+    ch2_scid = peer_channels[1]["short_channel_id"]
+    ch2_id = peer_channels[1]["channel_id"]
+    l2.rpc.setfwdto(ch2_id)
+
+    l1.daemon.wait_for_log(r"4 public channels")
+
+    l1.rpc.call(
+        "sling-job",
+        {
+            "scid": ch2_scid,
+            "direction": "push",
+            "amount": 10_000,
+            "maxppm": 1000,
+            "outppm": 0,
+            "target": 1,
+        },
+    )
+    l1.rpc.call("sling-go", [])
+    l1.daemon.wait_for_log(
+        rf"NOT resolving HTLC from .*: WRONG SCID: {ch2_scid} EXPECTED: {ch1_scid}"
+    )
+    l1.daemon.wait_for_log(r"got temp banned because of bad forwarding")
+    l1.daemon.wait_for_log(r"build_candidatelist: .* is a bad fwd node")
+
+    stats = l1.rpc.call("sling-stats", {"json": True})
+    assert stats[0]["status"] == ["1:NoCandidates"]
+
+
+def test_bad_forwarder_pull(node_factory, bitcoind, get_plugin):  # noqa: F811
+    l1, l2 = node_factory.get_nodes(
+        2,
+        opts=[
+            {
+                "plugin": get_plugin,
+            },
+            {
+                "plugin": os.path.join(
+                    os.path.dirname(__file__), "htlc_accepted-fwdto.py"
+                )
+            },
+        ],
+    )
+    nodes = [l1, l2]
+    l1.fundwallet(10_000_000)
+    l2.fundwallet(10_000_000)
+    l1.rpc.connect(l2.info["id"], "localhost", l2.port)
+    l1.rpc.fundchannel(
+        l2.info["id"], 1_000_000, mindepth=1, announce=True, push_msat=500_000_000
+    )
+    l2.rpc.fundchannel(
+        l1.info["id"], 1_000_000, mindepth=1, announce=True, push_msat=500_000_000
+    )
+
+    bitcoind.generate_block(6)
+    sync_blockheight(bitcoind, nodes)
+
+    peer_channels = l1.rpc.listpeerchannels()["channels"]
+    ch1_scid = peer_channels[0]["short_channel_id"]
+    ch2_scid = peer_channels[1]["short_channel_id"]
+    ch2_id = peer_channels[1]["channel_id"]
+    l2.rpc.setfwdto(ch2_id)
+
+    l1.daemon.wait_for_log(r"4 public channels")
+
+    l1.rpc.call(
+        "sling-job",
+        {
+            "scid": ch1_scid,
+            "direction": "pull",
+            "amount": 10_000,
+            "maxppm": 1000,
+            "outppm": 1000,
+            "target": 1,
+        },
+    )
+    l1.rpc.call("sling-go", [])
+    l1.daemon.wait_for_log(
+        rf"NOT resolving HTLC from .*: WRONG SCID: {ch2_scid} EXPECTED: {ch1_scid}"
+    )
+    l1.daemon.wait_for_log(r"got temp banned because of bad forwarding")
+    l1.daemon.wait_for_log(r"Job peer node not ready")
+
+    stats = l1.rpc.call("sling-stats", {"json": True})
+    assert stats[0]["status"] == ["1:PeerBad"]
