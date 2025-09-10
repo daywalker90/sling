@@ -1,5 +1,10 @@
 # Changelog
 
+## [4.1.1] - 2025-09-10
+
+### Fixed
+- Important fix if you have more than one channel with the same peer (see [Issue#11](https://github.com/daywalker90/sling/issues/11)): They can choose on which channel to forward sats to you and might not choose the scid from ``sling``'s route. This can be counter-productive and lead to pointless back and forth on the same channel while losing sats to fees. ``sling`` now checks if the sats arrive on the correct channel and if not fails the rebalance and bans the peer for one hour at which point it will try again. Reported by @whitslack, thank you!
+
 ## [4.1.0] - 2025-08-26
 
 ### Added
