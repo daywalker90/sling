@@ -161,7 +161,7 @@ pub async fn parse_job(
             }
 
             log::trace!(
-                "{:?}",
+                "candidatelist: {:?}",
                 candidatelist.clone().map(|s| s
                     .iter()
                     .map(|sc| sc.to_string())
@@ -169,7 +169,7 @@ pub async fn parse_job(
                     .join(", "))
             );
             log::trace!(
-                "{}",
+                "exclude_chans_pull: {}",
                 config
                     .exclude_chans_pull
                     .iter()
@@ -178,7 +178,7 @@ pub async fn parse_job(
                     .join(", ")
             );
             log::trace!(
-                "{}",
+                "exclude_chans_push: {}",
                 config
                     .exclude_chans_push
                     .iter()
@@ -399,7 +399,7 @@ pub async fn parse_once_job(
             }
 
             log::trace!(
-                "{:?}",
+                "candidatelist: {:?}",
                 candidatelist.clone().map(|s| s
                     .iter()
                     .map(|sc| sc.to_string())
@@ -407,7 +407,7 @@ pub async fn parse_once_job(
                     .join(", "))
             );
             log::trace!(
-                "{}",
+                "exclude_chans_pull: {}",
                 config
                     .exclude_chans_pull
                     .iter()
@@ -416,7 +416,7 @@ pub async fn parse_once_job(
                     .join(", ")
             );
             log::trace!(
-                "{}",
+                "exclude_chans_push: {}",
                 config
                     .exclude_chans_push
                     .iter()
