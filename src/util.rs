@@ -1,43 +1,42 @@
-use bitcoin::secp256k1::hashes::Hash;
-use bitcoin::secp256k1::hashes::HashEngine;
-use cln_rpc::model::responses::ListpeerchannelsChannels;
-use cln_rpc::primitives::Amount;
-use cln_rpc::primitives::ChannelState;
-use cln_rpc::primitives::PublicKey;
-use cln_rpc::primitives::Sha256;
-use cln_rpc::primitives::ShortChannelIdDir;
-use rand::Rng;
-use sling::SatDirection;
-use std::collections::BTreeMap;
-use std::collections::HashSet;
-use std::io;
-use std::path::PathBuf;
-use std::str::FromStr;
-use std::time::Duration;
-use std::{collections::HashMap, path::Path};
-
-use crate::model::JobMessage;
-use crate::model::Liquidity;
-use crate::model::PluginState;
-use crate::model::TaskIdentifier;
-use crate::model::EXCEPTS_CHANS_FILE_NAME;
-use crate::model::EXCEPTS_PEERS_FILE_NAME;
-use crate::model::JOB_FILE_NAME;
-use crate::model::LIQUIDITY_FILE_NAME;
-use crate::model::PLUGIN_NAME;
-use crate::ShortChannelIdDirState;
-use sling::Job;
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    io,
+    path::{Path, PathBuf},
+    str::FromStr,
+    time::Duration,
+};
 
 use anyhow::{anyhow, Error};
-use bitcoin::consensus::encode::serialize_hex;
+use bitcoin::{
+    consensus::encode::serialize_hex,
+    secp256k1::hashes::{Hash, HashEngine},
+};
 use cln_plugin::Plugin;
+use cln_rpc::{
+    model::responses::ListpeerchannelsChannels,
+    primitives::{Amount, ChannelState, PublicKey, Sha256, ShortChannelId, ShortChannelIdDir},
+};
+use rand::{rng, Rng};
+use sling::{Job, SatDirection};
+use tokio::{
+    fs::{self, File},
+    time::{self, Instant},
+};
 
-use cln_rpc::primitives::ShortChannelId;
-
-use rand::rng;
-use tokio::fs::{self, File};
-
-use tokio::time::{self, Instant};
+use crate::{
+    model::{
+        JobMessage,
+        Liquidity,
+        PluginState,
+        TaskIdentifier,
+        EXCEPTS_CHANS_FILE_NAME,
+        EXCEPTS_PEERS_FILE_NAME,
+        JOB_FILE_NAME,
+        LIQUIDITY_FILE_NAME,
+        PLUGIN_NAME,
+    },
+    ShortChannelIdDirState,
+};
 
 pub async fn read_jobs(
     sling_dir: &PathBuf,

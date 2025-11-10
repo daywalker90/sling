@@ -1,27 +1,34 @@
+use std::{
+    cmp::{max, min},
+    collections::HashMap,
+    time::Duration,
+};
+
 use anyhow::{anyhow, Error};
-
 use cln_plugin::Plugin;
-
-use cln_rpc::model::requests::SendpayRoute;
-use cln_rpc::model::responses::ListpeerchannelsChannels;
-use cln_rpc::primitives::*;
-
+use cln_rpc::{
+    model::{requests::SendpayRoute, responses::ListpeerchannelsChannels},
+    primitives::*,
+};
 use sling::{Job, SatDirection};
-use std::cmp::{max, min};
-
-use std::collections::HashMap;
-use std::time::Duration;
-
 use tokio::time::{self, Instant};
 
-use crate::dijkstra::dijkstra;
-use crate::model::{Config, JobMessage, PayResolveInfo, PluginState, PubKeyBytes, TaskIdentifier};
-use crate::response::{sendpay_response, waitsendpay_response};
-use crate::util::{
-    feeppm_effective, feeppm_effective_from_amts, get_normal_channel_from_listpeerchannels,
-    get_preimage_paymend_hash_pair, get_total_htlc_count, is_channel_normal, my_sleep,
+use crate::{
+    dijkstra::dijkstra,
+    get_remote_feeppm_effective,
+    model::{Config, JobMessage, PayResolveInfo, PluginState, PubKeyBytes, TaskIdentifier},
+    response::{sendpay_response, waitsendpay_response},
+    util::{
+        feeppm_effective,
+        feeppm_effective_from_amts,
+        get_normal_channel_from_listpeerchannels,
+        get_preimage_paymend_hash_pair,
+        get_total_htlc_count,
+        is_channel_normal,
+        my_sleep,
+    },
+    wait_for_gossip,
 };
-use crate::{get_remote_feeppm_effective, wait_for_gossip};
 
 pub async fn sling(
     job: &Job,

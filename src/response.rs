@@ -5,7 +5,10 @@ use cln_plugin::{Error, Plugin};
 use cln_rpc::{
     model::{
         requests::{
-            AskreneinformchannelInform, AskreneinformchannelRequest, SendpayRequest, SendpayRoute,
+            AskreneinformchannelInform,
+            AskreneinformchannelRequest,
+            SendpayRequest,
+            SendpayRoute,
             WaitsendpayRequest,
         },
         responses::SendpayResponse,
@@ -22,7 +25,10 @@ use crate::{
     model::{Liquidity, PayResolveInfo, TaskIdentifier},
     my_sleep,
     util::get_direction_from_nodes,
-    Config, FailureReb, PluginState, SuccessReb,
+    Config,
+    FailureReb,
+    PluginState,
+    SuccessReb,
 };
 
 #[allow(clippy::too_many_arguments)]

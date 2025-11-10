@@ -2,17 +2,30 @@ use anyhow::{anyhow, Error};
 use chrono::Utc;
 use cln_plugin::{
     options::{self},
-    ConfiguredPlugin, Plugin,
+    ConfiguredPlugin,
+    Plugin,
 };
 use cln_rpc::{model::requests::ListconfigsRequest, ClnRpc, RpcError};
 use serde_json::json;
 
 use crate::{
-    at_or_above_version, model::PluginState, Config, OPT_CANDIDATES_MIN_AGE, OPT_DEPLETEUPTOAMOUNT,
-    OPT_DEPLETEUPTOPERCENT, OPT_INFORM_LAYERS, OPT_MAXHOPS, OPT_MAX_HTLC_COUNT, OPT_PARALLELJOBS,
-    OPT_REFRESH_ALIASMAP_INTERVAL, OPT_RESET_LIQUIDITY_INTERVAL, OPT_STATS_DELETE_FAILURES_AGE,
-    OPT_STATS_DELETE_FAILURES_SIZE, OPT_STATS_DELETE_SUCCESSES_AGE,
-    OPT_STATS_DELETE_SUCCESSES_SIZE, OPT_TIMEOUTPAY,
+    at_or_above_version,
+    model::PluginState,
+    Config,
+    OPT_CANDIDATES_MIN_AGE,
+    OPT_DEPLETEUPTOAMOUNT,
+    OPT_DEPLETEUPTOPERCENT,
+    OPT_INFORM_LAYERS,
+    OPT_MAXHOPS,
+    OPT_MAX_HTLC_COUNT,
+    OPT_PARALLELJOBS,
+    OPT_REFRESH_ALIASMAP_INTERVAL,
+    OPT_RESET_LIQUIDITY_INTERVAL,
+    OPT_STATS_DELETE_FAILURES_AGE,
+    OPT_STATS_DELETE_FAILURES_SIZE,
+    OPT_STATS_DELETE_SUCCESSES_AGE,
+    OPT_STATS_DELETE_SUCCESSES_SIZE,
+    OPT_TIMEOUTPAY,
 };
 
 pub async fn setconfig_callback(

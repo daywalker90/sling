@@ -1,16 +1,21 @@
-use crate::model::{Config, DijkstraNode, JobMessage, Liquidity, LnGraph, PubKeyBytes, Task};
-use crate::util::{edge_cost, fee_total_msat_precise};
-use anyhow::{anyhow, Error};
-use cln_rpc::model::requests::SendpayRoute;
-use cln_rpc::primitives::*;
-use sling::{Job, SatDirection};
-use std::collections::hash_map::Entry::{Occupied, Vacant};
-use std::collections::BinaryHeap;
-
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::{
     cmp::Ordering,
-    collections::{HashMap, HashSet},
+    collections::{
+        hash_map::Entry::{Occupied, Vacant},
+        BinaryHeap,
+        HashMap,
+        HashSet,
+    },
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+use anyhow::{anyhow, Error};
+use cln_rpc::{model::requests::SendpayRoute, primitives::*};
+use sling::{Job, SatDirection};
+
+use crate::{
+    model::{Config, DijkstraNode, JobMessage, Liquidity, LnGraph, PubKeyBytes, Task},
+    util::{edge_cost, fee_total_msat_precise},
 };
 pub fn dijkstra(
     config: &Config,

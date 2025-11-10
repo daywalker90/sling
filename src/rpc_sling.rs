@@ -1,5 +1,10 @@
 use std::{
-    cmp::Ordering, collections::BTreeMap, path::Path, str::FromStr, sync::Arc, time::Duration,
+    cmp::Ordering,
+    collections::BTreeMap,
+    path::Path,
+    str::FromStr,
+    sync::Arc,
+    time::Duration,
 };
 
 use anyhow::anyhow;
@@ -19,8 +24,15 @@ use crate::{
     slings::sling,
     tasks::refresh_listpeerchannels,
     util::{read_except_chans, read_except_peers, write_liquidity},
-    write_excepts, write_job, JobMessage, PluginState, Task, EXCEPTS_CHANS_FILE_NAME,
-    EXCEPTS_PEERS_FILE_NAME, JOB_FILE_NAME, PLUGIN_NAME,
+    write_excepts,
+    write_job,
+    JobMessage,
+    PluginState,
+    Task,
+    EXCEPTS_CHANS_FILE_NAME,
+    EXCEPTS_PEERS_FILE_NAME,
+    JOB_FILE_NAME,
+    PLUGIN_NAME,
 };
 
 pub async fn slingjob(

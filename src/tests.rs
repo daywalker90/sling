@@ -1,22 +1,29 @@
-use cln_rpc::model::responses::GetinfoResponse;
-use cln_rpc::primitives::{Amount, PublicKey, ShortChannelId, ShortChannelIdDir};
+use std::{
+    collections::{HashMap, HashSet},
+    fs::File,
+    io::{BufReader, Read, Write},
+    path::{Path, PathBuf},
+    str::FromStr,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    thread::{self, sleep},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+
+use cln_rpc::{
+    model::responses::GetinfoResponse,
+    primitives::{Amount, PublicKey, ShortChannelId, ShortChannelIdDir},
+};
 use sling::Job;
 
-use crate::dijkstra::dijkstra;
-use crate::gossip::read_gossip_file;
-use crate::util::feeppm_effective;
-
-use std::collections::{HashMap, HashSet};
-use std::fs::File;
-use std::io::{BufReader, Read, Write};
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-use std::thread::{self, sleep};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-
-use crate::model::{Config, IncompleteChannels, JobMessage, LnGraph, Task, PLUGIN_NAME};
+use crate::{
+    dijkstra::dijkstra,
+    gossip::read_gossip_file,
+    model::{Config, IncompleteChannels, JobMessage, LnGraph, Task, PLUGIN_NAME},
+    util::feeppm_effective,
+};
 
 #[test]
 fn test_effective_feeppm() {

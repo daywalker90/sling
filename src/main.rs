@@ -1,26 +1,30 @@
-use cln_rpc::model::requests::GetinfoRequest;
-use cln_rpc::ClnRpc;
+use cln_rpc::{model::requests::GetinfoRequest, ClnRpc};
 use mimalloc::MiMalloc;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
+use std::{path::Path, time::Duration};
+
 use anyhow::anyhow;
-use cln_plugin::options::{
-    ConfigOption, DefaultBooleanConfigOption, DefaultIntegerConfigOption,
-    DefaultStringArrayConfigOption, DefaultStringConfigOption,
+use cln_plugin::{
+    options::{
+        ConfigOption,
+        DefaultBooleanConfigOption,
+        DefaultIntegerConfigOption,
+        DefaultStringArrayConfigOption,
+        DefaultStringConfigOption,
+    },
+    Builder,
+    RpcMethodBuilder,
 };
-use cln_plugin::{Builder, RpcMethodBuilder};
 use config::*;
-use htlc::block_added;
-use htlc::htlc_handler;
+use htlc::{block_added, htlc_handler};
 use model::*;
 use notifications::*;
 use rpc_sling::*;
 use serde_json::json;
 use stats::*;
-use std::path::Path;
-use std::time::Duration;
 use tokio::{self, time};
 use util::*;
 

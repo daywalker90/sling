@@ -13,7 +13,6 @@ use cln_rpc::{
     primitives::{Amount, ChannelState, ShortChannelIdDir},
     ClnRpc,
 };
-
 use tokio::{
     fs::OpenOptions,
     io::AsyncWriteExt,

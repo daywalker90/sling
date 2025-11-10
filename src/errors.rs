@@ -1,8 +1,4 @@
-use cln_rpc::primitives::Amount;
-use cln_rpc::primitives::PublicKey;
-use cln_rpc::primitives::Secret;
-use cln_rpc::primitives::Sha256;
-use cln_rpc::primitives::ShortChannelId;
+use cln_rpc::primitives::{Amount, PublicKey, Secret, Sha256, ShortChannelId};
 use serde::{Deserialize, Serialize};
 
 // status of the payment

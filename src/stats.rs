@@ -1,26 +1,45 @@
-use std::cmp::max;
-use std::time::{SystemTime, UNIX_EPOCH};
-use std::{collections::HashMap, path::Path, str::FromStr};
+use std::{
+    cmp::max,
+    collections::HashMap,
+    path::Path,
+    str::FromStr,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use anyhow::{anyhow, Error};
-use chrono::Local;
-use chrono::TimeZone;
+use chrono::{Local, TimeZone};
 use cln_plugin::Plugin;
-
-use cln_rpc::model::responses::ListpeerchannelsChannels;
-use cln_rpc::primitives::{PublicKey, ShortChannelId};
+use cln_rpc::{
+    model::responses::ListpeerchannelsChannels,
+    primitives::{PublicKey, ShortChannelId},
+};
 use num_format::{Locale, ToFormattedString};
 use serde_json::json;
 use sling::{
-    ChannelPartnerStats, FailureReasonCount, FailuresInTimeWindow, PeerPartnerStats, SlingStats,
+    ChannelPartnerStats,
+    FailureReasonCount,
+    FailuresInTimeWindow,
+    PeerPartnerStats,
+    SlingStats,
     SuccessesInTimeWindow,
 };
-use tabled::settings::{Panel, Rotate};
-use tabled::Table;
+use tabled::{
+    settings::{Panel, Rotate},
+    Table,
+};
 
-use crate::model::{FailureReb, JobMessage, SuccessReb};
-use crate::model::{PluginState, StatSummary, NO_ALIAS_SET, PLUGIN_NAME};
-use crate::util::{get_all_normal_channels_from_listpeerchannels, read_jobs};
+use crate::{
+    model::{
+        FailureReb,
+        JobMessage,
+        PluginState,
+        StatSummary,
+        SuccessReb,
+        NO_ALIAS_SET,
+        PLUGIN_NAME,
+    },
+    util::{get_all_normal_channels_from_listpeerchannels, read_jobs},
+};
 
 pub async fn slingstats(
     plugin: Plugin<PluginState>,
