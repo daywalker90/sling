@@ -46,7 +46,7 @@ pub async fn waitsendpay_response(
     match rpc
         .call_typed(&WaitsendpayRequest {
             payment_hash,
-            timeout: Some(config.timeoutpay as u32),
+            timeout: Some(u32::from(config.timeoutpay)),
             partid: None,
             groupid: None,
         })
@@ -71,7 +71,7 @@ pub async fn waitsendpay_response(
                     SatDirection::Pull => route.first().unwrap().channel,
                     SatDirection::Push => route.last().unwrap().channel,
                 },
-                hops: (route.len() - 1) as u8,
+                hops: u8::try_from(route.len() - 1)?,
                 completed_at: o.completed_at.unwrap() as u64,
             }
             .write_to_file(task_ident.get_chan_id(), &config.sling_dir)
@@ -87,9 +87,7 @@ pub async fn waitsendpay_response(
                 .write()
                 .remove(&payment_hash.to_string());
             let mut special_stop = false;
-            let ws_code = if let Some(c) = err.code {
-                c
-            } else {
+            let Some(ws_code) = err.code else {
                 return Err(anyhow!(
                     "{}: No WaitsendpayErrorCode, instead: {}",
                     task_ident,
@@ -138,7 +136,7 @@ pub async fn waitsendpay_response(
                                     .as_secs(),
                             },
                         );
-                    };
+                    }
                 }
                 FailureReb {
                     amount_msat: job.amount_msat,
@@ -148,7 +146,7 @@ pub async fn waitsendpay_response(
                         SatDirection::Pull => route.first().unwrap().channel,
                         SatDirection::Push => route.last().unwrap().channel,
                     },
-                    hops: (route.len() - 1) as u8,
+                    hops: u8::try_from(route.len() - 1)?,
                     created_at: SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .unwrap()
@@ -192,7 +190,7 @@ pub async fn waitsendpay_response(
                         SatDirection::Pull => route.first().unwrap().channel,
                         SatDirection::Push => route.last().unwrap().channel,
                     },
-                    hops: (route.len() - 1) as u8,
+                    hops: u8::try_from(route.len() - 1)?,
                     created_at: ws_error.created_at,
                 }
                 .write_to_file(task_ident.get_chan_id(), &config.sling_dir)
@@ -201,7 +199,7 @@ pub async fn waitsendpay_response(
                     return Err(anyhow!(
                         "{}: UNEXPECTED waitsendpay failure after {}s: {}",
                         task_ident,
-                        now.elapsed().as_secs().to_string(),
+                        now.elapsed().as_secs(),
                         err.message
                     ));
                 }
@@ -218,9 +216,8 @@ pub async fn waitsendpay_response(
                         my_sleep(plugin.clone(), 3, task_ident).await;
                     } else if plugin.state().bad_fwd_nodes.lock().contains_key(&last_hop) {
                         log::debug!(
-                            "{}: Last hop {} got temp banned because of bad forwarding",
-                            task_ident,
-                            last_hop
+                            "{task_ident}: Last hop {last_hop} got temp banned because \
+                            of bad forwarding"
                         );
                     } else {
                         plugin.state().temp_chan_bans.lock().insert(
@@ -247,7 +244,7 @@ pub async fn waitsendpay_response(
                 } else {
                     let dir_chan = ShortChannelIdDir {
                         short_channel_id: ws_error.erring_channel,
-                        direction: ws_error.erring_direction as u32,
+                        direction: u32::from(ws_error.erring_direction),
                     };
                     log::debug!(
                         "{}: Adjusting liquidity for {} to constrain it to {}msat",
@@ -275,7 +272,7 @@ pub async fn waitsendpay_response(
                                         .as_secs(),
                                 },
                             );
-                        };
+                        }
                     }
                     if config.at_or_above_24_11 {
                         for lay in &config.inform_layers {
@@ -300,12 +297,12 @@ pub async fn waitsendpay_response(
                 }
                 Ok(0)
             } else {
-                return Err(anyhow!(
+                Err(anyhow!(
                     "{}: UNEXPECTED waitsendpay failure: {} after: {}",
                     task_ident,
                     err.message,
-                    now.elapsed().as_millis().to_string()
-                ));
+                    now.elapsed().as_millis()
+                ))
             }
         }
     }
@@ -366,7 +363,7 @@ pub async fn sendpay_response(
                         SatDirection::Pull => route.first().unwrap().channel,
                         SatDirection::Push => route.last().unwrap().channel,
                     },
-                    hops: (route.len() - 1) as u8,
+                    hops: u8::try_from(route.len() - 1)?,
                     created_at: SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .unwrap()
@@ -377,11 +374,7 @@ pub async fn sendpay_response(
                 return Ok(None);
             }
 
-            Err(anyhow!(
-                "{}: Unexpected sendpay error: {}",
-                task_ident,
-                e.to_string()
-            ))
+            Err(anyhow!("{task_ident}: Unexpected sendpay error: {e}"))
         }
     }
 }

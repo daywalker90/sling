@@ -29,7 +29,7 @@ pub async fn parse_job(
         serde_json::Value::Object(ar) => {
             for k in ar.keys() {
                 if !valid_keys.contains(&k.as_str()) {
-                    return Err(anyhow!("Invalid argument: {}", k));
+                    return Err(anyhow!("Invalid argument: {k}"));
                 }
             }
 
@@ -62,7 +62,9 @@ pub async fn parse_job(
             }
 
             let maxppm = match ar.get("maxppm") {
-                Some(ppm) => ppm.as_u64().ok_or(anyhow!("maxppm must be an integer"))? as u32,
+                Some(ppm) => {
+                    u32::try_from(ppm.as_u64().ok_or(anyhow!("maxppm must be an integer"))?)?
+                }
                 None => return Err(anyhow!("Missing maxppm")),
             };
 
@@ -79,10 +81,12 @@ pub async fn parse_job(
                         .as_f64()
                         .ok_or(anyhow!("target must be a floating point"))?,
                 );
-            };
+            }
 
             let maxhops = match ar.get("maxhops") {
-                Some(h) => Some(h.as_u64().ok_or(anyhow!("maxhops must be an integer"))? as u8),
+                Some(h) => Some(u8::try_from(
+                    h.as_u64().ok_or(anyhow!("maxhops must be an integer"))?,
+                )?),
                 None => None,
             };
             if let Some(h) = maxhops {
@@ -112,21 +116,22 @@ pub async fn parse_job(
                         .ok_or(anyhow!("depleteuptoamount must be an integer"))?
                         * 1_000,
                 );
-            };
+            }
 
             let paralleljobs = match ar.get("paralleljobs") {
-                Some(h) => Some(
+                Some(h) => Some(u16::try_from(
                     h.as_u64()
-                        .ok_or(anyhow!("paralleljobs must be an integer"))?
-                        as u16,
-                ),
+                        .ok_or(anyhow!("paralleljobs must be an integer"))?,
+                )?),
                 None => None,
             };
             if let Some(pj) = paralleljobs {
                 if pj < 1 {
                     return Err(anyhow!("paralleljobs must be atleast 1"));
                 }
-                if job.sat_direction == SatDirection::Push && pj > (config.max_htlc_count as u16) {
+                if job.sat_direction == SatDirection::Push
+                    && pj > u16::try_from(config.max_htlc_count)?
+                {
                     return Err(anyhow!(
                         "In a push job it doesn't make sense to have more \
                     paralleljobs than your max_htlc_count"
@@ -164,7 +169,7 @@ pub async fn parse_job(
                 "candidatelist: {:?}",
                 candidatelist.clone().map(|s| s
                     .iter()
-                    .map(|sc| sc.to_string())
+                    .map(std::string::ToString::to_string)
                     .collect::<Vec<String>>()
                     .join(", "))
             );
@@ -173,7 +178,7 @@ pub async fn parse_job(
                 config
                     .exclude_chans_pull
                     .iter()
-                    .map(|s| s.to_string())
+                    .map(std::string::ToString::to_string)
                     .collect::<Vec<String>>()
                     .join(", ")
             );
@@ -182,29 +187,27 @@ pub async fn parse_job(
                 config
                     .exclude_chans_push
                     .iter()
-                    .map(|s| s.to_string())
+                    .map(std::string::ToString::to_string)
                     .collect::<Vec<String>>()
                     .join(", ")
             );
 
             if let Some(c) = candidatelist {
-                for candidate in c.iter() {
+                for candidate in &c {
                     match job.sat_direction {
                         SatDirection::Pull => {
                             if config.exclude_chans_pull.contains(candidate) {
                                 return Err(anyhow!(
-                                    "candidate {} has a pull-job that rebalances \
-                                in the other direction!",
-                                    candidate
+                                    "candidate {candidate} has a pull-job that rebalances \
+                                in the other direction!"
                                 ));
                             }
                         }
                         SatDirection::Push => {
                             if config.exclude_chans_push.contains(candidate) {
                                 return Err(anyhow!(
-                                    "candidate {} has a push-job that rebalances \
-                                in the other direction!",
-                                    candidate
+                                    "candidate {candidate} has a push-job that rebalances \
+                                in the other direction!"
                                 ));
                             }
                         }
@@ -216,7 +219,7 @@ pub async fn parse_job(
 
             Ok((chan_id, job))
         }
-        other => Err(anyhow!("Expected an object! Got {} instead", other)),
+        other => Err(anyhow!("Expected an object! Got {other} instead")),
     }
 }
 
@@ -243,7 +246,7 @@ pub async fn parse_once_job(
         serde_json::Value::Object(ar) => {
             for k in ar.keys() {
                 if !valid_keys.contains(&k.as_str()) {
-                    return Err(anyhow!("Invalid argument: {}", k));
+                    return Err(anyhow!("Invalid argument: {k}"));
                 }
             }
 
@@ -280,7 +283,9 @@ pub async fn parse_once_job(
             }
 
             let maxppm = match ar.get("maxppm") {
-                Some(ppm) => ppm.as_u64().ok_or(anyhow!("maxppm must be an integer"))? as u32,
+                Some(ppm) => {
+                    u32::try_from(ppm.as_u64().ok_or(anyhow!("maxppm must be an integer"))?)?
+                }
                 None => return Err(anyhow!("Missing maxppm")),
             };
 
@@ -320,7 +325,9 @@ pub async fn parse_once_job(
             job.add_onceamount_msat(onceamount_msat);
 
             let maxhops = match ar.get("maxhops") {
-                Some(h) => Some(h.as_u64().ok_or(anyhow!("maxhops must be an integer"))? as u8),
+                Some(h) => Some(u8::try_from(
+                    h.as_u64().ok_or(anyhow!("maxhops must be an integer"))?,
+                )?),
                 None => None,
             };
             if let Some(h) = maxhops {
@@ -350,21 +357,22 @@ pub async fn parse_once_job(
                         .ok_or(anyhow!("depleteuptoamount must be an integer"))?
                         * 1_000,
                 );
-            };
+            }
 
             let paralleljobs = match ar.get("paralleljobs") {
-                Some(h) => Some(
+                Some(h) => Some(u16::try_from(
                     h.as_u64()
-                        .ok_or(anyhow!("paralleljobs must be an integer"))?
-                        as u16,
-                ),
+                        .ok_or(anyhow!("paralleljobs must be an integer"))?,
+                )?),
                 None => None,
             };
             if let Some(pj) = paralleljobs {
                 if pj < 1 {
                     return Err(anyhow!("paralleljobs must be atleast 1"));
                 }
-                if job.sat_direction == SatDirection::Push && pj > (config.max_htlc_count as u16) {
+                if job.sat_direction == SatDirection::Push
+                    && pj > u16::try_from(config.max_htlc_count)?
+                {
                     return Err(anyhow!(
                         "In a push job it doesn't make sense to have more \
                     paralleljobs than your max_htlc_count"
@@ -402,7 +410,7 @@ pub async fn parse_once_job(
                 "candidatelist: {:?}",
                 candidatelist.clone().map(|s| s
                     .iter()
-                    .map(|sc| sc.to_string())
+                    .map(std::string::ToString::to_string)
                     .collect::<Vec<String>>()
                     .join(", "))
             );
@@ -411,7 +419,7 @@ pub async fn parse_once_job(
                 config
                     .exclude_chans_pull
                     .iter()
-                    .map(|s| s.to_string())
+                    .map(std::string::ToString::to_string)
                     .collect::<Vec<String>>()
                     .join(", ")
             );
@@ -420,29 +428,27 @@ pub async fn parse_once_job(
                 config
                     .exclude_chans_push
                     .iter()
-                    .map(|s| s.to_string())
+                    .map(std::string::ToString::to_string)
                     .collect::<Vec<String>>()
                     .join(", ")
             );
 
             if let Some(c) = candidatelist {
-                for candidate in c.iter() {
+                for candidate in &c {
                     match job.sat_direction {
                         SatDirection::Pull => {
                             if config.exclude_chans_pull.contains(candidate) {
                                 return Err(anyhow!(
-                                    "candidate {} has a pull-job that rebalances \
-                                in the other direction!",
-                                    candidate
+                                    "candidate {candidate} has a pull-job that rebalances \
+                                in the other direction!"
                                 ));
                             }
                         }
                         SatDirection::Push => {
                             if config.exclude_chans_push.contains(candidate) {
                                 return Err(anyhow!(
-                                    "candidate {} has a push-job that rebalances \
-                                in the other direction!",
-                                    candidate
+                                    "candidate {candidate} has a push-job that rebalances \
+                                in the other direction!"
                                 ));
                             }
                         }
@@ -453,6 +459,6 @@ pub async fn parse_once_job(
 
             Ok((chan_id, job))
         }
-        other => Err(anyhow!("Expected an object! Got {} instead", other)),
+        other => Err(anyhow!("Expected an object! Got {other} instead")),
     }
 }

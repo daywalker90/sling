@@ -8,7 +8,7 @@ use anyhow::{anyhow, Error};
 use cln_plugin::Plugin;
 use cln_rpc::{
     model::{requests::SendpayRoute, responses::ListpeerchannelsChannels},
-    primitives::*,
+    primitives::{Amount, PublicKey, ShortChannelId, ShortChannelIdDir},
 };
 use sling::{Job, SatDirection};
 use tokio::time::{self, Instant};
@@ -90,7 +90,7 @@ pub async fn sling(
         let mut excepts = build_except_chans(&temp_chan_bans, &config, job);
 
         let actual_candidates = build_candidatelist(
-            plugin.clone(),
+            &plugin,
             &peer_channels,
             task.get_identifier(),
             job,
@@ -104,7 +104,7 @@ pub async fn sling(
             task,
             actual_candidates
                 .iter()
-                .map(|y| y.to_string())
+                .map(std::string::ToString::to_string)
                 .collect::<Vec<String>>()
                 .join(", ")
         );
@@ -118,7 +118,7 @@ pub async fn sling(
                     .lock()
                     .clone()
                     .keys()
-                    .map(|y| y.to_string())
+                    .map(std::string::ToString::to_string)
                     .collect::<Vec<String>>()
                     .join(", ")
             );
@@ -130,10 +130,10 @@ pub async fn sling(
                 config
                     .exclude_chans_pull
                     .iter()
-                    .map(|s| s.to_string())
+                    .map(std::string::ToString::to_string)
                     .collect::<Vec<String>>()
                     .join(", ")
-            )
+            );
         }
         if !config.exclude_chans_push.is_empty() {
             log::trace!(
@@ -142,10 +142,10 @@ pub async fn sling(
                 config
                     .exclude_chans_push
                     .iter()
-                    .map(|s| s.to_string())
+                    .map(std::string::ToString::to_string)
                     .collect::<Vec<String>>()
                     .join(", ")
-            )
+            );
         }
         if actual_candidates.is_empty() {
             log::info!(
@@ -167,7 +167,7 @@ pub async fn sling(
 
         let route = {
             let nr = next_route(
-                plugin.clone(),
+                &plugin,
                 &config,
                 &peer_channels,
                 job,
@@ -249,12 +249,11 @@ pub async fn sling(
                                 tasks.set_state(&task_ident, JobMessage::Error);
                                 tasks.set_active(&task_ident, false);
                                 log::warn!(
-                                    "{}: Found multiple matching last hops via alias",
-                                    task_ident
+                                    "{task_ident}: Found multiple matching last hops via alias"
                                 );
                                 break 'outer;
                             }
-                            find_hop = Some(channel)
+                            find_hop = Some(channel);
                         }
                     }
                 }
@@ -266,7 +265,7 @@ pub async fn sling(
             let mut tasks = plugin.state().tasks.lock();
             tasks.set_state(&task_ident, JobMessage::Error);
             tasks.set_active(&task_ident, false);
-            log::warn!("{}: Could not find last hop", task_ident);
+            log::warn!("{task_ident}: Could not find last hop");
             break 'outer;
         }
 
@@ -366,7 +365,7 @@ fn build_except_chans(
     }
     match job.sat_direction {
         SatDirection::Pull => {
-            for scid in config.exclude_chans_pull.iter() {
+            for scid in &config.exclude_chans_pull {
                 excepts.push(ShortChannelIdDir {
                     short_channel_id: *scid,
                     direction: 0,
@@ -378,7 +377,7 @@ fn build_except_chans(
             }
         }
         SatDirection::Push => {
-            for scid in config.exclude_chans_push.iter() {
+            for scid in &config.exclude_chans_push {
                 excepts.push(ShortChannelIdDir {
                     short_channel_id: *scid,
                     direction: 0,
@@ -396,7 +395,7 @@ fn build_except_chans(
 
 #[allow(clippy::too_many_arguments)]
 fn next_route(
-    plugin: Plugin<PluginState>,
+    plugin: &Plugin<PluginState>,
     config: &Config,
     peer_channels: &HashMap<ShortChannelId, ListpeerchannelsChannels>,
     job: &Job,
@@ -458,37 +457,23 @@ fn next_route(
         excepts.extend(task_bans);
 
         let liquidity = plugin.state().liquidity.lock();
-        match job.sat_direction {
-            SatDirection::Pull => {
-                route = dijkstra(
-                    config,
-                    &graph,
-                    job,
-                    task,
-                    actual_candidates,
-                    excepts,
-                    &liquidity,
-                )?;
-            }
-            SatDirection::Push => {
-                route = dijkstra(
-                    config,
-                    &graph,
-                    job,
-                    task,
-                    actual_candidates,
-                    excepts,
-                    &liquidity,
-                )?;
-            }
-        }
+
+        route = dijkstra(
+            config,
+            &graph,
+            job,
+            task,
+            actual_candidates,
+            excepts,
+            &liquidity,
+        )?;
     }
     if route.len() >= 3 {
         let route_claim_chan = route[route.len() / 2].channel;
         let route_claim_peer = route[(route.len() / 2) - 1].id;
         if let Ok((dir_chan, dir_chan_state)) = graph.get_state_no_direction(
             &PubKeyBytes::from_pubkey(&route_claim_peer),
-            &route_claim_chan,
+            route_claim_chan,
         ) {
             if dir_chan_state.source != config.pubkey_bytes
                 && dir_chan_state.destination != config.pubkey_bytes
@@ -500,7 +485,7 @@ fn next_route(
         };
     } else {
         task.parallel_ban = None;
-    };
+    }
     Ok(route)
 }
 
@@ -515,7 +500,7 @@ async fn health_check(
     bad_fwd_nodes: &HashMap<PublicKey, u64>,
 ) -> Result<Option<bool>, Error> {
     let channel =
-        match get_normal_channel_from_listpeerchannels(peer_channels, &task_ident.get_chan_id()) {
+        match get_normal_channel_from_listpeerchannels(peer_channels, task_ident.get_chan_id()) {
             Ok(o) => o,
             Err(e) => {
                 log::warn!("{task_ident}: {e}. Stopping Job.");
@@ -553,58 +538,53 @@ async fn health_check(
             .set_state(task_ident, JobMessage::HTLCcapped);
         my_sleep(plugin.clone(), 10, task_ident).await;
         Ok(Some(true))
-    } else {
-        match peer_channels
-            .values()
-            .find(|x| x.peer_id == other_peer.to_pubkey())
+    } else if let Some(p) = peer_channels
+        .values()
+        .find(|x| x.peer_id == other_peer.to_pubkey())
+    {
+        if !p.peer_connected {
+            log::info!("{task_ident}: not connected. Taking a break...");
+            plugin
+                .state()
+                .tasks
+                .lock()
+                .set_state(task_ident, JobMessage::Disconnected);
+            my_sleep(plugin.clone(), 60, task_ident).await;
+            Ok(Some(true))
+        } else if temp_chan_bans.contains_key(&task_ident.get_chan_id()) {
+            log::info!("{task_ident}: Job peer channel not ready. Taking a break...");
+            plugin
+                .state()
+                .tasks
+                .lock()
+                .set_state(task_ident, JobMessage::PeerNotReady);
+            my_sleep(plugin.clone(), 20, task_ident).await;
+            Ok(Some(true))
+        } else if job.sat_direction == SatDirection::Pull
+            && bad_fwd_nodes.contains_key(&other_peer.to_pubkey())
         {
-            Some(p) => {
-                if !p.peer_connected {
-                    log::info!("{task_ident}: not connected. Taking a break...");
-                    plugin
-                        .state()
-                        .tasks
-                        .lock()
-                        .set_state(task_ident, JobMessage::Disconnected);
-                    my_sleep(plugin.clone(), 60, task_ident).await;
-                    Ok(Some(true))
-                } else if temp_chan_bans.contains_key(&task_ident.get_chan_id()) {
-                    log::info!("{task_ident}: Job peer channel not ready. Taking a break...");
-                    plugin
-                        .state()
-                        .tasks
-                        .lock()
-                        .set_state(task_ident, JobMessage::PeerNotReady);
-                    my_sleep(plugin.clone(), 20, task_ident).await;
-                    Ok(Some(true))
-                } else if job.sat_direction == SatDirection::Pull
-                    && bad_fwd_nodes.contains_key(&other_peer.to_pubkey())
-                {
-                    log::info!("{task_ident}: Job peer node not ready. Taking a break...");
-                    plugin
-                        .state()
-                        .tasks
-                        .lock()
-                        .set_state(task_ident, JobMessage::PeerBad);
-                    my_sleep(plugin.clone(), 60, task_ident).await;
-                    Ok(Some(true))
-                } else {
-                    Ok(None)
-                }
-            }
-            None => {
-                let mut tasks = plugin.state().tasks.lock();
-                tasks.set_state(task_ident, JobMessage::PeerNotFound);
-                tasks.set_active(task_ident, false);
-                log::warn!("{task_ident}: peer not found. Stopping job.");
-                Ok(Some(false))
-            }
+            log::info!("{task_ident}: Job peer node not ready. Taking a break...");
+            plugin
+                .state()
+                .tasks
+                .lock()
+                .set_state(task_ident, JobMessage::PeerBad);
+            my_sleep(plugin.clone(), 60, task_ident).await;
+            Ok(Some(true))
+        } else {
+            Ok(None)
         }
+    } else {
+        let mut tasks = plugin.state().tasks.lock();
+        tasks.set_state(task_ident, JobMessage::PeerNotFound);
+        tasks.set_active(task_ident, false);
+        log::warn!("{task_ident}: peer not found. Stopping job.");
+        Ok(Some(false))
     }
 }
 
 fn build_candidatelist(
-    plugin: Plugin<PluginState>,
+    plugin: &Plugin<PluginState>,
     peer_channels: &HashMap<ShortChannelId, ListpeerchannelsChannels>,
     task_ident: &TaskIdentifier,
     job: &Job,
@@ -620,9 +600,7 @@ fn build_candidatelist(
     let depleteuptoamount = job.get_depleteuptoamount_msat(config.depleteuptoamount);
 
     for channel in peer_channels.values() {
-        let scid = if let Some(scid) = channel.short_channel_id {
-            scid
-        } else {
+        let Some(scid) = channel.short_channel_id else {
             log::trace!(
                 "{}: build_candidatelist: channel with {} has no short_channel_id",
                 task_ident,
@@ -642,7 +620,7 @@ fn build_candidatelist(
             } else {
                 continue;
             }
-        };
+        }
 
         match job.sat_direction {
             SatDirection::Pull => {
@@ -709,7 +687,7 @@ fn build_candidatelist(
         let total_msat = Amount::msat(&channel.total_msat.unwrap());
         let chan_out_ppm = feeppm_effective(
             channel.fee_proportional_millionths.unwrap(),
-            Amount::msat(&channel.fee_base_msat.unwrap()) as u32,
+            u32::try_from(Amount::msat(&channel.fee_base_msat.unwrap()))?,
             job.amount_msat,
         );
 
@@ -766,7 +744,7 @@ fn build_candidatelist(
                         continue;
                     }
                 }
-                if chan_in_ppm > (job.maxppm as u64) {
+                if chan_in_ppm > u64::from(job.maxppm) {
                     log::trace!(
                         "{}: build_candidatelist: {} inppm is too high: {}>{}",
                         task_ident,
@@ -777,7 +755,7 @@ fn build_candidatelist(
                     continue;
                 }
             }
-        };
+        }
 
         if get_total_htlc_count(channel) > config.max_htlc_count {
             log::trace!("{task_ident}: build_candidatelist: {scid} has too many pending htlcs");

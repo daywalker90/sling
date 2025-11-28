@@ -18,15 +18,51 @@ use cln_plugin::{
     Builder,
     RpcMethodBuilder,
 };
-use config::*;
+use config::{get_startup_options, setconfig_callback};
 use htlc::{block_added, htlc_handler};
-use model::*;
-use notifications::*;
-use rpc_sling::*;
+use model::{
+    Config,
+    FailureReb,
+    JobMessage,
+    PluginState,
+    PubKeyBytes,
+    ShortChannelIdDirState,
+    SuccessReb,
+    Task,
+    EXCEPTS_CHANS_FILE_NAME,
+    EXCEPTS_PEERS_FILE_NAME,
+    JOB_FILE_NAME,
+    PLUGIN_NAME,
+};
+use notifications::shutdown_handler;
+use rpc_sling::{
+    slingdeletejob,
+    slingexceptchan,
+    slingexceptpeer,
+    slinggo,
+    slingjob,
+    slingjobsettings,
+    slingonce,
+    slingstop,
+    slingversion,
+};
 use serde_json::json;
-use stats::*;
+use stats::slingstats;
 use tokio::{self, time};
-use util::*;
+use util::{
+    at_or_above_version,
+    feeppm_effective_from_amts,
+    get_normal_channel_from_listpeerchannels,
+    get_remote_feeppm_effective,
+    my_sleep,
+    read_except_chans,
+    read_except_peers,
+    read_jobs,
+    read_liquidity,
+    wait_for_gossip,
+    write_excepts,
+    write_job,
+};
 
 mod config;
 mod dijkstra;
@@ -97,7 +133,7 @@ async fn main() -> Result<(), anyhow::Error> {
     .dynamic();
     let opt_depleteuptoamount: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
         OPT_DEPLETEUPTOAMOUNT,
-        2000000000,
+        2_000_000_000,
         "Deplete up to amount for candidate search. Default is `2000000000`",
     )
     .dynamic();
@@ -295,7 +331,7 @@ async fn main() -> Result<(), anyhow::Error> {
             confplugin = plugin;
         }
         None => return Err(anyhow!("Error configuring the plugin!")),
-    };
+    }
     if let Ok(plugin) = confplugin.start(state).await {
         log::debug!("{:?}", plugin.configuration());
         let peersclone = plugin.clone();
@@ -303,7 +339,7 @@ async fn main() -> Result<(), anyhow::Error> {
             match tasks::refresh_listpeerchannels_loop(peersclone.clone()).await {
                 Ok(()) => (),
                 Err(e) => log::warn!("Error in refresh_listpeers thread: {e:?}"),
-            };
+            }
             let _res = peersclone.shutdown();
         });
         let channelsclone = plugin.clone();
@@ -311,7 +347,7 @@ async fn main() -> Result<(), anyhow::Error> {
             match tasks::refresh_graph(channelsclone.clone()).await {
                 Ok(()) => (),
                 Err(e) => log::warn!("Error in refresh_graph thread: {e:?}"),
-            };
+            }
             let _res = channelsclone.shutdown();
         });
         let aliasclone = plugin.clone();
@@ -319,7 +355,7 @@ async fn main() -> Result<(), anyhow::Error> {
             match tasks::refresh_aliasmap(aliasclone.clone()).await {
                 Ok(()) => (),
                 Err(e) => log::warn!("Error in refresh_aliasmap thread: {e:?}"),
-            };
+            }
             let _res = aliasclone.shutdown();
         });
         let liquidityclone = plugin.clone();
@@ -327,7 +363,7 @@ async fn main() -> Result<(), anyhow::Error> {
             match tasks::refresh_liquidity(liquidityclone.clone()).await {
                 Ok(()) => (),
                 Err(e) => log::warn!("Error in refresh_liquidity thread: {e:?}"),
-            };
+            }
             let _res = liquidityclone.shutdown();
         });
         let tempbanclone = plugin.clone();
@@ -335,7 +371,7 @@ async fn main() -> Result<(), anyhow::Error> {
             match tasks::clear_tempbans(tempbanclone.clone()).await {
                 Ok(()) => (),
                 Err(e) => log::warn!("Error in clear_tempbans thread: {e:?}"),
-            };
+            }
             let _res = tempbanclone.shutdown();
         });
         let clearstatsclone = plugin.clone();
@@ -343,7 +379,7 @@ async fn main() -> Result<(), anyhow::Error> {
             match tasks::clear_stats(clearstatsclone.clone()).await {
                 Ok(()) => (),
                 Err(e) => log::warn!("Error in clear_stats thread: {e:?}"),
-            };
+            }
             let _res = clearstatsclone.shutdown();
         });
         if plugin.state().config.lock().at_or_above_24_11 {
@@ -352,7 +388,7 @@ async fn main() -> Result<(), anyhow::Error> {
                 match tasks::read_askrene_liquidity(askrene_clone.clone()).await {
                     Ok(()) => (),
                     Err(e) => log::warn!("Error in read_askrene_liquidity thread: {e:?}"),
-                };
+                }
                 let _res = askrene_clone.shutdown();
             });
         }

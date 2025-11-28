@@ -96,8 +96,7 @@ pub async fn slingstats(
         }
         e => {
             return Err(anyhow!(
-                "sling-stats: invalid arguments, expected array or object, got: {}",
-                e
+                "sling-stats: invalid arguments, expected array or object, got: {e}"
             ))
         }
     };
@@ -203,13 +202,13 @@ pub async fn slingstats(
 
         let mut job_scids: Vec<&ShortChannelId> = jobs.keys().collect();
         for (scid, tasks) in tasks.get_all_tasks() {
-            if tasks.values().any(|t| t.is_once()) {
+            if tasks.values().any(super::model::Task::is_once) {
                 job_scids.push(scid);
             }
         }
 
         for scid in job_scids {
-            let tasks = tasks.get_scid_tasks(scid);
+            let tasks = tasks.get_scid_tasks(*scid);
             let mut task_states: Vec<(u16, String)> = if let Some(task) = tasks {
                 task.iter()
                     .map(|(id, jt)| (*id, id.to_string() + ":" + &jt.get_state().to_string()))
@@ -232,7 +231,7 @@ pub async fn slingstats(
                     || success_reb.completed_at >= now - stats_delete_successes_age * 24 * 60 * 60
                 {
                     total_amount_msat += success_reb.amount_msat;
-                    weighted_fee_ppm += success_reb.fee_ppm as u64 * success_reb.amount_msat;
+                    weighted_fee_ppm += u64::from(success_reb.fee_ppm) * success_reb.amount_msat;
                     most_recent_completed_at =
                         std::cmp::max(most_recent_completed_at, success_reb.completed_at);
                 }
@@ -284,7 +283,7 @@ pub async fn slingstats(
                 w_feeppm: weighted_fee_ppm,
                 last_route_taken,
                 last_success_reb,
-            })
+            });
         }
 
         table.sort_by_key(|x| {
@@ -327,7 +326,7 @@ fn success_stats(
     for success_reb in successes {
         if time_window == 0 || success_reb.completed_at >= now - time_window * 24 * 60 * 60 {
             total_amount_msat += success_reb.amount_msat;
-            weighted_fee_ppm += success_reb.fee_ppm as u64 * success_reb.amount_msat;
+            weighted_fee_ppm += u64::from(success_reb.fee_ppm) * success_reb.amount_msat;
             *channel_partner_counts
                 .entry(success_reb.channel_partner)
                 .or_insert(0) += success_reb.amount_msat / 1_000;
@@ -341,7 +340,7 @@ fn success_stats(
     if total_transactions == 0 {
         return None;
     }
-    fee_ppms.sort();
+    fee_ppms.sort_unstable();
     let most_common_hop_count = hop_counts
         .into_iter()
         .max_by_key(|&(_, count)| count)
@@ -357,8 +356,10 @@ fn success_stats(
     } else {
         &channel_partners[..]
     };
-    let feeppm_90th_percentile =
-        fee_ppms[max(0, (fee_ppms.len() as f64 * 0.9).ceil() as i32 - 1) as usize];
+    let feeppm_90th_percentile = fee_ppms[max(
+        0,
+        ((fee_ppms.len() as f64 * 0.9).ceil() as usize).saturating_sub(1),
+    )];
     let time_of_last_rebalance = Local
         .timestamp_opt(most_recent_completed_at as i64, 0)
         .unwrap()
@@ -381,14 +382,14 @@ fn success_stats(
             .iter()
             .map(|(partner, count)| ChannelPartnerStats {
                 scid: *partner,
-                alias: get_stats_alias(peer_channels, partner, alias_map),
+                alias: get_stats_alias(peer_channels, *partner, alias_map),
                 sats: *count,
             })
             .collect::<Vec<_>>(),
         most_common_hop_count,
         time_of_last_rebalance,
         total_rebalances: total_transactions,
-        total_spent_sats: (weighted_fee_ppm as f64 * 0.000001 * total_amount_msat as f64) as u64
+        total_spent_sats: (weighted_fee_ppm as f64 * 0.000_001 * total_amount_msat as f64) as u64
             / 1000,
     };
     Some(successes_in_time_window)
@@ -498,7 +499,7 @@ fn failure_stats(
             .iter()
             .map(|(partner, count)| ChannelPartnerStats {
                 scid: *partner,
-                alias: get_stats_alias(peer_channels, partner, alias_map),
+                alias: get_stats_alias(peer_channels, *partner, alias_map),
                 sats: *count,
             })
             .collect::<Vec<_>>(),
@@ -512,10 +513,10 @@ fn failure_stats(
 
 fn get_stats_alias(
     peer_channels: &HashMap<ShortChannelId, ListpeerchannelsChannels>,
-    partner: &ShortChannelId,
+    partner: ShortChannelId,
     alias_map: &HashMap<PublicKey, String>,
 ) -> String {
-    if let Some(chan) = &peer_channels.get(partner) {
+    if let Some(chan) = &peer_channels.get(&partner) {
         if let Some(alias) = alias_map.get(&chan.peer_id) {
             alias.clone()
         } else {

@@ -90,7 +90,7 @@ pub fn read_gossip_file(
             match reader.read(&mut gossip_file[bytes_read..]) {
                 Ok(0) => break, // EOF reached
                 Ok(n) => bytes_read += n,
-                Err(e) => return Err(e).map_err(|e| anyhow!("Error reading gossip file: {}", e)),
+                Err(e) => return Err(e).map_err(|e| anyhow!("Error reading gossip file: {e}")),
             }
         }
 
@@ -371,7 +371,7 @@ fn parse_channel_update(inpu: &[u8]) -> Result<(ShortChannelIdDir, ChannelUpdate
     Ok((
         ShortChannelIdDir {
             short_channel_id: scid,
-            direction: (inpu[109] & 0b0000_0001) as u32,
+            direction: u32::from(inpu[109] & 0b0000_0001),
         },
         ChannelUpdate {
             // message_flags: inpu[108],

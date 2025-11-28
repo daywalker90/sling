@@ -19,7 +19,20 @@ use tokio::{
     time::{self, Instant},
 };
 
-use crate::{gossip::read_gossip_store, model::*};
+use crate::{
+    gossip::read_gossip_store,
+    model::{
+        FailureReb,
+        Liquidity,
+        PluginState,
+        PubKeyBytes,
+        ShortChannelIdDirState,
+        SuccessReb,
+        FAILURES_SUFFIX,
+        PLUGIN_NAME,
+        SUCCESSES_SUFFIX,
+    },
+};
 
 pub async fn refresh_aliasmap(plugin: Plugin<PluginState>) -> Result<(), Error> {
     loop {
@@ -91,10 +104,10 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
     let interval;
     {
         let config = plugin.state().config.lock();
-        if config.network != "bitcoin" {
-            interval = 1;
-        } else {
+        if config.network == "bitcoin" {
             interval = 10;
+        } else {
+            interval = 1;
         }
     }
 
@@ -127,9 +140,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     now.elapsed().as_millis()
                 );
                 for chan in local_channels.values() {
-                    let private = if let Some(pri) = chan.private {
-                        pri
-                    } else {
+                    let Some(private) = chan.private else {
                         log::debug!("{:?} is missing private field", chan.short_channel_id);
                         continue;
                     };
@@ -143,9 +154,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     }
                     let local_alias = chan.alias.as_ref().and_then(|l| l.local);
                     let remote_alias = chan.alias.as_ref().and_then(|l| l.remote);
-                    let updates = if let Some(upd) = &chan.updates {
-                        upd
-                    } else {
+                    let Some(updates) = &chan.updates else {
                         log::debug!(
                             "{} is missing updates field",
                             chan.short_channel_id.unwrap()
@@ -163,13 +172,14 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                             destination: PubKeyBytes::from_pubkey(&chan.peer_id),
                             scid_alias: local_alias,
                             fee_per_millionth: updates.local.fee_proportional_millionths,
-                            base_fee_millisatoshi: Amount::msat(&updates.local.fee_base_msat)
-                                as u32,
+                            base_fee_millisatoshi: u32::try_from(Amount::msat(
+                                &updates.local.fee_base_msat,
+                            ))?,
                             htlc_maximum_msat: updates.local.htlc_maximum_msat,
                             htlc_minimum_msat: updates.local.htlc_minimum_msat,
                             delay: updates.local.cltv_expiry_delta,
                             active: chan.peer_connected,
-                            last_update: timestamp as u32,
+                            last_update: u32::try_from(timestamp)?,
                             private: true,
                         },
                     );
@@ -185,13 +195,14 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                                 destination: my_pubkey,
                                 scid_alias: remote_alias,
                                 fee_per_millionth: remote_updates.fee_proportional_millionths,
-                                base_fee_millisatoshi: Amount::msat(&remote_updates.fee_base_msat)
-                                    as u32,
+                                base_fee_millisatoshi: u32::try_from(Amount::msat(
+                                    &remote_updates.fee_base_msat,
+                                ))?,
                                 htlc_maximum_msat: remote_updates.htlc_maximum_msat,
                                 htlc_minimum_msat: remote_updates.htlc_minimum_msat,
                                 delay: remote_updates.cltv_expiry_delta,
                                 active: chan.peer_connected,
-                                last_update: timestamp as u32,
+                                last_update: u32::try_from(timestamp)?,
                                 private: true,
                             },
                         );
@@ -310,7 +321,7 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
                 {
                     filtered_rebs
                         .into_iter()
-                        .skip(filtered_rebs_len - stats_delete_successes_size as usize)
+                        .skip(filtered_rebs_len - usize::try_from(stats_delete_successes_size)?)
                         .collect::<Vec<SuccessReb>>()
                 } else {
                     filtered_rebs
@@ -354,7 +365,7 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
                 {
                     filtered_rebs
                         .into_iter()
-                        .skip(filtered_rebs_len - stats_delete_failures_size as usize)
+                        .skip(filtered_rebs_len - usize::try_from(stats_delete_failures_size)?)
                         .collect::<Vec<FailureReb>>()
                 } else {
                     filtered_rebs
@@ -407,15 +418,11 @@ pub async fn read_askrene_liquidity(plugin: Plugin<PluginState>) -> Result<(), E
                 .ok_or_else(|| anyhow!("no xpay layer"))?;
             let mut liquidity = plugin.state().liquidity.lock();
             let mut counter = 0;
-            for belief in xpay_layer.constraints.iter() {
-                let scid_dir = if let Some(sd) = belief.short_channel_id_dir {
-                    sd
-                } else {
+            for belief in &xpay_layer.constraints {
+                let Some(scid_dir) = belief.short_channel_id_dir else {
                     continue;
                 };
-                let belief_timestamp = if let Some(ts) = belief.timestamp {
-                    ts
-                } else {
+                let Some(belief_timestamp) = belief.timestamp else {
                     continue;
                 };
                 let belief_maximum_msat = if let Some(mm) = belief.maximum_msat {
@@ -442,7 +449,7 @@ pub async fn read_askrene_liquidity(plugin: Plugin<PluginState>) -> Result<(), E
                             liquidity_age: belief_timestamp,
                         });
                     }
-                };
+                }
             }
             log::info!(
                 "Read {} askerene liquidity constraints in {}ms!",

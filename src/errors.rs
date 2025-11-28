@@ -17,8 +17,7 @@ impl TryFrom<i32> for WaitsendpayErrorStatus {
             1 => Ok(WaitsendpayErrorStatus::Pending),
             -1 => Ok(WaitsendpayErrorStatus::Failed),
             o => Err(anyhow::anyhow!(
-                "Unknown variant {} for enum WaitsendpayErrorStatus",
-                o
+                "Unknown variant {o} for enum WaitsendpayErrorStatus"
             )),
         }
     }

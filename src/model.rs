@@ -105,9 +105,9 @@ impl Tasks {
             }
         }
     }
-    pub fn is_any_active(&self, scid: &ShortChannelId) -> bool {
-        if let Some(tasks) = self.tasks.get(scid) {
-            tasks.values().any(|t| t.is_active())
+    pub fn is_any_active(&self, scid: ShortChannelId) -> bool {
+        if let Some(tasks) = self.tasks.get(&scid) {
+            tasks.values().any(Task::is_active)
         } else {
             false
         }
@@ -132,11 +132,11 @@ impl Tasks {
     pub fn get_all_tasks(&self) -> &HashMap<ShortChannelId, HashMap<u16, Task>> {
         &self.tasks
     }
-    pub fn get_scid_tasks_mut(&mut self, scid: &ShortChannelId) -> Option<&mut HashMap<u16, Task>> {
-        self.tasks.get_mut(scid)
+    pub fn get_scid_tasks_mut(&mut self, scid: ShortChannelId) -> Option<&mut HashMap<u16, Task>> {
+        self.tasks.get_mut(&scid)
     }
-    pub fn get_scid_tasks(&self, scid: &ShortChannelId) -> Option<&HashMap<u16, Task>> {
-        self.tasks.get(scid)
+    pub fn get_scid_tasks(&self, scid: ShortChannelId) -> Option<&HashMap<u16, Task>> {
+        self.tasks.get(&scid)
     }
     pub fn get_parallelbans(
         &self,
@@ -165,8 +165,8 @@ impl Tasks {
     pub fn remove_all_tasks(&mut self) {
         self.tasks.clear();
     }
-    pub fn remove_task(&mut self, scid: &ShortChannelId) {
-        self.tasks.remove(scid);
+    pub fn remove_task(&mut self, scid: ShortChannelId) {
+        self.tasks.remove(&scid);
     }
 }
 
@@ -203,7 +203,7 @@ impl Hash for PubKeyBytes {
 impl Serialize for PubKeyBytes {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut hex = String::with_capacity(66);
-        for byte in self.0.iter() {
+        for byte in &self.0 {
             use std::fmt::Write;
             write!(&mut hex, "{byte:02x}").unwrap();
         }
@@ -238,7 +238,7 @@ impl Display for TaskIdentifier {
 
 #[derive(Clone, Debug)]
 pub struct Task {
-    task_ident: TaskIdentifier,
+    identifier: TaskIdentifier,
     latest_state: JobMessage,
     active: bool,
     should_stop: bool,
@@ -248,7 +248,7 @@ pub struct Task {
 }
 impl Display for Task {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.task_ident)
+        write!(f, "{}", self.identifier)
     }
 }
 
@@ -267,7 +267,7 @@ impl Task {
             once,
             other_pubkey,
             parallel_ban: None,
-            task_ident: TaskIdentifier::new(short_channel_id, task_id),
+            identifier: TaskIdentifier::new(short_channel_id, task_id),
         }
     }
 
@@ -293,10 +293,10 @@ impl Task {
         }
     }
     pub fn get_chan_id(&self) -> ShortChannelId {
-        self.task_ident.get_chan_id()
+        self.identifier.get_chan_id()
     }
     pub fn get_identifier(&self) -> &TaskIdentifier {
-        &self.task_ident
+        &self.identifier
     }
     pub fn is_once(&self) -> bool {
         self.once
@@ -529,41 +529,32 @@ impl ShortChannelIdDirStateBuilder {
     }
 
     pub fn build(self) -> BuildResult {
-        let htlc_maximum_msat = match self.htlc_maximum_msat {
-            Some(v) => v,
-            None => return BuildResult::Failure(self),
+        let Some(htlc_maximum_msat) = self.htlc_maximum_msat else {
+            return BuildResult::Failure(self);
         };
-        let source = match self.source {
-            Some(v) => v,
-            None => return BuildResult::Failure(self),
+        let Some(source) = self.source else {
+            return BuildResult::Failure(self);
         };
-        let destination = match self.destination {
-            Some(v) => v,
-            None => return BuildResult::Failure(self),
+        let Some(destination) = self.destination else {
+            return BuildResult::Failure(self);
         };
-        let active = match self.active {
-            Some(v) => v,
-            None => return BuildResult::Failure(self),
+        let Some(active) = self.active else {
+            return BuildResult::Failure(self);
         };
-        let fee_per_millionth = match self.fee_per_millionth {
-            Some(v) => v,
-            None => return BuildResult::Failure(self),
+        let Some(fee_per_millionth) = self.fee_per_millionth else {
+            return BuildResult::Failure(self);
         };
-        let base_fee_millisatoshi = match self.base_fee_millisatoshi {
-            Some(v) => v,
-            None => return BuildResult::Failure(self),
+        let Some(base_fee_millisatoshi) = self.base_fee_millisatoshi else {
+            return BuildResult::Failure(self);
         };
-        let htlc_minimum_msat = match self.htlc_minimum_msat {
-            Some(v) => v,
-            None => return BuildResult::Failure(self),
+        let Some(htlc_minimum_msat) = self.htlc_minimum_msat else {
+            return BuildResult::Failure(self);
         };
-        let delay = match self.delay {
-            Some(v) => v,
-            None => return BuildResult::Failure(self),
+        let Some(delay) = self.delay else {
+            return BuildResult::Failure(self);
         };
-        let last_update = match self.last_update {
-            Some(v) => v,
-            None => return BuildResult::Failure(self),
+        let Some(last_update) = self.last_update else {
+            return BuildResult::Failure(self);
         };
         let private = self.private.unwrap_or(false);
         let scid_alias = self.scid_alias;
@@ -602,7 +593,7 @@ fn get_node_order(
             Ok((node_1, node_2))
         }
     } else {
-        Err(anyhow!("gossip_reader: invalid direction:{}", direction))
+        Err(anyhow!("gossip_reader: invalid direction:{direction}"))
     }
 }
 
@@ -649,7 +640,7 @@ impl IncompleteChannels {
     }
     pub fn update_graph(&mut self, graph: &mut LnGraph) {
         let mut count_built = 0;
-        for updated_chan in self.updated_channels.iter() {
+        for updated_chan in &self.updated_channels {
             if let Some(state) = self.incomplete_channels.remove(updated_chan) {
                 match state.build() {
                     BuildResult::Success(state) => {
@@ -709,10 +700,10 @@ impl LnGraph {
             .channels
             .iter()
             .filter_map(|(key, value)| {
-                if !predicate(key, value) {
-                    Some(*key)
-                } else {
+                if predicate(key, value) {
                     None
+                } else {
+                    Some(*key)
                 }
             })
             .collect();
@@ -743,7 +734,7 @@ impl LnGraph {
             if self
                 .graph
                 .get(&value.source)
-                .is_some_and(|keys| keys.is_empty())
+                .is_some_and(std::collections::HashSet::is_empty)
             {
                 self.graph.remove(&value.source);
             }
@@ -781,14 +772,14 @@ impl LnGraph {
     pub fn get_state_no_direction(
         &self,
         source: &PubKeyBytes,
-        scid: &ShortChannelId,
+        scid: ShortChannelId,
     ) -> Result<(ShortChannelIdDir, &ShortChannelIdDirState), Error> {
         let dir_chan_0 = ShortChannelIdDir {
-            short_channel_id: *scid,
+            short_channel_id: scid,
             direction: 0,
         };
         let dir_chan_1 = ShortChannelIdDir {
-            short_channel_id: *scid,
+            short_channel_id: scid,
             direction: 1,
         };
         if let Some(node_channels) = self.graph.get(source) {
@@ -802,7 +793,7 @@ impl LnGraph {
                 }
             }
         }
-        Err(anyhow!("Could not find channel in lngraph: {}", scid))
+        Err(anyhow!("Could not find channel in lngraph: {scid}"))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -885,9 +876,7 @@ impl SuccessReb {
         let mut read_dir = tokio::fs::read_dir(sling_dir).await?;
         while let Some(file) = read_dir.next_entry().await? {
             let file_name_os = file.file_name();
-            let file_name = if let Some(f_n) = file_name_os.to_str() {
-                f_n
-            } else {
+            let Some(file_name) = file_name_os.to_str() else {
                 continue;
             };
             let file_path = file.path();
@@ -900,14 +889,10 @@ impl SuccessReb {
             } else {
                 continue;
             };
-            let (scid_str, suffix) = if let Some(split) = file_name.split_once('_') {
-                split
-            } else {
+            let Some((scid_str, suffix)) = file_name.split_once('_') else {
                 continue;
             };
-            let scid = if let Ok(id) = ShortChannelId::from_str(scid_str) {
-                id
-            } else {
+            let Ok(scid) = ShortChannelId::from_str(scid_str) else {
                 continue;
             };
             if let Some(s) = search_scid {
@@ -983,9 +968,7 @@ impl FailureReb {
         let mut read_dir = tokio::fs::read_dir(sling_dir).await?;
         while let Some(file) = read_dir.next_entry().await? {
             let file_name_os = file.file_name();
-            let file_name = if let Some(f_n) = file_name_os.to_str() {
-                f_n
-            } else {
+            let Some(file_name) = file_name_os.to_str() else {
                 continue;
             };
             let file_path = file.path();
@@ -998,14 +981,10 @@ impl FailureReb {
             } else {
                 continue;
             };
-            let (scid_str, suffix) = if let Some(split) = file_name.split_once('_') {
-                split
-            } else {
+            let Some((scid_str, suffix)) = file_name.split_once('_') else {
                 continue;
             };
-            let scid = if let Ok(id) = ShortChannelId::from_str(scid_str) {
-                id
-            } else {
+            let Ok(scid) = ShortChannelId::from_str(scid_str) else {
                 continue;
             };
             if let Some(s) = search_scid {

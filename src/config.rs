@@ -76,7 +76,7 @@ fn parse_option(name: &str, value: &serde_json::Value) -> Result<options::Value,
             if value.is_string() {
                 Ok(options::Value::String(value.as_str().unwrap().to_owned()))
             } else {
-                Err(anyhow!("{} is not a valid string!", name))
+                Err(anyhow!("{name} is not a valid string!"))
             }
         }
         // n if n.eq(OPT_INFORM_LAYERS) => {
@@ -102,7 +102,7 @@ fn parse_option(name: &str, value: &serde_json::Value) -> Result<options::Value,
                     return Ok(options::Value::Integer(n_neg_i64));
                 }
             }
-            Err(anyhow!("{} is not a valid integer!", name))
+            Err(anyhow!("{name} is not a valid integer!"))
         }
     }
 }
@@ -115,9 +115,7 @@ fn validate_u64_input(
 ) -> Result<u64, Error> {
     if value < gteq {
         return Err(anyhow!(
-            "{} must be greater than or equal to {}",
-            var_name,
-            gteq
+            "{var_name} must be greater than or equal to {gteq}"
         ));
     }
 
@@ -127,7 +125,7 @@ fn validate_u64_input(
                 "{} needs to be a positive number and smaller than {}, \
             not `{}`.",
                 var_name,
-                (Utc::now().timestamp() as u64),
+                Utc::now().timestamp().unsigned_abs(),
                 value
             ));
         }
@@ -137,7 +135,7 @@ fn validate_u64_input(
 }
 
 fn is_valid_hour_timestamp(val: u64) -> bool {
-    Utc::now().timestamp() as u64 > val
+    Utc::now().timestamp().unsigned_abs() > val
 }
 
 fn options_value_to_u64(
@@ -150,9 +148,7 @@ fn options_value_to_u64(
         validate_u64_input(value as u64, name, gteq, time_factor_to_secs)
     } else {
         Err(anyhow!(
-            "{} needs to be a positive number and not `{}`.",
-            name,
-            value
+            "{name} needs to be a positive number and not `{value}`."
         ))
     }
 }
@@ -180,43 +176,43 @@ pub async fn get_startup_options(
 
     if let Some(rai) = plugin.option_str(OPT_REFRESH_ALIASMAP_INTERVAL)? {
         check_option(&mut config, OPT_REFRESH_ALIASMAP_INTERVAL, &rai)?;
-    };
+    }
     if let Some(rli) = plugin.option_str(OPT_RESET_LIQUIDITY_INTERVAL)? {
         check_option(&mut config, OPT_RESET_LIQUIDITY_INTERVAL, &rli)?;
-    };
+    }
     if let Some(dup) = plugin.option_str(OPT_DEPLETEUPTOPERCENT)? {
         check_option(&mut config, OPT_DEPLETEUPTOPERCENT, &dup)?;
-    };
+    }
     if let Some(dua) = plugin.option_str(OPT_DEPLETEUPTOAMOUNT)? {
         check_option(&mut config, OPT_DEPLETEUPTOAMOUNT, &dua)?;
-    };
+    }
     if let Some(mhops) = plugin.option_str(OPT_MAXHOPS)? {
         check_option(&mut config, OPT_MAXHOPS, &mhops)?;
-    };
+    }
     if let Some(cma) = plugin.option_str(OPT_CANDIDATES_MIN_AGE)? {
         check_option(&mut config, OPT_CANDIDATES_MIN_AGE, &cma)?;
-    };
+    }
     if let Some(pj) = plugin.option_str(OPT_PARALLELJOBS)? {
         check_option(&mut config, OPT_PARALLELJOBS, &pj)?;
-    };
+    }
     if let Some(tp) = plugin.option_str(OPT_TIMEOUTPAY)? {
         check_option(&mut config, OPT_TIMEOUTPAY, &tp)?;
-    };
+    }
     if let Some(mhc) = plugin.option_str(OPT_MAX_HTLC_COUNT)? {
         check_option(&mut config, OPT_MAX_HTLC_COUNT, &mhc)?;
-    };
+    }
     if let Some(sdfa) = plugin.option_str(OPT_STATS_DELETE_FAILURES_AGE)? {
         check_option(&mut config, OPT_STATS_DELETE_FAILURES_AGE, &sdfa)?;
-    };
+    }
     if let Some(sdfs) = plugin.option_str(OPT_STATS_DELETE_FAILURES_SIZE)? {
         check_option(&mut config, OPT_STATS_DELETE_FAILURES_SIZE, &sdfs)?;
-    };
+    }
     if let Some(sdsa) = plugin.option_str(OPT_STATS_DELETE_SUCCESSES_AGE)? {
         check_option(&mut config, OPT_STATS_DELETE_SUCCESSES_AGE, &sdsa)?;
-    };
+    }
     if let Some(sdss) = plugin.option_str(OPT_STATS_DELETE_SUCCESSES_SIZE)? {
         check_option(&mut config, OPT_STATS_DELETE_SUCCESSES_SIZE, &sdss)?;
-    };
+    }
     if let Some(layers) = plugin.option_str(OPT_INFORM_LAYERS)? {
         check_option(&mut config, OPT_INFORM_LAYERS, &layers)?;
     }
@@ -232,7 +228,7 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
                 value.as_i64().unwrap(),
                 1,
                 None,
-            )?
+            )?;
         }
         n if n.eq(OPT_RESET_LIQUIDITY_INTERVAL) => {
             config.reset_liquidity_interval = options_value_to_u64(
@@ -240,7 +236,7 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
                 value.as_i64().unwrap(),
                 10,
                 None,
-            )?
+            )?;
         }
         n if n.eq(OPT_DEPLETEUPTOPERCENT) => {
             config.depleteuptopercent = match value.as_str().unwrap().parse::<f64>() {
@@ -249,25 +245,22 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
                         f
                     } else {
                         return Err(anyhow!(
-                            "Error: {} needs to be greater than 0 and <1, not `{}`.",
-                            OPT_DEPLETEUPTOPERCENT,
-                            f
+                            "Error: {OPT_DEPLETEUPTOPERCENT} needs to be greater \
+                            than 0 and <1, not `{f}`."
                         ));
                     }
                 }
                 Err(e) => {
                     return Err(anyhow!(
-                        "Error: {} could not parse a floating point for `{}`.",
-                        e,
-                        OPT_DEPLETEUPTOPERCENT,
-                    ))
+                    "Error: {e} could not parse a floating point for `{OPT_DEPLETEUPTOPERCENT}`.",
+                ))
                 }
             }
         }
         n if n.eq(OPT_DEPLETEUPTOAMOUNT) => {
             config.depleteuptoamount =
                 options_value_to_u64(OPT_DEPLETEUPTOAMOUNT, value.as_i64().unwrap(), 0, None)?
-                    * 1000
+                    * 1000;
         }
         n if n.eq(OPT_MAXHOPS) => {
             config.maxhops = u8::try_from(options_value_to_u64(
@@ -275,7 +268,7 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
                 value.as_i64().unwrap(),
                 2,
                 None,
-            )?)?
+            )?)?;
         }
         n if n.eq(OPT_CANDIDATES_MIN_AGE) => {
             config.candidates_min_age = u32::try_from(options_value_to_u64(
@@ -283,7 +276,7 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
                 value.as_i64().unwrap(),
                 0,
                 None,
-            )?)?
+            )?)?;
         }
         n if n.eq(OPT_PARALLELJOBS) => {
             config.paralleljobs = u16::try_from(options_value_to_u64(
@@ -291,7 +284,7 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
                 value.as_i64().unwrap(),
                 1,
                 None,
-            )?)?
+            )?)?;
         }
         n if n.eq(OPT_TIMEOUTPAY) => {
             config.timeoutpay = u16::try_from(options_value_to_u64(
@@ -299,11 +292,11 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
                 value.as_i64().unwrap(),
                 1,
                 None,
-            )?)?
+            )?)?;
         }
         n if n.eq(OPT_MAX_HTLC_COUNT) => {
             config.max_htlc_count =
-                options_value_to_u64(OPT_MAX_HTLC_COUNT, value.as_i64().unwrap(), 1, None)?
+                options_value_to_u64(OPT_MAX_HTLC_COUNT, value.as_i64().unwrap(), 1, None)?;
         }
         n if n.eq(OPT_STATS_DELETE_FAILURES_AGE) => {
             config.stats_delete_failures_age = options_value_to_u64(
@@ -311,7 +304,7 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
                 value.as_i64().unwrap(),
                 0,
                 Some(24 * 60 * 60),
-            )?
+            )?;
         }
         n if n.eq(OPT_STATS_DELETE_FAILURES_SIZE) => {
             config.stats_delete_failures_size = options_value_to_u64(
@@ -319,7 +312,7 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
                 value.as_i64().unwrap(),
                 0,
                 None,
-            )?
+            )?;
         }
         n if n.eq(OPT_STATS_DELETE_SUCCESSES_AGE) => {
             config.stats_delete_successes_age = options_value_to_u64(
@@ -327,7 +320,7 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
                 value.as_i64().unwrap(),
                 0,
                 Some(24 * 60 * 60),
-            )?
+            )?;
         }
         n if n.eq(OPT_STATS_DELETE_SUCCESSES_SIZE) => {
             config.stats_delete_successes_size = options_value_to_u64(
@@ -335,12 +328,12 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
                 value.as_i64().unwrap(),
                 0,
                 None,
-            )?
+            )?;
         }
         n if n.eq(OPT_INFORM_LAYERS) => {
-            config.inform_layers = value.as_str_arr().unwrap().clone();
+            config.inform_layers.clone_from(value.as_str_arr().unwrap());
         }
-        _ => return Err(anyhow!("Unknown option: {}", name)),
+        _ => return Err(anyhow!("Unknown option: {name}")),
     }
     Ok(())
 }

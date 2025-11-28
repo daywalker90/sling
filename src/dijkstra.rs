@@ -10,7 +10,10 @@ use std::{
 };
 
 use anyhow::{anyhow, Error};
-use cln_rpc::{model::requests::SendpayRoute, primitives::*};
+use cln_rpc::{
+    model::requests::SendpayRoute,
+    primitives::{Amount, ShortChannelId, ShortChannelIdDir},
+};
 use sling::{Job, SatDirection};
 
 use crate::{
@@ -26,11 +29,13 @@ pub fn dijkstra(
     excepts: &[ShortChannelIdDir],
     liquidity: &HashMap<ShortChannelIdDir, Liquidity>,
 ) -> Result<Vec<SendpayRoute>, Error> {
-    let two_weeks_ago = (SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
-        - 60 * 60 * 24 * 14) as u32;
+    let two_weeks_ago = u32::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            - 60 * 60 * 24 * 14,
+    )?;
 
     let mut visited = HashSet::with_capacity(lngraph.node_count());
     let mut scores = HashMap::new();
@@ -140,7 +145,7 @@ pub fn dijkstra(
         visited.insert(node);
     }
 
-    build_route(
+    Ok(build_route(
         &predecessor,
         &goal,
         &scores,
@@ -148,7 +153,7 @@ pub fn dijkstra(
         &start,
         &slingchan,
         config,
-    )
+    ))
 }
 
 fn build_route(
@@ -159,14 +164,14 @@ fn build_route(
     start: &PubKeyBytes,
     slingchan: &DijkstraNode,
     config: &Config,
-) -> Result<Vec<SendpayRoute>, Error> {
+) -> Vec<SendpayRoute> {
     let mut dijkstra_path = Vec::new();
     // debug!("predecssors: {:?}", predecessor);
     let mut prev;
     match predecessor.get(goal) {
         Some(node) => prev = *node,
-        None => return Ok(vec![]),
-    };
+        None => return vec![],
+    }
     dijkstra_path.push(*scores.get(goal).unwrap());
     // debug!(
     //     "{}: found potential new route with #hops: {}",
@@ -190,10 +195,10 @@ fn build_route(
     let mut amount_msat = Amount::from_msat(0);
     let mut delay = config.cltv_delta;
 
-    let first_hop = if !dijkstra_path.is_empty() {
-        dijkstra_path.first().unwrap()
+    let first_hop = if dijkstra_path.is_empty() {
+        return sendpay_route;
     } else {
-        return Ok(sendpay_route);
+        dijkstra_path.first().unwrap()
     };
 
     for hop in &dijkstra_path {
@@ -240,7 +245,7 @@ fn build_route(
         );
         delay += hop.channel_state.delay;
     }
-    Ok(sendpay_route)
+    sendpay_route
 }
 
 fn construct_first_node(
@@ -252,15 +257,13 @@ fn construct_first_node(
 ) -> Result<DijkstraNode, Error> {
     match sat_direction {
         SatDirection::Pull => {
-            let (_scid_dir, slingchan_inc) =
-                match lngraph.get_state_no_direction(&task.other_pubkey, &task.get_chan_id()) {
-                    Ok(in_chan) => in_chan,
-                    Err(_) => {
-                        log::warn!("{task}: channel not found in graph!");
-                        task.set_state(JobMessage::ChanNotInGraph);
-                        return Err(anyhow!("channel not found in graph"));
-                    }
-                };
+            let Ok((_scid_dir, slingchan_inc)) =
+                lngraph.get_state_no_direction(&task.other_pubkey, task.get_chan_id())
+            else {
+                log::warn!("{task}: channel not found in graph!");
+                task.set_state(JobMessage::ChanNotInGraph);
+                return Err(anyhow!("channel not found in graph"));
+            };
             Ok(DijkstraNode {
                 score: 0,
                 channel_state: *slingchan_inc,
@@ -270,15 +273,13 @@ fn construct_first_node(
             })
         }
         SatDirection::Push => {
-            let (_scid_dir, slingchan_out) =
-                match lngraph.get_state_no_direction(&config.pubkey_bytes, &task.get_chan_id()) {
-                    Ok(in_chan) => in_chan,
-                    Err(_) => {
-                        log::warn!("{task}: channel not found in graph!");
-                        task.set_state(JobMessage::ChanNotInGraph);
-                        return Err(anyhow!("channel not found in graph"));
-                    }
-                };
+            let Ok((_scid_dir, slingchan_out)) =
+                lngraph.get_state_no_direction(&config.pubkey_bytes, task.get_chan_id())
+            else {
+                log::warn!("{task}: channel not found in graph!");
+                task.set_state(JobMessage::ChanNotInGraph);
+                return Err(anyhow!("channel not found in graph"));
+            };
             Ok(DijkstraNode {
                 score: 0,
                 channel_state: *slingchan_out,

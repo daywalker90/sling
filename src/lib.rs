@@ -25,7 +25,7 @@ impl FromStr for SatDirection {
         match s {
             "pull" => Ok(SatDirection::Pull),
             "push" => Ok(SatDirection::Push),
-            _ => Err(anyhow!("could not parse flow direction from `{}`", s)),
+            _ => Err(anyhow!("could not parse flow direction from `{s}`")),
         }
     }
 }
@@ -78,7 +78,7 @@ impl Display for Job {
             parts.push(format!(
                 "candidates:{}",
                 c.iter()
-                    .map(|s| s.to_string())
+                    .map(std::string::ToString::to_string)
                     .collect::<Vec<String>>()
                     .join(",")
             ));
@@ -298,21 +298,21 @@ impl FailuresInTimeWindow {
     pub fn display_fail_reasons(top_5_failure_reasons: &[FailureReasonCount]) -> String {
         top_5_failure_reasons
             .iter()
-            .map(|p| p.to_string())
+            .map(std::string::ToString::to_string)
             .collect::<Vec<String>>()
             .join("\n")
     }
     pub fn display_fail_nodes(top_5_fail_nodes: &[PeerPartnerStats]) -> String {
         top_5_fail_nodes
             .iter()
-            .map(|p| p.to_string())
+            .map(std::string::ToString::to_string)
             .collect::<Vec<String>>()
             .join("\n")
     }
     pub fn display_chan_partners(top_5_channel_partners: &[ChannelPartnerStats]) -> String {
         top_5_channel_partners
             .iter()
-            .map(|p| p.to_string())
+            .map(std::string::ToString::to_string)
             .collect::<Vec<String>>()
             .join("\n")
     }
@@ -339,10 +339,9 @@ impl SuccessesInTimeWindow {
     pub fn display_partners(top_5_channel_partners: &[ChannelPartnerStats]) -> String {
         top_5_channel_partners
             .iter()
-            .map(|p| p.to_string())
+            .map(std::string::ToString::to_string)
             .collect::<Vec<String>>()
             .join("\n")
-            .to_string()
     }
 }
 

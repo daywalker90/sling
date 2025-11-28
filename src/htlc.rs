@@ -74,7 +74,7 @@ pub async fn block_added(plugin: Plugin<PluginState>, v: serde_json::Value) -> R
         return Err(anyhow!("could not read block notification"));
     };
     if let Some(h) = block.get("height") {
-        *plugin.state().blockheight.lock() = h.as_u64().unwrap() as u32
+        *plugin.state().blockheight.lock() = u32::try_from(h.as_u64().unwrap())?;
     } else {
         return Err(anyhow!("could not find height for block"));
     }

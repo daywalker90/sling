@@ -58,7 +58,7 @@ pub async fn read_jobs(
             File::create(jobfile.clone()).await?;
             jobs = BTreeMap::new();
         }
-    };
+    }
     let peer_channels = plugin.state().peer_channels.lock().clone();
     let channels = get_all_normal_channels_from_listpeerchannels(&peer_channels);
 
@@ -103,7 +103,7 @@ pub async fn write_job(
     let mut jobs_to_remove = HashSet::new();
     if !peer_channels.is_empty() {
         for chan_id in jobs.keys() {
-            if get_normal_channel_from_listpeerchannels(&peer_channels, chan_id).is_err() {
+            if get_normal_channel_from_listpeerchannels(&peer_channels, *chan_id).is_err() {
                 jobs_to_remove.insert(*chan_id);
             }
         }
@@ -129,7 +129,7 @@ async fn refresh_job_excepts(
     let mut config = plugin.state().config.lock();
     config.exclude_chans_pull.clear();
     config.exclude_chans_push.clear();
-    for (scid, job) in jobs.iter() {
+    for (scid, job) in jobs {
         match job.sat_direction {
             SatDirection::Pull => config.exclude_chans_pull.insert(*scid),
             SatDirection::Push => config.exclude_chans_push.insert(*scid),
@@ -189,7 +189,7 @@ pub async fn read_liquidity(
             File::create(liquidity_file.clone()).await?;
             liquidity = HashMap::new();
         }
-    };
+    }
 
     Ok(liquidity)
 }
@@ -204,10 +204,10 @@ pub async fn write_liquidity(plugin: Plugin<PluginState>) -> Result<(), Error> {
 
 pub async fn create_sling_dir(sling_dir: &PathBuf) -> Result<(), Error> {
     match fs::create_dir(sling_dir).await {
-        Ok(_) => Ok(()),
+        Ok(()) => Ok(()),
         Err(e) => match e.kind() {
             io::ErrorKind::AlreadyExists => Ok(()),
-            _ => Err(anyhow!("error: {}, could not create sling folder", e)),
+            _ => Err(anyhow!("error: {e}, could not create sling folder")),
         },
     }
 }
@@ -241,7 +241,7 @@ pub fn feeppm_effective(feeppm: u32, basefee_msat: u32, amount_msat: u64) -> u64
 }
 
 pub fn fee_total_msat_precise(feeppm: u32, basefee_msat: u32, amount_msat: u64) -> f64 {
-    basefee_msat as f64 + (feeppm as f64 / 1_000_000.0 * amount_msat as f64)
+    f64::from(basefee_msat) + (f64::from(feeppm) / 1_000_000.0 * amount_msat as f64)
 }
 
 // pub fn amt_from_amt_sent_and_feeppm(amount_sent_msat: u64, feeppm: u32) -> u64 {
@@ -257,9 +257,10 @@ pub fn fee_total_msat_precise(feeppm: u32, basefee_msat: u32, amount_msat: u64) 
 // }
 
 pub fn feeppm_effective_from_amts(amount_sent_msat: u64, amount_msat: u64) -> u32 {
-    if amount_sent_msat < amount_msat {
-        panic!("CRITICAL ERROR: amount_sent_msat should be greater than or equal to amount_msat")
-    }
+    assert!(
+        amount_sent_msat >= amount_msat,
+        "CRITICAL ERROR: amount_sent_msat should be greater than or equal to amount_msat"
+    );
     ((amount_sent_msat - amount_msat) as f64 / amount_msat as f64 * 1_000_000.0).ceil() as u32
 }
 
@@ -278,11 +279,11 @@ pub fn is_channel_normal(channel: &ListpeerchannelsChannels) -> Result<(), Error
 
 pub fn get_normal_channel_from_listpeerchannels(
     peer_channels: &HashMap<ShortChannelId, ListpeerchannelsChannels>,
-    chan_id: &ShortChannelId,
+    chan_id: ShortChannelId,
 ) -> Result<ListpeerchannelsChannels, Error> {
-    if let Some(chan) = peer_channels.get(chan_id) {
+    if let Some(chan) = peer_channels.get(&chan_id) {
         match is_channel_normal(chan) {
-            Ok(_) => Ok(chan.clone()),
+            Ok(()) => Ok(chan.clone()),
             Err(e) => Err(e),
         }
     } else {
@@ -361,7 +362,7 @@ pub fn get_remote_feeppm_effective(
     };
     let chan_in_ppm = feeppm_effective(
         chan_updates.fee_proportional_millionths,
-        Amount::msat(&chan_updates.fee_base_msat) as u32,
+        u32::try_from(Amount::msat(&chan_updates.fee_base_msat))?,
         amount_msat,
     );
     Ok(chan_in_ppm)
@@ -405,13 +406,12 @@ async fn parse_excepts<T: FromStr + std::hash::Hash + Eq>(
 
     match content {
         Ok(file) => excepts_tostring = serde_json::from_str(&file).unwrap_or(Vec::new()),
-        Err(e) => match e.kind() {
-            io::ErrorKind::NotFound => {
+        Err(e) => {
+            if e.kind() == io::ErrorKind::NotFound {
                 log::info!("{} not found. Creating...", excepts_file.display());
                 File::create(excepts_file.clone()).await?;
                 excepts_tostring = Vec::new();
-            }
-            _ => {
+            } else {
                 log::warn!("Could not open {}: {}.", excepts_file.to_str().unwrap(), e);
                 return Err(anyhow!(
                     "Could not open {}: {}.",
@@ -419,8 +419,8 @@ async fn parse_excepts<T: FromStr + std::hash::Hash + Eq>(
                     e
                 ));
             }
-        },
-    };
+        }
+    }
 
     for except in excepts_tostring {
         match T::from_str(&except) {
@@ -428,7 +428,7 @@ async fn parse_excepts<T: FromStr + std::hash::Hash + Eq>(
                 excepts.insert(id);
             }
             Err(_e) => {
-                log::warn!("excepts file contains invalid short_channel_id/node_id: {except}")
+                log::warn!("excepts file contains invalid short_channel_id/node_id: {except}");
             }
         }
     }
@@ -449,7 +449,7 @@ pub fn at_or_above_version(my_version: &str, min_version: &str) -> Result<bool, 
     let min_version_parts: Vec<&str> = min_version.split('.').collect();
 
     if my_version_parts.len() <= 1 || my_version_parts.len() > 3 {
-        return Err(anyhow!("Version string parse error: {}", my_version));
+        return Err(anyhow!("Version string parse error: {my_version}"));
     }
     for (my, min) in my_version_parts.iter().zip(min_version_parts.iter()) {
         let my_num: u32 = my.parse()?;
