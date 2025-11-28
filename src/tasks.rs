@@ -406,11 +406,16 @@ pub async fn read_askrene_liquidity(plugin: Plugin<PluginState>) -> Result<(), E
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-            let xpay_layer_resp = rpc
+            let Ok(xpay_layer_resp) = rpc
                 .call_typed(&AskrenelistlayersRequest {
                     layer: Some("xpay".to_owned()),
                 })
-                .await?;
+                .await
+            else {
+                log::debug!("askrene did not create xpay layer yet");
+                time::sleep(Duration::from_secs(1)).await;
+                continue;
+            };
 
             let xpay_layer = xpay_layer_resp
                 .layers
