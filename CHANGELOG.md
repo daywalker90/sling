@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- Don't exit if xpay layer was not created yet (should only happen in CI)
+
 ## [4.1.1] - 2025-09-10
 
 ### Fixed
