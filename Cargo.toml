@@ -1,6 +1,6 @@
 [package]
 name = "sling"
-version = "4.1.1"
+version = "4.1.2"
 edition = "2021"
 rust-version = "1.85"
 
@@ -13,10 +13,10 @@ serde_json = "1.0"
 
 tokio = { version = "1", features = ["fs", "sync", "rt-multi-thread"] }
 
- cln-rpc = "0.5"
+cln-rpc = "0.5"
 # cln-rpc = { path="../lightning/cln-rpc/", version = "^0.4" }
 #cln-rpc = { git = "https://github.com/ElementsProject/lightning.git", tag = "v25.05" }
- cln-plugin = "0.5"
+cln-plugin = "0.5"
 # cln-plugin = { path="../lightning/plugins/", version = "^0.4" }
 #cln-plugin = { git = "https://github.com/ElementsProject/lightning.git", tag = "v25.05" }
 
