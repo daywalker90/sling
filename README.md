@@ -1,18 +1,6 @@
 <table border="0">
   <tr>
     <td>
-      <a href="https://github.com/daywalker90/sling/actions/workflows/latest_v24.11.yml">
-        <img src="https://github.com/daywalker90/sling/actions/workflows/latest_v24.11.yml/badge.svg?branch=main">
-      </a>
-    </td>
-    <td>
-      <a href="https://github.com/daywalker90/sling/actions/workflows/main_v24.11.yml">
-        <img src="https://github.com/daywalker90/sling/actions/workflows/main_v24.11.yml/badge.svg?branch=main">
-      </a>
-    </td>
-  </tr>
-  <tr>
-    <td>
       <a href="https://github.com/daywalker90/sling/actions/workflows/latest_v25.02.yml">
         <img src="https://github.com/daywalker90/sling/actions/workflows/latest_v25.02.yml/badge.svg?branch=main">
       </a>
@@ -44,6 +32,18 @@
     <td>
       <a href="https://github.com/daywalker90/sling/actions/workflows/main_v25.09.yml">
         <img src="https://github.com/daywalker90/sling/actions/workflows/main_v25.09.yml/badge.svg?branch=main">
+      </a>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <a href="https://github.com/daywalker90/sling/actions/workflows/latest_v25.12.yml">
+        <img src="https://github.com/daywalker90/sling/actions/workflows/latest_v25.12.yml/badge.svg?branch=main">
+      </a>
+    </td>
+    <td>
+      <a href="https://github.com/daywalker90/sling/actions/workflows/main_v25.12.yml">
+        <img src="https://github.com/daywalker90/sling/actions/workflows/main_v25.12.yml/badge.svg?branch=main">
       </a>
     </td>
   </tr>
