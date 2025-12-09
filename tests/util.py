@@ -6,9 +6,9 @@ import pytest
 from pathlib import Path
 
 RUST_PROFILE = os.environ.get("RUST_PROFILE", "debug")
-COMPILED_PATH = Path.cwd() / "target" / RUST_PROFILE / \
-    "sling"
-DOWNLOAD_PATH = Path.cwd() / "tests" / "sling"
+plugin_dir = Path(__file__).parent.parent.resolve()
+COMPILED_PATH = plugin_dir / "target" / RUST_PROFILE / "sling"
+DOWNLOAD_PATH = plugin_dir / "tests" / "sling"
 
 
 @pytest.fixture
@@ -23,8 +23,9 @@ def get_plugin(directory):
 
 def generate_random_label():
     label_length = 8
-    random_label = ''.join(random.choice(string.ascii_letters)
-                           for _ in range(label_length))
+    random_label = "".join(
+        random.choice(string.ascii_letters) for _ in range(label_length)
+    )
     return random_label
 
 
