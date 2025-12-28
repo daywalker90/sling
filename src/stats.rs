@@ -202,7 +202,7 @@ pub async fn slingstats(
 
         let mut job_scids: Vec<&ShortChannelId> = jobs.keys().collect();
         for (scid, tasks) in tasks.get_all_tasks() {
-            if tasks.values().any(super::model::Task::is_once) {
+            if tasks.values().any(super::model::Task::is_once) && scid_peer_map.contains_key(scid) {
                 job_scids.push(scid);
             }
         }

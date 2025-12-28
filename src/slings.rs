@@ -507,7 +507,11 @@ async fn health_check(
                 let mut tasks = plugin.state().tasks.lock();
                 tasks.set_state(task_ident, JobMessage::ChanNotNormal);
                 tasks.set_active(task_ident, false);
-                return Ok(Some(false));
+                let task = tasks.get_task_mut(task_ident);
+                if let Some(t) = task {
+                    t.stop();
+                }
+                return Err(e);
             }
         };
 

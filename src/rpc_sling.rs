@@ -438,10 +438,16 @@ pub async fn slingonce(
                 loop {
                     {
                         let mut tasks = plugin.state().tasks.lock();
-                        let task = tasks.get_task_mut(&task_ident).unwrap();
+                        let task_map = tasks.get_scid_tasks_mut(chan_id).unwrap();
                         let mut total_rebalanced = total_rebalanced.lock();
-                        if task.should_stop() {
-                            log::debug!("{chan_id}/{i}: Spawned once-job exited.");
+                        if task_map.get(&i).unwrap().should_stop() {
+                            log::info!("{chan_id}/{i}: Spawned once-job exited.");
+                            for task in task_map.values_mut() {
+                                task.stop();
+                                log::debug!("{}: Stopping once-job...", task.get_identifier());
+                            }
+
+                            let task = task_map.get_mut(&i).unwrap();
                             task.set_state(JobMessage::Stopped);
                             task.set_active(false);
                             let mut config = plugin.state().config.lock();
@@ -456,7 +462,8 @@ pub async fn slingonce(
                             break;
                         }
                         if *total_rebalanced + job.amount_msat > job.onceamount_msat.unwrap() {
-                            log::debug!("{chan_id}/{i}: Done rebalancing.");
+                            log::info!("{chan_id}/{i}: Done rebalancing.");
+                            let task = task_map.get_mut(&i).unwrap();
                             task.set_state(JobMessage::Balanced);
                             task.set_active(false);
                             let mut config = plugin.state().config.lock();

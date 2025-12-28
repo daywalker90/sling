@@ -1487,3 +1487,86 @@ def test_bad_forwarder_pull(node_factory, bitcoind, get_plugin):  # noqa: F811
 
     stats = l1.rpc.call("sling-stats", {"json": True})
     assert stats[0]["status"] == ["1:PeerBad"]
+
+
+def test_once_close(node_factory, bitcoind, get_plugin):  # noqa: F811
+    l1, l2, l3 = node_factory.get_nodes(
+        3,
+        opts=[
+            {
+                "plugin": get_plugin,
+            },
+            {"log-level": "debug"},
+            {"log-level": "debug"},
+        ],
+    )
+    nodes = [l1, l2, l3]
+    l1.fundwallet(10_000_000)
+    l2.fundwallet(20_000_000)
+    l3.fundwallet(10_000_000)
+    l1.rpc.connect(l2.info["id"], "localhost", l2.port)
+    l3.rpc.connect(l2.info["id"], "localhost", l2.port)
+    l3.rpc.connect(l1.info["id"], "localhost", l1.port)
+    l1.rpc.fundchannel(
+        l2.info["id"], 1_000_000, mindepth=1, announce=True, push_msat=500_000_000
+    )
+
+    l2.rpc.fundchannel(
+        l3.info["id"], 1_000_000, mindepth=1, announce=True, push_msat=500_000_000
+    )
+
+    l3.rpc.fundchannel(
+        l1.info["id"], 1_000_000, mindepth=1, announce=True, push_msat=500_000_000
+    )
+
+    bitcoind.generate_block(6)
+    sync_blockheight(bitcoind, nodes)
+
+    l1.daemon.wait_for_log(r"6 public channels")
+
+    peer_channels = l1.rpc.listpeerchannels()["channels"]
+    ch1_scid = peer_channels[0]["short_channel_id"]
+    ch2_scid = peer_channels[1]["short_channel_id"]
+
+    l1.rpc.call(
+        "sling-once",
+        {
+            "scid": ch1_scid,
+            "direction": "pull",
+            "amount": 1_000,
+            "maxppm": 1000,
+            "outppm": 1000,
+            "paralleljobs": 5,
+            "onceamount": 100_000,
+        },
+    )
+
+    needle = l1.daemon.logsearch_start
+
+    l1.rpc.close(ch1_scid)
+    time.sleep(5)
+
+    print(
+        l1.rpc.call(
+            "sling-stats",
+            {},
+        )
+    )
+
+    print(
+        l1.rpc.call(
+            "sling-stats",
+            {"scid": ch1_scid},
+        )
+    )
+
+    l1.daemon.logsearch_start = needle
+    l1.daemon.wait_for_log(f"{ch1_scid}/{1}: Spawned once-job exited.")
+    l1.daemon.logsearch_start = needle
+    l1.daemon.wait_for_log(f"{ch1_scid}/{2}: Spawned once-job exited.")
+    l1.daemon.logsearch_start = needle
+    l1.daemon.wait_for_log(f"{ch1_scid}/{3}: Spawned once-job exited.")
+    l1.daemon.logsearch_start = needle
+    l1.daemon.wait_for_log(f"{ch1_scid}/{4}: Spawned once-job exited.")
+    l1.daemon.logsearch_start = needle
+    l1.daemon.wait_for_log(f"{ch1_scid}/{5}: Spawned once-job exited.")
