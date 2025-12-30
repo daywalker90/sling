@@ -1,6 +1,6 @@
 plugin:
   name: sling
-  version: 4.1.2
+  version: 4.1.3
   lang: rust
   install: |
     cargo build --release && cp target/release/sling . && cargo clean

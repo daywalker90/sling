@@ -1,5 +1,10 @@
 # Changelog
 
+## [4.1.3] - 2025-12-30
+
+### Fixed
+- `sling-once`: if a channel was closed during this command, `sling` would not exit the job properly and also cause `sling-stats` to hang
+
 ## [4.1.2] - 2025-11-28
 
 ### Fixed
