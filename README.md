@@ -67,10 +67,9 @@ Release binaries for
 * x86_64-linux
 * armv7-linux (Raspberry Pi 32bit)
 * aarch64-linux (Raspberry Pi 64bit)
+* universal-apple-darwin (macOS)
 
-can be found on the [release](https://github.com/daywalker90/sling/releases) page. If you are unsure about your architecture you can run ``uname -m``.
-
-They require ``glibc>=2.31``, which you can check with ``ldd --version``.
+and more info can be found on the [release](https://github.com/daywalker90/sling/releases) page. If you are on linux and unsure about your architecture you can run ``uname -m``.
 
 
 # Building
@@ -85,7 +84,7 @@ Install a recent rust version ([rustup](https://rustup.rs/) is recommended) and 
 
 After that the binary will be here: ``target/release/sling``
 
-Note: Release binaries are built using ``cross`` and the ``optimized`` profile.
+Note: Release binaries are built with the ``optimized`` profile.
 
 # Documentation
 
