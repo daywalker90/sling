@@ -122,12 +122,6 @@ jobs:
       if:  ${{ inputs.tagged-release == false}}
       uses: dtolnay/rust-toolchain@stable
 
-    - name: Set up protoc
-      if: ${{ inputs.tagged-release == false}} && ${{ steps.cache-cln.outputs.cache-hit != 'true' }}
-      uses: arduino/setup-protoc@v3
-      with:
-        repo-token: ${{ secrets.GITHUB_TOKEN }}
-
     - name: Get plugin binary
       run: |
         if ${{ inputs.tagged-release }}; then
