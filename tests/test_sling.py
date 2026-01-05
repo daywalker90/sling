@@ -1162,15 +1162,19 @@ def test_gossip(node_factory, bitcoind, get_plugin):  # noqa: F811
             {
                 "plugin": get_plugin,
                 "may_reconnect": True,
+                "allow_warning": True,
             },
             {
                 "may_reconnect": True,
+                "allow_warning": True,
             },
             {
                 "may_reconnect": True,
+                "allow_warning": True,
             },
             {
                 "may_reconnect": True,
+                "allow_warning": True,
             },
         ],
     )
