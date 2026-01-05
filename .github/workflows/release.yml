@@ -166,3 +166,4 @@ jobs:
                 artifactErrorsFailBuild: true
                 body: "${{ steps.changelog_reader.outputs.changes }} \n\n### Release binaries info\n\n- Release binaries were built using rust ${{ needs.build-linux.outputs.rust-version }}\n- Linux release binaries require glibc>=${{ needs.build-linux.outputs.glibc-version }} (check yours with ``ldd --version``)\n- macOS universal binary (x86_64 + aarch64), requires macOS >= ${{ needs.build-macos.outputs.macos-deployment-target }} (deployment target)"
                 artifacts: "${{ github.event.repository.name }}-${{github.ref_name}}-*.tar.gz,${{ github.event.repository.name }}-${{github.ref_name}}-*.zip"
+                immutableCreate: true
