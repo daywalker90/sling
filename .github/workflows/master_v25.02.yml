@@ -1,9 +1,9 @@
-name: main on CLN v25.05.x
+name: master on CLN v25.02.x
 
 on:
     push:
         branches:
-            - main
+            - master
         paths-ignore:
             - 'tools/**'
             - 'CHANGELOG.md'
@@ -19,6 +19,6 @@ jobs:
     call-ci:
         uses: ./.github/workflows/ci.yml
         with:
-            cln-version: "v25.05"
-            pyln-version: "25.5"
+            cln-version: "v25.02.1"
+            pyln-version: "25.2.1"
             tagged-release: false

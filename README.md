@@ -2,48 +2,48 @@
   <tr>
     <td>
       <a href="https://github.com/daywalker90/sling/actions/workflows/latest_v25.02.yml">
-        <img src="https://github.com/daywalker90/sling/actions/workflows/latest_v25.02.yml/badge.svg?branch=main">
+        <img src="https://github.com/daywalker90/sling/actions/workflows/latest_v25.02.yml/badge.svg?branch=master">
       </a>
     </td>
     <td>
-      <a href="https://github.com/daywalker90/sling/actions/workflows/main_v25.02.yml">
-        <img src="https://github.com/daywalker90/sling/actions/workflows/main_v25.02.yml/badge.svg?branch=main">
+      <a href="https://github.com/daywalker90/sling/actions/workflows/master_v25.02.yml">
+        <img src="https://github.com/daywalker90/sling/actions/workflows/master_v25.02.yml/badge.svg?branch=master">
       </a>
     </td>
   </tr>
   <tr>
     <td>
       <a href="https://github.com/daywalker90/sling/actions/workflows/latest_v25.05.yml">
-        <img src="https://github.com/daywalker90/sling/actions/workflows/latest_v25.05.yml/badge.svg?branch=main">
+        <img src="https://github.com/daywalker90/sling/actions/workflows/latest_v25.05.yml/badge.svg?branch=master">
       </a>
     </td>
     <td>
-      <a href="https://github.com/daywalker90/sling/actions/workflows/main_v25.05.yml">
-        <img src="https://github.com/daywalker90/sling/actions/workflows/main_v25.05.yml/badge.svg?branch=main">
+      <a href="https://github.com/daywalker90/sling/actions/workflows/master_v25.05.yml">
+        <img src="https://github.com/daywalker90/sling/actions/workflows/master_v25.05.yml/badge.svg?branch=master">
       </a>
     </td>
   </tr>
   <tr>
     <td>
       <a href="https://github.com/daywalker90/sling/actions/workflows/latest_v25.09.yml">
-        <img src="https://github.com/daywalker90/sling/actions/workflows/latest_v25.09.yml/badge.svg?branch=main">
+        <img src="https://github.com/daywalker90/sling/actions/workflows/latest_v25.09.yml/badge.svg?branch=master">
       </a>
     </td>
     <td>
-      <a href="https://github.com/daywalker90/sling/actions/workflows/main_v25.09.yml">
-        <img src="https://github.com/daywalker90/sling/actions/workflows/main_v25.09.yml/badge.svg?branch=main">
+      <a href="https://github.com/daywalker90/sling/actions/workflows/master_v25.09.yml">
+        <img src="https://github.com/daywalker90/sling/actions/workflows/master_v25.09.yml/badge.svg?branch=master">
       </a>
     </td>
   </tr>
   <tr>
     <td>
       <a href="https://github.com/daywalker90/sling/actions/workflows/latest_v25.12.yml">
-        <img src="https://github.com/daywalker90/sling/actions/workflows/latest_v25.12.yml/badge.svg?branch=main">
+        <img src="https://github.com/daywalker90/sling/actions/workflows/latest_v25.12.yml/badge.svg?branch=master">
       </a>
     </td>
     <td>
-      <a href="https://github.com/daywalker90/sling/actions/workflows/main_v25.12.yml">
-        <img src="https://github.com/daywalker90/sling/actions/workflows/main_v25.12.yml/badge.svg?branch=main">
+      <a href="https://github.com/daywalker90/sling/actions/workflows/master_v25.12.yml">
+        <img src="https://github.com/daywalker90/sling/actions/workflows/master_v25.12.yml/badge.svg?branch=master">
       </a>
     </td>
   </tr>
