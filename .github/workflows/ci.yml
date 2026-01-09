@@ -24,7 +24,7 @@ jobs:
     strategy:
         fail-fast: false
         matrix:
-            bitcoind-version: ["30.0"]
+            bitcoind-version: ["30.2"]
             experimental: [1]
             deprecated: [0]
             python-version: ["3.9", "3.13"]
