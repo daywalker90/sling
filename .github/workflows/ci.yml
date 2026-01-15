@@ -122,6 +122,18 @@ jobs:
       if:  ${{ inputs.tagged-release == false}}
       uses: dtolnay/rust-toolchain@stable
 
+    - name: Install cargo-binstall
+      if: ${{ inputs.tagged-release == false}}
+      uses: taiki-e/install-action@cargo-binstall
+
+    - name: Install cargo-msrv
+      if: ${{ inputs.tagged-release == false}}
+      run: cargo binstall --no-confirm cargo-msrv
+
+    - name: Verify MSRV
+      if: ${{ inputs.tagged-release == false}}
+      run: cargo msrv verify
+
     - name: Get plugin binary
       run: |
         if ${{ inputs.tagged-release }}; then
