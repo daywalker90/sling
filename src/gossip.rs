@@ -1,10 +1,11 @@
 use std::{
     fs::File,
-    io::{BufReader, Read},
+    io::{BufReader, Read, Seek},
     time::Instant,
 };
 
 use anyhow::{anyhow, Error};
+use bitcoin::consensus::encode::serialize_hex;
 use cln_plugin::Plugin;
 use cln_rpc::primitives::{Amount, ShortChannelId, ShortChannelIdDir};
 
@@ -34,27 +35,35 @@ pub struct ChannelAnnouncement {
     // pub features: String,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct NextGossipStore {
+    pub equivalent_offset: u64,
+    pub uuid: [u8; 32],
+}
+
 const CHUNK_SIZE: usize = 1024 * 1024;
 
 pub async fn read_gossip_store(
     plugin: Plugin<PluginState>,
     reader: &mut BufReader<File>,
     is_start_up: &mut bool,
-) -> Result<(), Error> {
+    store_hint: Option<NextGossipStore>,
+) -> Result<Option<NextGossipStore>, Error> {
     let mut graph = plugin.state().graph.lock();
     let mut incomplete_channels = plugin.state().incomplete_channels.lock();
 
     let mut offset = 0;
 
-    read_gossip_file(
+    let next_store = read_gossip_file(
         is_start_up,
         reader,
         &mut graph,
         &mut incomplete_channels,
         &mut offset,
+        store_hint,
     )?;
 
-    Ok(())
+    Ok(next_store)
 }
 
 pub fn read_gossip_file(
@@ -63,7 +72,8 @@ pub fn read_gossip_file(
     graph: &mut LnGraph,
     incomplete_channels: &mut IncompleteChannels,
     offset: &mut usize,
-) -> Result<(), anyhow::Error> {
+    store_hint: Option<NextGossipStore>,
+) -> Result<Option<NextGossipStore>, anyhow::Error> {
     let now = Instant::now();
 
     if *is_start_up {
@@ -82,6 +92,8 @@ pub fn read_gossip_file(
 
     let mut gossip_file = vec![0u8; CHUNK_SIZE];
 
+    let mut next_store = None;
+
     loop {
         let mut bytes_read = 0;
 
@@ -98,17 +110,24 @@ pub fn read_gossip_file(
             break;
         }
         let test_now = Instant::now();
-        read_gossip_file_chunk(
+
+        next_store = read_gossip_file_chunk(
             &gossip_file[..bytes_read],
             offset,
             graph,
             incomplete_channels,
+            reader,
+            store_hint,
         )?;
+
         log::trace!(
             "read_gossip_file: gossip_store read chunk {} in: {}ms",
             bytes_read,
             test_now.elapsed().as_millis()
         );
+        if next_store.is_some() {
+            break;
+        }
         if *offset < bytes_read {
             reader.seek_relative(*offset as i64 - bytes_read as i64)?;
         }
@@ -138,7 +157,7 @@ pub fn read_gossip_file(
         graph.public_channel_count(),
         incomplete_channels.len()
     );
-    Ok(())
+    Ok(next_store)
 }
 
 fn read_gossip_file_chunk(
@@ -146,7 +165,9 @@ fn read_gossip_file_chunk(
     offset: &mut usize,
     graph: &mut LnGraph,
     incomplete_channels: &mut IncompleteChannels,
-) -> Result<(), anyhow::Error> {
+    reader: &mut BufReader<File>,
+    store_hint: Option<NextGossipStore>,
+) -> Result<Option<NextGossipStore>, anyhow::Error> {
     log::trace!(
         "read_gossip_file_chunk: reading gossip_store chunk of size {}",
         gossip_file.len()
@@ -350,6 +371,58 @@ fn read_gossip_file_chunk(
                 incomplete_channels.remove(&dir_chan_0);
                 incomplete_channels.remove(&dir_chan_1);
             }
+            4105 => {
+                // 4105 gossip_store_ended
+                //  - `equivalent_offset`: u64
+                //  - `uuid`: [u8; 32]
+                let equivalent_offset =
+                    u64::from_be_bytes(gossip_file[*offset..*offset + 8].try_into()?);
+                *offset += 8;
+                let uuid: [u8; 32] = gossip_file[*offset..*offset + 32].try_into()?;
+                log::trace!(
+                    "read_gossip_file_chunk: encountered gossip_store_ended with \
+                equivalent_offset: {equivalent_offset} and next uuid: {}",
+                    serialize_hex(&uuid)
+                );
+                let next_store = NextGossipStore {
+                    equivalent_offset,
+                    uuid,
+                };
+                return Ok(Some(next_store));
+            }
+            4107 => {
+                // 4107 uuid
+                //  - `uuid`: [u8; 32]
+                let uuid: [u8; 32] = gossip_file[*offset..*offset + 32].try_into()?;
+                log::trace!(
+                    "read_gossip_file_chunk: opened gossip_store with uuid: {}",
+                    serialize_hex(&uuid)
+                );
+
+                if let Some(ns) = &store_hint {
+                    if uuid != ns.uuid {
+                        let next_store = NextGossipStore {
+                            equivalent_offset: 0,
+                            uuid,
+                        };
+                        log::info!(
+                            "read_gossip_file_chunk: missed gossip_store compaction, \
+                        reopening..."
+                        );
+                        return Ok(Some(next_store));
+                    }
+                    log::debug!(
+                        "read_gossip_file_chunk: seeking to equivalent_offset {} in \
+                    compacted gossip_store",
+                        ns.equivalent_offset
+                    );
+                    reader.seek(std::io::SeekFrom::Start(ns.equivalent_offset))?;
+                    *offset = gossip_file.len();
+                    break;
+                }
+
+                *offset += 32;
+            }
             _e => {
                 // Unknown message type
                 // debug!("unknown: {}", e);
@@ -358,7 +431,7 @@ fn read_gossip_file_chunk(
         }
     }
 
-    Ok(())
+    Ok(None)
 }
 
 fn extract_scid(gossip_file: &[u8]) -> Result<ShortChannelId, anyhow::Error> {

@@ -1,5 +1,10 @@
 # Changelog
 
+## [4.2.0] - 2026-02-16
+
+### Fixed
+- gossip store reader can handle gossip store compaction for CLN v26.04+
+
 ## [4.1.3] - 2025-12-30
 
 ### Fixed

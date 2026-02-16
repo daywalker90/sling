@@ -224,6 +224,7 @@ fn test_gossip_file_reader() {
             &mut graph,
             &mut incomplete_channels,
             &mut offset,
+            None,
         )
         .expect("read_gossip_file failed");
         let elapsed = now.elapsed().as_millis();
@@ -236,6 +237,7 @@ fn test_gossip_file_reader() {
             &mut graph,
             &mut incomplete_channels,
             &mut offset,
+            None,
         )
         .expect("read_gossip_file failed");
         let elapsed_after = now.elapsed().as_millis();
@@ -313,6 +315,7 @@ fn test_dijkstra_speed() {
         &mut graph,
         &mut incomplete_channels,
         &mut offset,
+        None,
     )
     .expect("read_gossip_file failed");
 

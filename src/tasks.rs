@@ -96,10 +96,13 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
     let my_pubkey = plugin.state().config.lock().pubkey_bytes;
     let mut is_startup = true;
 
-    let gossip_file =
-        File::open(Path::new(&plugin.configuration().lightning_dir).join("gossip_store"))?;
+    let gossip_path = Path::new(&plugin.configuration().lightning_dir).join("gossip_store");
+
+    let gossip_file = File::open(&gossip_path)?;
 
     let mut reader = BufReader::new(gossip_file);
+
+    let mut store_hint = None;
 
     let interval;
     {
@@ -116,7 +119,36 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
             let now = Instant::now();
             {
                 log::debug!("Getting all channels in gossip_store...");
-                read_gossip_store(plugin.clone(), &mut reader, &mut is_startup).await?;
+                loop {
+                    match read_gossip_store(
+                        plugin.clone(),
+                        &mut reader,
+                        &mut is_startup,
+                        store_hint,
+                    )
+                    .await
+                    {
+                        Ok(Some(ns)) => {
+                            if ns.equivalent_offset != 0 {
+                                store_hint = Some(ns);
+                            } else {
+                                store_hint = None;
+                            }
+                            log::info!("Gossip store ended, reopening file...");
+
+                            let gossip_file = File::open(&gossip_path)?;
+                            reader = BufReader::new(gossip_file);
+
+                            is_startup = true;
+                        }
+                        Ok(None) => {
+                            break;
+                        }
+                        Err(e) => {
+                            return Err(e);
+                        }
+                    }
+                }
                 log::debug!(
                     "Reading gossip store done after {}ms!",
                     now.elapsed().as_millis()

@@ -6,7 +6,7 @@ import os
 import time
 
 import pytest
-from pyln.client import RpcError
+from pyln.client import RpcError, NodeVersion
 from pyln.testing.fixtures import *  # noqa: F403
 from pyln.testing.utils import only_one, sync_blockheight, wait_for
 from util import get_plugin  # noqa: F401
@@ -383,12 +383,14 @@ def test_maxhops_2(node_factory, bitcoind, get_plugin):  # noqa: F811
     l1.daemon.wait_for_log(r"already balanced. Taking a break")
 
     wait_for(
-        lambda: next(
-            channel
-            for channel in l1.rpc.listpeerchannels(l2.info["id"])["channels"]
-            if channel["opener"] == "remote"
-        )["to_us_msat"]
-        >= 200_000_000
+        lambda: (
+            next(
+                channel
+                for channel in l1.rpc.listpeerchannels(l2.info["id"])["channels"]
+                if channel["opener"] == "remote"
+            )["to_us_msat"]
+            >= 200_000_000
+        )
     )
     assert (
         next(
@@ -510,10 +512,10 @@ def test_pull_and_push(node_factory, bitcoind, get_plugin):  # noqa: F811
     l1.rpc.call("sling-go", [])
     l1.daemon.wait_for_log(r"already balanced. Taking a break")
     wait_for(
-        lambda: only_one(l1.rpc.listpeerchannels(l5.info["id"])["channels"])[
-            "to_us_msat"
-        ]
-        >= 400_000_000
+        lambda: (
+            only_one(l1.rpc.listpeerchannels(l5.info["id"])["channels"])["to_us_msat"]
+            >= 400_000_000
+        )
     )
     pull_pay = l1.rpc.call("listpays", {"status": "complete"})["pays"][0]
     LOGGER.info(f"{pull_pay}")
@@ -554,10 +556,10 @@ def test_pull_and_push(node_factory, bitcoind, get_plugin):  # noqa: F811
     l1.rpc.call("sling-go", [])
     l1.daemon.wait_for_log(r"already balanced. Taking a break")
     wait_for(
-        lambda: only_one(l1.rpc.listpeerchannels(l5.info["id"])["channels"])[
-            "to_us_msat"
-        ]
-        <= 120_000_000
+        lambda: (
+            only_one(l1.rpc.listpeerchannels(l5.info["id"])["channels"])["to_us_msat"]
+            <= 120_000_000
+        )
     )
     pays = l1.rpc.call("listpays", {"status": "complete"})["pays"]
     push_pay = pays[len(pays) - 1]
@@ -935,10 +937,14 @@ def test_private_candidates(node_factory, bitcoind, get_plugin):  # noqa: F811
         assert l1.daemon.is_in_log(f"exclude_push_chans: {l2_l3_scid}")
 
     wait_for(
-        lambda: len(
-            l1.rpc.call("sling-stats", [scid_l1_l3, True])["successes_in_time_window"]
+        lambda: (
+            len(
+                l1.rpc.call("sling-stats", [scid_l1_l3, True])[
+                    "successes_in_time_window"
+                ]
+            )
+            is not None
         )
-        is not None
     )
     stats = l1.rpc.call("sling-stats", [scid_l1_l3, True])["successes_in_time_window"]
     for chan_partner in stats["top_5_channel_partners"]:
@@ -1106,13 +1112,15 @@ def test_once(node_factory, bitcoind, get_plugin):  # noqa: F811
         time.sleep(1)
 
     wait_for(
-        lambda: l1.rpc.call("sling-stats", [True])[0]["status"]
-        == [
-            "1:Balanced",
-            "2:Balanced",
-            "3:Balanced",
-            "4:Balanced",
-        ]
+        lambda: (
+            l1.rpc.call("sling-stats", [True])[0]["status"]
+            == [
+                "1:Balanced",
+                "2:Balanced",
+                "3:Balanced",
+                "4:Balanced",
+            ]
+        )
     )
 
     assert (
@@ -1231,7 +1239,7 @@ def test_gossip(node_factory, bitcoind, get_plugin):  # noqa: F811
     l1.daemon.wait_for_log(r"8 public channels")
 
     l1.rpc.close(scid_l1_l4_1)
-    bitcoind.generate_block(6, wait_for_mempool=1)
+    bitcoind.generate_block(18, wait_for_mempool=1)
     sync_blockheight(bitcoind, nodes)
 
     l1.daemon.wait_for_log(r"4 private channels")
@@ -1256,11 +1264,9 @@ def test_gossip(node_factory, bitcoind, get_plugin):  # noqa: F811
     sling_liquidity = os.path.join(l1.info["lightning-dir"], "sling", "liquidity.json")
     assert os.path.getsize(sling_liquidity) == 2
 
-    # 24.08 has a bug in gossip store where it will return 7 public channels after a
-    # restart, so we abort here
-    version = l1.rpc.call("getinfo", {})["version"]
-    if version.startswith("v24.08"):
-        return
+    LOGGER.info(scid_l1_l4_1)
+    LOGGER.info(l1.rpc.call("listchannels", {})["channels"])
+    wait_for(lambda: len(l1.rpc.call("listchannels", {})["channels"]) == 6)
 
     l1.restart()
     l1.rpc.connect(l2.info["id"] + "@localhost:" + str(l2.port))
@@ -1272,7 +1278,7 @@ def test_gossip(node_factory, bitcoind, get_plugin):  # noqa: F811
     l1.daemon.wait_for_log(r"6 public channels")
 
     l2.rpc.close(scid_l2_l4)
-    bitcoind.generate_block(1, wait_for_mempool=1)
+    bitcoind.generate_block(12, wait_for_mempool=1)
     sync_blockheight(bitcoind, nodes)
 
     l1.daemon.wait_for_log(r"4 private channels")
@@ -1294,11 +1300,40 @@ def test_gossip(node_factory, bitcoind, get_plugin):  # noqa: F811
     assert not l1.daemon.is_in_log(f"sling: {scid_l2_l4}")
 
     l2.rpc.close(scid_l1_l2)
-    bitcoind.generate_block(1, wait_for_mempool=1)
+    bitcoind.generate_block(12, wait_for_mempool=1)
     sync_blockheight(bitcoind, nodes)
 
     l1.daemon.wait_for_log(r"2 private channels")
     l1.daemon.wait_for_log(r"4 public channels")
+
+    version = l1.info["version"]
+    if NodeVersion(version) >= "v26.04":
+        l1.rpc.call("dev-compact-gossip-store", [])
+
+        l1.daemon.wait_for_log(
+            r"read_gossip_file_chunk: encountered gossip_store_ended with"
+        )
+        l1.daemon.wait_for_log(r"read_gossip_file_chunk: seeking to equivalent_offset")
+
+        l4.rpc.fundchannel(
+            l1.info["id"] + "@localhost:" + str(l1.port),
+            1_000_000,
+        )
+
+        bitcoind.generate_block(6)
+        sync_blockheight(bitcoind, nodes)
+
+        l1.daemon.wait_for_log(r"2 private channels")
+        l1.daemon.wait_for_log(r"6 public channels")
+
+        l1.daemon.wait_for_log(r"Reading gossip store done after")
+        l1.rpc.call("dev-compact-gossip-store", [])
+        l1.rpc.call("dev-compact-gossip-store", [])
+        l1.daemon.wait_for_log(
+            r"read_gossip_file_chunk: missed gossip_store compaction"
+        )
+        l1.daemon.wait_for_log(r"2 private channels")
+        l1.daemon.wait_for_log(r"6 public channels")
 
 
 def test_splice(node_factory, bitcoind, get_plugin):  # noqa: F811

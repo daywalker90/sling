@@ -214,7 +214,7 @@ pub async fn create_sling_dir(sling_dir: &PathBuf) -> Result<(), Error> {
 
 pub fn get_preimage_paymend_hash_pair() -> (String, Sha256) {
     let mut preimage = [0u8; 32];
-    rng().fill(&mut preimage[..]);
+    rng().fill_bytes(&mut preimage[..]);
 
     let pi_str = serialize_hex(&preimage);
 
