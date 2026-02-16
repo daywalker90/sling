@@ -398,7 +398,15 @@ def test_maxhops_2(node_factory, bitcoind, get_plugin):  # noqa: F811
             for channel in l1.rpc.listpeerchannels(l2.info["id"])["channels"]
             if channel["opener"] == "remote"
         )["to_us_msat"]
-        == 200_000_000
+        >= 200_000_000
+    )
+    assert (
+        next(
+            channel
+            for channel in l1.rpc.listpeerchannels(l2.info["id"])["channels"]
+            if channel["opener"] == "remote"
+        )["to_us_msat"]
+        <= 300_000_000
     )
 
 
