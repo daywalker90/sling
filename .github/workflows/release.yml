@@ -51,7 +51,7 @@ jobs:
             echo "glibc-version=$GLIBC_VER" >> "$GITHUB_OUTPUT"
 
         - name: Upload Linux artifacts
-          uses: actions/upload-artifact@v6
+          uses: actions/upload-artifact@v7
           with:
             name: linux-binaries
             path: |
@@ -130,7 +130,7 @@ jobs:
             echo "Success: Both architectures have deployment target $EXPECTED_TARGET"
 
         - name: Upload macOS artifacts
-          uses: actions/upload-artifact@v6
+          uses: actions/upload-artifact@v7
           with:
             name: macos-binaries
             path: |
