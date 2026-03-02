@@ -85,14 +85,14 @@ jobs:
       run: |
         export BITCOIND_VERSION=${{ matrix.bitcoind-version }}
         export TARGET_ARCH="x86_64-linux-gnu"
-        wget https://bitcoincore.org/bin/bitcoin-core-${BITCOIND_VERSION}/bitcoin-${BITCOIND_VERSION}-${TARGET_ARCH}.tar.gz
+        wget --tries=5 --waitretry=5 --retry-connrefused --timeout=20 --continue https://bitcoincore.org/bin/bitcoin-core-${BITCOIND_VERSION}/bitcoin-${BITCOIND_VERSION}-${TARGET_ARCH}.tar.gz
         tar -xzf bitcoin-${BITCOIND_VERSION}-${TARGET_ARCH}.tar.gz
         sudo mv bitcoin-${BITCOIND_VERSION}/bin/* /usr/local/bin
         rm -rf bitcoin-${BITCOIND_VERSION}-${TARGET_ARCH}.tar.gz bitcoin-${BITCOIND_VERSION}
 
     - name: Save bitcoind cache
       id: save-cache-bitcoind
-      if : ${{ always() && steps.cache-bitcoind.outputs.cache-hit != 'true'}}
+      if : ${{ success() && steps.cache-bitcoind.outputs.cache-hit != 'true'}}
       uses: actions/cache/save@v5
       with:
         path: /usr/local/bin/bitcoin*
@@ -104,13 +104,13 @@ jobs:
           url=$(curl -f --retry 3 --retry-delay 3 -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/repos/ElementsProject/lightning/releases/tags/${{ inputs.cln-version }} \
             | jq '.assets[] | select(.name | contains("24.04")) | .browser_download_url' \
             | tr -d '\"')
-          wget $url
+          wget --tries=5 --waitretry=5 --retry-connrefused --timeout=20 --continue $url
           sudo tar -xvf ${url##*/} -C /usr/local --strip-components=2
           echo "CLN_VERSION=$(lightningd --version)" >> "$GITHUB_OUTPUT"
 
     - name: Save CLN cache
       id: save-cache-cln
-      if : ${{ always() && steps.cache-cln.outputs.cache-hit != 'true' }}
+      if : ${{ success() && steps.cache-cln.outputs.cache-hit != 'true' }}
       uses: actions/cache/save@v5
       with:
         path: |
