@@ -1372,7 +1372,7 @@ def test_splice(node_factory, bitcoind, get_plugin):  # noqa: F811
         l1.rpc.listpeerchannels(l2.info["id"])["channels"][0]["short_channel_id"]
     )
 
-    funds_result = l1.rpc.fundpsbt("109000sat", "slow", 166, excess_as_change=True)
+    funds_result = l1.rpc.fundpsbt("105790sat", 0, 0, excess_as_change=True)
 
     result = l1.rpc.splice_init(chan_id, 100_000, funds_result["psbt"])
     result = l1.rpc.splice_update(chan_id, result["psbt"])
