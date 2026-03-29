@@ -346,11 +346,11 @@ fn test_dijkstra_speed() {
 
     let getinfo = GetinfoResponse {
         lightning_dir: String::new(),
-        alias: None,
+        alias: "test".to_owned(),
         our_features: None,
         warning_bitcoind_sync: None,
         warning_lightningd_sync: None,
-        address: None,
+        address: Vec::new(),
         binding: None,
         blockheight: 1,
         color: String::new(),

@@ -82,6 +82,7 @@ pub async fn refresh_listpeerchannels(plugin: Plugin<PluginState>) -> Result<(),
         .call_typed(&ListpeerchannelsRequest {
             id: None,
             short_channel_id: None,
+            channel_id: None,
         })
         .await?
         .channels
@@ -456,9 +457,6 @@ pub async fn read_askrene_liquidity(plugin: Plugin<PluginState>) -> Result<(), E
             let mut liquidity = plugin.state().liquidity.lock();
             let mut counter = 0;
             for belief in &xpay_layer.constraints {
-                let Some(scid_dir) = belief.short_channel_id_dir else {
-                    continue;
-                };
                 let Some(belief_timestamp) = belief.timestamp else {
                     continue;
                 };
@@ -471,7 +469,7 @@ pub async fn read_askrene_liquidity(plugin: Plugin<PluginState>) -> Result<(), E
                     continue;
                 }
                 counter += 1;
-                match liquidity.entry(scid_dir) {
+                match liquidity.entry(belief.short_channel_id_dir) {
                     hash_map::Entry::Occupied(mut occupied_entry) => {
                         if occupied_entry.get().liquidity_age < belief_timestamp {
                             *occupied_entry.get_mut() = Liquidity {

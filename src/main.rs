@@ -1,4 +1,4 @@
-use cln_rpc::{model::requests::GetinfoRequest, ClnRpc};
+use cln_rpc::{ClnRpc, model::requests::GetinfoRequest};
 use mimalloc::MiMalloc;
 
 #[global_allocator]
@@ -8,6 +8,8 @@ use std::{path::Path, time::Duration};
 
 use anyhow::anyhow;
 use cln_plugin::{
+    Builder,
+    RpcMethodBuilder,
     options::{
         ConfigOption,
         DefaultBooleanConfigOption,
@@ -15,24 +17,22 @@ use cln_plugin::{
         DefaultStringArrayConfigOption,
         DefaultStringConfigOption,
     },
-    Builder,
-    RpcMethodBuilder,
 };
 use config::{get_startup_options, setconfig_callback};
 use htlc::{block_added, htlc_handler};
 use model::{
     Config,
+    EXCEPTS_CHANS_FILE_NAME,
+    EXCEPTS_PEERS_FILE_NAME,
     FailureReb,
+    JOB_FILE_NAME,
     JobMessage,
+    PLUGIN_NAME,
     PluginState,
     PubKeyBytes,
     ShortChannelIdDirState,
     SuccessReb,
     Task,
-    EXCEPTS_CHANS_FILE_NAME,
-    EXCEPTS_PEERS_FILE_NAME,
-    JOB_FILE_NAME,
-    PLUGIN_NAME,
 };
 use notifications::shutdown_handler;
 use rpc_sling::{
@@ -104,10 +104,12 @@ const OPT_AUTOGO: DefaultBooleanConfigOption = ConfigOption::new_bool_with_defau
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    std::env::set_var(
-        "CLN_PLUGIN_LOG",
-        "cln_plugin=info,cln_rpc=info,sling=trace,debug",
-    );
+    unsafe {
+        std::env::set_var(
+            "CLN_PLUGIN_LOG",
+            "cln_plugin=info,cln_rpc=info,sling=trace,debug",
+        )
+    };
     log_panics::init();
     let state;
     let confplugin;
@@ -332,75 +334,76 @@ async fn main() -> Result<(), anyhow::Error> {
         }
         None => return Err(anyhow!("Error configuring the plugin!")),
     }
-    if let Ok(plugin) = confplugin.start(state).await {
-        log::debug!("{:?}", plugin.configuration());
-        let peersclone = plugin.clone();
-        tokio::spawn(async move {
-            match tasks::refresh_listpeerchannels_loop(peersclone.clone()).await {
-                Ok(()) => (),
-                Err(e) => log::warn!("Error in refresh_listpeers thread: {e:?}"),
-            }
-            let _res = peersclone.shutdown();
-        });
-        let channelsclone = plugin.clone();
-        tokio::spawn(async move {
-            match tasks::refresh_graph(channelsclone.clone()).await {
-                Ok(()) => (),
-                Err(e) => log::warn!("Error in refresh_graph thread: {e:?}"),
-            }
-            let _res = channelsclone.shutdown();
-        });
-        let aliasclone = plugin.clone();
-        tokio::spawn(async move {
-            match tasks::refresh_aliasmap(aliasclone.clone()).await {
-                Ok(()) => (),
-                Err(e) => log::warn!("Error in refresh_aliasmap thread: {e:?}"),
-            }
-            let _res = aliasclone.shutdown();
-        });
-        let liquidityclone = plugin.clone();
-        tokio::spawn(async move {
-            match tasks::refresh_liquidity(liquidityclone.clone()).await {
-                Ok(()) => (),
-                Err(e) => log::warn!("Error in refresh_liquidity thread: {e:?}"),
-            }
-            let _res = liquidityclone.shutdown();
-        });
-        let tempbanclone = plugin.clone();
-        tokio::spawn(async move {
-            match tasks::clear_tempbans(tempbanclone.clone()).await {
-                Ok(()) => (),
-                Err(e) => log::warn!("Error in clear_tempbans thread: {e:?}"),
-            }
-            let _res = tempbanclone.shutdown();
-        });
-        let clearstatsclone = plugin.clone();
-        tokio::spawn(async move {
-            match tasks::clear_stats(clearstatsclone.clone()).await {
-                Ok(()) => (),
-                Err(e) => log::warn!("Error in clear_stats thread: {e:?}"),
-            }
-            let _res = clearstatsclone.shutdown();
-        });
-        if plugin.state().config.lock().at_or_above_24_11 {
-            let askrene_clone = plugin.clone();
+    match confplugin.start(state).await {
+        Ok(plugin) => {
+            log::debug!("{:?}", plugin.configuration());
+            let peersclone = plugin.clone();
             tokio::spawn(async move {
-                match tasks::read_askrene_liquidity(askrene_clone.clone()).await {
+                match tasks::refresh_listpeerchannels_loop(peersclone.clone()).await {
                     Ok(()) => (),
-                    Err(e) => log::warn!("Error in read_askrene_liquidity thread: {e:?}"),
+                    Err(e) => log::warn!("Error in refresh_listpeers thread: {e:?}"),
                 }
-                let _res = askrene_clone.shutdown();
+                let _res = peersclone.shutdown();
             });
-        }
+            let channelsclone = plugin.clone();
+            tokio::spawn(async move {
+                match tasks::refresh_graph(channelsclone.clone()).await {
+                    Ok(()) => (),
+                    Err(e) => log::warn!("Error in refresh_graph thread: {e:?}"),
+                }
+                let _res = channelsclone.shutdown();
+            });
+            let aliasclone = plugin.clone();
+            tokio::spawn(async move {
+                match tasks::refresh_aliasmap(aliasclone.clone()).await {
+                    Ok(()) => (),
+                    Err(e) => log::warn!("Error in refresh_aliasmap thread: {e:?}"),
+                }
+                let _res = aliasclone.shutdown();
+            });
+            let liquidityclone = plugin.clone();
+            tokio::spawn(async move {
+                match tasks::refresh_liquidity(liquidityclone.clone()).await {
+                    Ok(()) => (),
+                    Err(e) => log::warn!("Error in refresh_liquidity thread: {e:?}"),
+                }
+                let _res = liquidityclone.shutdown();
+            });
+            let tempbanclone = plugin.clone();
+            tokio::spawn(async move {
+                match tasks::clear_tempbans(tempbanclone.clone()).await {
+                    Ok(()) => (),
+                    Err(e) => log::warn!("Error in clear_tempbans thread: {e:?}"),
+                }
+                let _res = tempbanclone.shutdown();
+            });
+            let clearstatsclone = plugin.clone();
+            tokio::spawn(async move {
+                match tasks::clear_stats(clearstatsclone.clone()).await {
+                    Ok(()) => (),
+                    Err(e) => log::warn!("Error in clear_stats thread: {e:?}"),
+                }
+                let _res = clearstatsclone.shutdown();
+            });
+            if plugin.state().config.lock().at_or_above_24_11 {
+                let askrene_clone = plugin.clone();
+                tokio::spawn(async move {
+                    match tasks::read_askrene_liquidity(askrene_clone.clone()).await {
+                        Ok(()) => (),
+                        Err(e) => log::warn!("Error in read_askrene_liquidity thread: {e:?}"),
+                    }
+                    let _res = askrene_clone.shutdown();
+                });
+            }
 
-        if plugin.option(&OPT_AUTOGO).unwrap() {
-            time::sleep(Duration::from_secs(5)).await;
-            let _go_res = slinggo(plugin.clone(), json!({})).await;
-        }
+            if plugin.option(&OPT_AUTOGO).unwrap() {
+                time::sleep(Duration::from_secs(5)).await;
+                let _go_res = slinggo(plugin.clone(), json!({})).await;
+            }
 
-        plugin.join().await?;
-        std::process::exit(0);
-    } else {
-        Err(anyhow!("Error starting the plugin!"))
+            plugin.join().await?;
+            std::process::exit(0);
+        }
+        _ => Err(anyhow!("Error starting the plugin!")),
     }
 }

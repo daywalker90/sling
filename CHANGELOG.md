@@ -1,5 +1,10 @@
 # Changelog
 
+## [4.2.1] - 2026-03-29
+
+### Changed
+- updated `cln-rpc`, `cln-plugin` and `bitcoin` dependencies
+
 ## [4.2.0] - 2026-02-16
 
 ### Fixed

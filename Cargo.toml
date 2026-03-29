@@ -1,7 +1,7 @@
 [package]
 name = "sling"
-version = "4.2.0"
-edition = "2021"
+version = "4.2.1"
+edition = "2024"
 rust-version = "1.85.0"
 
 [dependencies]
@@ -13,11 +13,11 @@ serde_json = "1.0"
 
 tokio = { version = "1", features = ["fs", "sync", "rt-multi-thread"] }
 
-cln-rpc = "0.5"
-# cln-rpc = { path="../lightning/cln-rpc/", version = "^0.4" }
+cln-rpc = "0.6"
+# cln-rpc = { path = "../lightning/cln-rpc/", version = "^0.6" }
 #cln-rpc = { git = "https://github.com/ElementsProject/lightning.git", tag = "v25.05" }
-cln-plugin = "0.5"
-# cln-plugin = { path="../lightning/plugins/", version = "^0.4" }
+cln-plugin = "0.6"
+# cln-plugin = { path = "../lightning/plugins/", version = "^0.6" }
 #cln-plugin = { git = "https://github.com/ElementsProject/lightning.git", tag = "v25.05" }
 
 tabled = "0.20"
@@ -28,7 +28,7 @@ chrono = { version = "0.4", default-features = false, features = [
 ] }
 rand = "0.10"
 parking_lot = "0.12"
-bitcoin = "0.31"
+bitcoin = "0.32"
 
 log-panics = "2"
 

@@ -284,11 +284,11 @@ pub async fn waitsendpay_response(
                                 ws_error.amount_msat.unwrap().msat() / 2
                             );
                             rpc.call_typed(&AskreneinformchannelRequest {
-                                amount_msat: Some(Amount::from_msat(
+                                amount_msat: Amount::from_msat(
                                     ws_error.amount_msat.unwrap().msat() / 2,
-                                )),
-                                inform: Some(AskreneinformchannelInform::CONSTRAINED),
-                                short_channel_id_dir: Some(dir_chan),
+                                ),
+                                inform: AskreneinformchannelInform::CONSTRAINED,
+                                short_channel_id_dir: dir_chan,
                                 layer: lay.clone(),
                             })
                             .await?;
