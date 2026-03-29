@@ -42,7 +42,7 @@ jobs:
             tar -czf "${{ github.event.repository.name }}-${{github.ref_name}}-x86_64-linux-gnu.tar.gz" --transform 's|.*/||' "target/x86_64-unknown-linux-gnu/optimized/${{ github.event.repository.name }}"
 
             ls -alh *.tar.gz
-        
+
         - name: Get versions
           id: versions
           run: |
