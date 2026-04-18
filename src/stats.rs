@@ -315,6 +315,7 @@ fn success_stats(
     let mut channel_partner_counts = HashMap::new();
     let mut hop_counts = HashMap::new();
     let mut most_recent_completed_at = 0;
+    let mut last_channel_partner = None;
     let mut total_transactions = 0;
     let mut weighted_fee_ppm = 0;
     let mut fee_ppms = Vec::new();
@@ -331,8 +332,10 @@ fn success_stats(
                 .entry(success_reb.channel_partner)
                 .or_insert(0) += success_reb.amount_msat / 1_000;
             *hop_counts.entry(success_reb.hops).or_insert(0) += 1;
-            most_recent_completed_at =
-                std::cmp::max(most_recent_completed_at, success_reb.completed_at);
+            if success_reb.completed_at >= most_recent_completed_at {
+                most_recent_completed_at = success_reb.completed_at;
+                last_channel_partner = Some(success_reb.channel_partner);
+            }
             fee_ppms.push(success_reb.fee_ppm);
             total_transactions += 1_u64;
         }
@@ -388,6 +391,7 @@ fn success_stats(
             .collect::<Vec<_>>(),
         most_common_hop_count,
         time_of_last_rebalance,
+        last_channel_partner,
         total_rebalances: total_transactions,
         total_spent_sats: (weighted_fee_ppm as f64 * 0.000_001 * total_amount_msat as f64) as u64
             / 1000,
