@@ -849,6 +849,8 @@ pub struct SuccessReb {
     pub amount_msat: u64,
     pub fee_ppm: u32,
     pub channel_partner: ShortChannelId,
+    #[serde(default)]
+    pub other_channel_partner: Option<ShortChannelId>,
     pub hops: u8,
     pub completed_at: u64,
 }

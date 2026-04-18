@@ -71,6 +71,10 @@ pub async fn waitsendpay_response(
                     SatDirection::Pull => route.first().unwrap().channel,
                     SatDirection::Push => route.last().unwrap().channel,
                 },
+                other_channel_partner: Some(match job.sat_direction {
+                    SatDirection::Pull => route.last().unwrap().channel,
+                    SatDirection::Push => route.first().unwrap().channel,
+                }),
                 hops: u8::try_from(route.len() - 1)?,
                 completed_at: o.completed_at.unwrap() as u64,
             }

@@ -332,6 +332,8 @@ pub struct SuccessesInTimeWindow {
     #[tabled(display("tabled::derive::display::option", "N/A"))]
     pub most_common_hop_count: Option<u8>,
     pub time_of_last_rebalance: String,
+    #[tabled(display("tabled::derive::display::option", "N/A"))]
+    pub last_other_channel_partner: Option<ShortChannelId>,
     pub total_rebalances: u64,
     pub total_spent_sats: u64,
 }
