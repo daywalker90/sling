@@ -9,7 +9,7 @@ import pytest
 from pyln.client import RpcError, NodeVersion
 from pyln.testing.fixtures import *  # noqa: F403
 from pyln.testing.utils import only_one, sync_blockheight, wait_for
-from util import get_plugin  # noqa: F401
+from util import experimental_splicing_check, get_plugin  # noqa: F401
 
 LOGGER = logging.getLogger(__name__)
 
@@ -1345,23 +1345,27 @@ def test_gossip(node_factory, bitcoind, get_plugin):  # noqa: F811
 
 
 def test_splice(node_factory, bitcoind, get_plugin):  # noqa: F811
+    opts = [
+        {
+            "plugin": get_plugin,
+            "log-level": "info",
+            "log-level": "debug:plugin-sling",  # noqa: F601
+        },
+        {
+            "log-level": "info",
+        },
+        {},
+    ]
+
+    if experimental_splicing_check:
+        opts[0]["experimental-splicing"] = None
+        opts[1]["experimental-splicing"] = None
+
     l1, l2, l3 = node_factory.line_graph(
         3,
         fundamount=1_000_000,
         wait_for_announce=True,
-        opts=[
-            {
-                "experimental-splicing": None,
-                "plugin": get_plugin,
-                "log-level": "info",
-                "log-level": "debug:plugin-sling",  # noqa: F601
-            },
-            {
-                "experimental-splicing": None,
-                "log-level": "info",
-            },
-            {},
-        ],
+        opts=opts,
     )
     l3.fundwallet(10_000_000)
 

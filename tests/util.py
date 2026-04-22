@@ -40,3 +40,12 @@ def pay_with_thread(rpc, bolt11):
     except Exception as e:
         LOGGER.debug(f"holdinvoice: Error paying payment hash:{e}")
         pass
+
+
+def experimental_splicing_check(node_factory):
+    l1 = node_factory.get_node()
+    version = l1.rpc.getinfo()["version"]
+    if version.startswith("v25"):
+        return True
+    else:
+        return False
