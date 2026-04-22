@@ -9,3 +9,29 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "UTC"
+
+    groups:
+      all-dependencies:
+        patterns:
+          - "*"
+
+    cooldown:
+      default-days: 7
+
+    open-pull-requests-limit: 1
+
+    versioning-strategy: "auto"
+
+    labels:
+      - "dependencies"
+      - "rust"
+
+    allow:
+      - dependency-type: "all"
