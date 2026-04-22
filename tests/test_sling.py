@@ -1357,7 +1357,7 @@ def test_splice(node_factory, bitcoind, get_plugin):  # noqa: F811
         {},
     ]
 
-    if experimental_splicing_check:
+    if experimental_splicing_check(node_factory):
         opts[0]["experimental-splicing"] = None
         opts[1]["experimental-splicing"] = None
 
