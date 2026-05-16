@@ -9,7 +9,7 @@ import pytest
 from pyln.client import RpcError, NodeVersion
 from pyln.testing.fixtures import *  # noqa: F403
 from pyln.testing.utils import only_one, sync_blockheight, wait_for
-from util import experimental_splicing_check, get_plugin  # noqa: F401
+from util import get_plugin  # noqa: F401
 
 LOGGER = logging.getLogger(__name__)
 
@@ -1247,7 +1247,7 @@ def test_gossip(node_factory, bitcoind, get_plugin):  # noqa: F811
     l1.daemon.wait_for_log(r"8 public channels")
 
     l1.rpc.close(scid_l1_l4_1)
-    bitcoind.generate_block(18, wait_for_mempool=1)
+    bitcoind.generate_block(78, wait_for_mempool=1)
     sync_blockheight(bitcoind, nodes)
 
     l1.daemon.wait_for_log(r"4 private channels")
@@ -1286,7 +1286,7 @@ def test_gossip(node_factory, bitcoind, get_plugin):  # noqa: F811
     l1.daemon.wait_for_log(r"6 public channels")
 
     l2.rpc.close(scid_l2_l4)
-    bitcoind.generate_block(12, wait_for_mempool=1)
+    bitcoind.generate_block(73, wait_for_mempool=1)
     sync_blockheight(bitcoind, nodes)
 
     l1.daemon.wait_for_log(r"4 private channels")
@@ -1308,7 +1308,7 @@ def test_gossip(node_factory, bitcoind, get_plugin):  # noqa: F811
     assert not l1.daemon.is_in_log(f"sling: {scid_l2_l4}")
 
     l2.rpc.close(scid_l1_l2)
-    bitcoind.generate_block(12, wait_for_mempool=1)
+    bitcoind.generate_block(73, wait_for_mempool=1)
     sync_blockheight(bitcoind, nodes)
 
     l1.daemon.wait_for_log(r"2 private channels")
@@ -1344,7 +1344,13 @@ def test_gossip(node_factory, bitcoind, get_plugin):  # noqa: F811
         l1.daemon.wait_for_log(r"6 public channels")
 
 
-def test_splice(node_factory, bitcoind, get_plugin):  # noqa: F811
+def test_splice(
+    node_factory,
+    bitcoind,
+    get_plugin,  # noqa: F811
+    experimental_splicing_required,
+    v2606,
+):
     opts = [
         {
             "plugin": get_plugin,
@@ -1357,7 +1363,7 @@ def test_splice(node_factory, bitcoind, get_plugin):  # noqa: F811
         {},
     ]
 
-    if experimental_splicing_check(node_factory):
+    if experimental_splicing_required:
         opts[0]["experimental-splicing"] = None
         opts[1]["experimental-splicing"] = None
 
@@ -1376,7 +1382,10 @@ def test_splice(node_factory, bitcoind, get_plugin):  # noqa: F811
         l1.rpc.listpeerchannels(l2.info["id"])["channels"][0]["short_channel_id"]
     )
 
-    funds_result = l1.rpc.fundpsbt("105790sat", 0, 0, excess_as_change=True)
+    if v2606:
+        funds_result = l1.rpc.fundpsbt("111722sat", 0, 0, excess_as_change=True)
+    else:
+        funds_result = l1.rpc.fundpsbt("105790sat", 0, 0, excess_as_change=True)
 
     result = l1.rpc.splice_init(chan_id, 100_000, funds_result["psbt"])
     result = l1.rpc.splice_update(chan_id, result["psbt"])
