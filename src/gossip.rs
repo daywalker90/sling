@@ -4,14 +4,15 @@ use std::{
     time::Instant,
 };
 
-use anyhow::{anyhow, Error};
+use anyhow::{Error, anyhow};
 use bitcoin::consensus::encode::serialize_hex;
 use cln_plugin::Plugin;
 use cln_rpc::primitives::{Amount, ShortChannelId, ShortChannelIdDir};
+use serde::Serialize;
 
 use crate::{
-    model::{IncompleteChannels, LnGraph, PubKeyBytes, ShortChannelIdDirStateBuilder},
     PluginState,
+    model::{IncompleteChannels, LnGraph, PubKeyBytes, ShortChannelIdDirStateBuilder},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -26,6 +27,13 @@ pub struct ChannelUpdate {
     pub delay: u32,
     pub htlc_minimum_msat: Amount,
     pub htlc_maximum_msat: Amount,
+    pub inbound_fee: Option<InboundFee>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct InboundFee {
+    pub base_msat: i32,
+    pub proportional_millionths: i32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -202,8 +210,20 @@ fn read_gossip_file_chunk(
             256 => {
                 // public channel_announcement
                 let (scid, chan_ann) =
-                    parse_channel_announcement(&gossip_file[*offset..*offset + len - 2])?;
-                *offset += len - 2;
+                    match parse_channel_announcement(&gossip_file[*offset..*offset + len - 2]) {
+                        Ok(x) => {
+                            *offset += len - 2;
+                            x
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "read_gossip_file_chunk: Error parsing \
+                            channel_announcement: {e}"
+                            );
+                            *offset += len - 2;
+                            continue;
+                        }
+                    };
 
                 let dir_chan_0 = ShortChannelIdDir {
                     short_channel_id: scid,
@@ -244,8 +264,22 @@ fn read_gossip_file_chunk(
                 //   - `amount_sat`: u64
                 //   - `len`: u16
                 //   - `msg_type + announcement`: u16 + u8[len-2]
-                let (scid, chan_ann) =
-                    parse_channel_announcement(&gossip_file[*offset + 12..*offset + 10 + len])?;
+                let (scid, chan_ann) = match parse_channel_announcement(
+                    &gossip_file[*offset + 12..*offset + 10 + len],
+                ) {
+                    Ok(x) => {
+                        *offset += len + 10;
+                        x
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "read_gossip_file_chunk: Error parsing \
+                            channel_announcement: {e}"
+                        );
+                        *offset += len + 10;
+                        continue;
+                    }
+                };
 
                 let dir_chan_0 = ShortChannelIdDir {
                     short_channel_id: scid,
@@ -280,13 +314,25 @@ fn read_gossip_file_chunk(
                         incomplete_channels.insert(dir_chan_1, chan_state);
                     }
                 }
-                *offset += len + 10;
             }
             258 => {
                 // channel_update
                 let (scid_dir, chan_up) =
-                    parse_channel_update(&gossip_file[*offset..*offset + len - 2])?;
-                *offset += len - 2;
+                    match parse_channel_update(&gossip_file[*offset..*offset + len - 2]) {
+                        Ok(x) => {
+                            *offset += len - 2;
+                            x
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "read_gossip_file_chunk: Error parsing \
+                            channel_update: {e}"
+                            );
+                            *offset += len - 2;
+                            continue;
+                        }
+                    };
+
                 let mut updated = false;
 
                 if let Some(chan_state) = graph.get_state_mut_direction(scid_dir) {
@@ -310,8 +356,20 @@ fn read_gossip_file_chunk(
                 //   - `len`: u16
                 //   - `msg_type + update`: u16 + u8[len-2]
                 let (scid_dir, chan_up) =
-                    parse_channel_update(&gossip_file[*offset + 4..*offset + 2 + len])?;
-                *offset += len + 2;
+                    match parse_channel_update(&gossip_file[*offset + 4..*offset + 2 + len]) {
+                        Ok(x) => {
+                            *offset += len + 2;
+                            x
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "read_gossip_file_chunk: Error parsing \
+                            channel_update: {e}"
+                            );
+                            *offset += len + 2;
+                            continue;
+                        }
+                    };
                 let mut updated = false;
                 if let Some(chan_state) = graph.get_state_mut_direction(scid_dir) {
                     chan_state.update(chan_up);
@@ -336,8 +394,18 @@ fn read_gossip_file_chunk(
             4103 => {
                 // 4103 gossip_store_delete_chan
                 //  - `scid`: u64
-                let scid = extract_scid(&gossip_file[*offset..*offset + 8])?;
-                *offset += 8;
+                let scid = match extract_scid(&gossip_file[*offset..*offset + 8]) {
+                    Ok(x) => {
+                        *offset += 8;
+                        x
+                    }
+                    Err(e) => {
+                        log::warn!("read_gossip_file_chunk: Error parsing scid: {e}");
+                        *offset += 8;
+                        continue;
+                    }
+                };
+
                 let dir_chan_0 = ShortChannelIdDir {
                     short_channel_id: scid,
                     direction: 0,
@@ -355,9 +423,20 @@ fn read_gossip_file_chunk(
                 // 4106 WIRE_GOSSIP_STORE_CHAN_DYING
                 //  - `scid`: u64
                 //  - `blockheight`: u32
-                let scid = extract_scid(&gossip_file[*offset..*offset + 8])?;
-                // skip blockheight aswell (+4)
-                *offset += 12;
+                let scid = match extract_scid(&gossip_file[*offset..*offset + 8]) {
+                    Ok(x) => {
+                        // skip blockheight aswell (+4)
+                        *offset += 12;
+                        x
+                    }
+                    Err(e) => {
+                        log::warn!("read_gossip_file_chunk: Error parsing scid: {e}");
+                        // skip blockheight aswell (+4)
+                        *offset += 12;
+                        continue;
+                    }
+                };
+
                 let dir_chan_0 = ShortChannelIdDir {
                     short_channel_id: scid,
                     direction: 0,
@@ -439,38 +518,52 @@ fn extract_scid(gossip_file: &[u8]) -> Result<ShortChannelId, anyhow::Error> {
     Ok(ShortChannelId::from(scid))
 }
 
-fn parse_channel_update(inpu: &[u8]) -> Result<(ShortChannelIdDir, ChannelUpdate), Error> {
-    let scid = extract_scid(&inpu[96..104])?;
-    Ok((
-        ShortChannelIdDir {
-            short_channel_id: scid,
-            direction: u32::from(inpu[109] & 0b0000_0001),
-        },
-        ChannelUpdate {
-            // message_flags: inpu[108],
-            // channel_flags: inpu[109],
-            active: ((inpu[109] & 0b0000_0010) >> 1) != 1,
-            last_update: u32::from_be_bytes(inpu[104..108].try_into()?),
-            base_fee_millisatoshi: u32::from_be_bytes(inpu[120..124].try_into()?),
-            fee_per_millionth: u32::from_be_bytes(inpu[124..128].try_into()?),
-            delay: (u32::from(inpu[110]) << 8) | u32::from(inpu[111]),
-            htlc_minimum_msat: Amount::from_msat(u64::from_be_bytes(inpu[112..120].try_into()?)),
-            htlc_maximum_msat: Amount::from_msat(u64::from_be_bytes(inpu[128..136].try_into()?)),
-        },
-    ))
+fn parse_channel_update(input: &[u8]) -> Result<(ShortChannelIdDir, ChannelUpdate), Error> {
+    if input.len() < 136 {
+        return Err(anyhow!("channel_update < 136 bytes"));
+    }
+
+    let scid = extract_scid(&input[96..104])?;
+
+    let scid_dir = ShortChannelIdDir {
+        short_channel_id: scid,
+        direction: u32::from(input[109] & 0b0000_0001),
+    };
+
+    let mut inbound_fee = None;
+
+    if input.len() > 136 {
+        parse_channel_update_tlvs(&input[136..], &mut inbound_fee)?;
+    }
+
+    let update = ChannelUpdate {
+        active: ((input[109] & 0b0000_0010) >> 1) != 1,
+        last_update: u32::from_be_bytes(input[104..108].try_into()?),
+        base_fee_millisatoshi: u32::from_be_bytes(input[120..124].try_into()?),
+        fee_per_millionth: u32::from_be_bytes(input[124..128].try_into()?),
+        delay: u32::from(u16::from_be_bytes(input[110..112].try_into()?)),
+        htlc_minimum_msat: Amount::from_msat(u64::from_be_bytes(input[112..120].try_into()?)),
+        htlc_maximum_msat: Amount::from_msat(u64::from_be_bytes(input[128..136].try_into()?)),
+
+        inbound_fee,
+    };
+
+    Ok((scid_dir, update))
 }
 
-fn parse_channel_announcement(inpu: &[u8]) -> Result<(ShortChannelId, ChannelAnnouncement), Error> {
+fn parse_channel_announcement(
+    input: &[u8],
+) -> Result<(ShortChannelId, ChannelAnnouncement), Error> {
     // 0..64 sig1
     // 64..128 sig2
     // 128..192 bc_sig_1
     // 192..256 bc_sig_2
-    let len = u16::from_be_bytes(inpu[256..258].try_into()?) as usize;
+    let len = u16::from_be_bytes(input[256..258].try_into()?) as usize;
     // 258..258+len features
     // 258+len..290+len chain_hash
-    let scid = extract_scid(&inpu[(290 + len)..(298 + len)])?;
-    let source = PubKeyBytes::new(inpu[(298 + len)..(331 + len)].try_into()?);
-    let destination = PubKeyBytes::new(inpu[(331 + len)..(364 + len)].try_into()?);
+    let scid = extract_scid(&input[(290 + len)..(298 + len)])?;
+    let source = PubKeyBytes::new(input[(298 + len)..(331 + len)].try_into()?);
+    let destination = PubKeyBytes::new(input[(331 + len)..(364 + len)].try_into()?);
     Ok((
         scid,
         ChannelAnnouncement {
@@ -479,4 +572,282 @@ fn parse_channel_announcement(inpu: &[u8]) -> Result<(ShortChannelId, ChannelAnn
             // features: String::new(),
         },
     ))
+}
+
+fn parse_channel_update_tlvs(
+    mut data: &[u8],
+    inbound_fee: &mut Option<InboundFee>,
+) -> Result<(), Error> {
+    let mut last_type = 0;
+
+    while !data.is_empty() {
+        let (ty, rest) = read_bigsize(data)?;
+        let (len, rest) = read_bigsize(rest)?;
+
+        if ty <= last_type {
+            return Err(anyhow!("TLV types not strictly increasing"));
+        }
+
+        last_type = ty;
+
+        if rest.len() < len as usize {
+            return Err(anyhow!("TLV truncated"));
+        }
+
+        let (value, remaining) = rest.split_at(len as usize);
+
+        match ty {
+            55555 => {
+                if value.len() != 8 {
+                    return Err(anyhow!("inbound_fee TLV length != 8"));
+                }
+
+                *inbound_fee = Some(InboundFee {
+                    base_msat: i32::from_be_bytes(value[0..4].try_into()?),
+                    proportional_millionths: i32::from_be_bytes(value[4..8].try_into()?),
+                });
+                log::debug!("Got inbound_fee: {inbound_fee:?}");
+            }
+
+            even if even % 2 == 0 => {
+                return Err(anyhow!("unknown even TLV type {}", even));
+            }
+
+            _ => {
+                // ignore unknown odd TLVs
+            }
+        }
+
+        data = remaining;
+    }
+
+    Ok(())
+}
+
+fn read_bigsize(data: &[u8]) -> Result<(u64, &[u8]), Error> {
+    if data.is_empty() {
+        return Err(anyhow!("read_bigsize: data is empty"));
+    }
+
+    match data[0] {
+        n @ 0x00..=0xfc => Ok((u64::from(n), &data[1..])),
+
+        0xfd => {
+            if data.len() < 3 {
+                return Err(anyhow!("read_bigsize: data is <3"));
+            }
+
+            let v = u64::from(u16::from_be_bytes([data[1], data[2]]));
+
+            if v < 0xfd {
+                return Err(anyhow!("read_bigsize: v < 0xfd"));
+            }
+
+            Ok((v, &data[3..]))
+        }
+
+        0xfe => {
+            if data.len() < 5 {
+                return Err(anyhow!("read_bigsize: data is <5"));
+            }
+
+            let v = u64::from(u32::from_be_bytes(data[1..5].try_into().unwrap()));
+
+            if v < 0x10000 {
+                return Err(anyhow!("read_bigsize: v < 0x10000"));
+            }
+
+            Ok((v, &data[5..]))
+        }
+
+        0xff => {
+            if data.len() < 9 {
+                return Err(anyhow!("read_bigsize: data is <9"));
+            }
+
+            let v = u64::from_be_bytes(data[1..9].try_into().unwrap());
+
+            if v < 0x1_0000_0000 {
+                return Err(anyhow!("read_bigsize: v < 0x1_0000_0000"));
+            }
+
+            Ok((v, &data[9..]))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TestCase {
+        name: &'static str,
+        value: u64,
+        bytes: &'static str,
+        exp_error: Option<&'static str>,
+    }
+
+    fn hex_decode(s: &str) -> Vec<u8> {
+        if s.is_empty() {
+            return Vec::new();
+        }
+
+        assert!(s.len() % 2 == 0);
+
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn test_read_bigsize_vectors() {
+        let tests = vec![
+            TestCase {
+                name: "zero",
+                value: 0,
+                bytes: "00",
+                exp_error: None,
+            },
+            TestCase {
+                name: "one byte high",
+                value: 252,
+                bytes: "fc",
+                exp_error: None,
+            },
+            TestCase {
+                name: "two byte low",
+                value: 253,
+                bytes: "fd00fd",
+                exp_error: None,
+            },
+            TestCase {
+                name: "two byte high",
+                value: 65535,
+                bytes: "fdffff",
+                exp_error: None,
+            },
+            TestCase {
+                name: "four byte low",
+                value: 65536,
+                bytes: "fe00010000",
+                exp_error: None,
+            },
+            TestCase {
+                name: "four byte high",
+                value: 4294967295,
+                bytes: "feffffffff",
+                exp_error: None,
+            },
+            TestCase {
+                name: "eight byte low",
+                value: 4294967296,
+                bytes: "ff0000000100000000",
+                exp_error: None,
+            },
+            TestCase {
+                name: "eight byte high",
+                value: u64::MAX,
+                bytes: "ffffffffffffffffff",
+                exp_error: None,
+            },
+            TestCase {
+                name: "two byte not canonical",
+                value: 0,
+                bytes: "fd00fc",
+                exp_error: Some("read_bigsize: v < 0xfd"),
+            },
+            TestCase {
+                name: "four byte not canonical",
+                value: 0,
+                bytes: "fe0000ffff",
+                exp_error: Some("read_bigsize: v < 0x10000"),
+            },
+            TestCase {
+                name: "eight byte not canonical",
+                value: 0,
+                bytes: "ff00000000ffffffff",
+                exp_error: Some("read_bigsize: v < 0x1_0000_0000"),
+            },
+            TestCase {
+                name: "two byte short read",
+                value: 0,
+                bytes: "fd00",
+                exp_error: Some("read_bigsize: data is <3"),
+            },
+            TestCase {
+                name: "four byte short read",
+                value: 0,
+                bytes: "feffff",
+                exp_error: Some("read_bigsize: data is <5"),
+            },
+            TestCase {
+                name: "eight byte short read",
+                value: 0,
+                bytes: "ffffffffff",
+                exp_error: Some("read_bigsize: data is <9"),
+            },
+            TestCase {
+                name: "one byte no read",
+                value: 0,
+                bytes: "",
+                exp_error: Some("read_bigsize: data is empty"),
+            },
+            TestCase {
+                name: "two byte no read",
+                value: 0,
+                bytes: "fd",
+                exp_error: Some("read_bigsize: data is <3"),
+            },
+            TestCase {
+                name: "four byte no read",
+                value: 0,
+                bytes: "fe",
+                exp_error: Some("read_bigsize: data is <5"),
+            },
+            TestCase {
+                name: "eight byte no read",
+                value: 0,
+                bytes: "ff",
+                exp_error: Some("read_bigsize: data is <9"),
+            },
+        ];
+
+        for tc in tests {
+            let bytes = hex_decode(tc.bytes);
+
+            match read_bigsize(&bytes) {
+                Ok((value, remaining)) => {
+                    if let Some(err) = tc.exp_error {
+                        panic!(
+                            "[{}] expected error '{}', got value {}",
+                            tc.name, err, value
+                        );
+                    }
+
+                    assert_eq!(value, tc.value, "[{}] decoded value mismatch", tc.name);
+
+                    assert!(
+                        remaining.is_empty(),
+                        "[{}] remaining bytes not empty",
+                        tc.name
+                    );
+                }
+
+                Err(e) => {
+                    let err = e.to_string();
+
+                    match tc.exp_error {
+                        Some(expected) => {
+                            assert_eq!(err, expected, "[{}] error mismatch", tc.name);
+                        }
+
+                        None => {
+                            panic!("[{}] unexpected error: {}", tc.name, err);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

@@ -1,15 +1,15 @@
 use std::{
     cmp::Ordering,
     collections::{
-        hash_map::Entry::{Occupied, Vacant},
         BinaryHeap,
         HashMap,
         HashSet,
+        hash_map::Entry::{Occupied, Vacant},
     },
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use anyhow::{anyhow, Error};
+use anyhow::{Error, anyhow};
 use cln_rpc::{
     model::requests::SendpayRoute,
     primitives::{Amount, ShortChannelId, ShortChannelIdDir},
@@ -18,7 +18,7 @@ use sling::{Job, SatDirection};
 
 use crate::{
     model::{Config, DijkstraNode, JobMessage, Liquidity, LnGraph, PubKeyBytes, Task},
-    util::{edge_cost, fee_total_msat_precise},
+    util::{edge_cost, fee_total_msat_precise, fee_total_msat_precise_i32},
 };
 pub fn dijkstra(
     config: &Config,
@@ -92,7 +92,15 @@ pub fn dijkstra(
             let next_score = if edge.source == config.pubkey_bytes {
                 0
             } else {
-                node_score + edge_cost(edge, job.amount_msat)
+                let inbound_fee = lngraph
+                    .get_state_direction(ShortChannelIdDir {
+                        short_channel_id: scid.short_channel_id,
+                        direction: 1 - scid.direction, // opposite direction
+                    })
+                    .and_then(|s| s.inbound_fee);
+
+                let out_cost = edge_cost(edge, inbound_fee, job.amount_msat);
+                node_score + out_cost
             };
             // debug!(
             //     "{}: next: {} node_score:{} next_score:{}",
@@ -115,7 +123,7 @@ pub fn dijkstra(
                             channel_state: *edge,
                             destination: edge.destination,
                             hops: current_hops + 1,
-                            short_channel_id: scid.short_channel_id,
+                            short_channel_id_dir: *scid,
                         };
                         *ent.into_mut() = dijkstra_node;
                         visit_next.push(MinScored(next_score, &edge.destination));
@@ -134,7 +142,7 @@ pub fn dijkstra(
                         channel_state: *edge,
                         destination: edge.destination,
                         hops: current_hops + 1,
-                        short_channel_id: scid.short_channel_id,
+                        short_channel_id_dir: *scid,
                     };
                     ent.insert(dijkstra_node);
                     visit_next.push(MinScored(next_score, &edge.destination));
@@ -146,6 +154,7 @@ pub fn dijkstra(
     }
 
     Ok(build_route(
+        lngraph,
         &predecessor,
         &goal,
         &scores,
@@ -157,6 +166,7 @@ pub fn dijkstra(
 }
 
 fn build_route(
+    lngraph: &LnGraph,
     predecessor: &HashMap<&PubKeyBytes, &PubKeyBytes>,
     goal: &PubKeyBytes,
     scores: &HashMap<&PubKeyBytes, DijkstraNode>,
@@ -201,47 +211,84 @@ fn build_route(
         dijkstra_path.first().unwrap()
     };
 
-    for hop in &dijkstra_path {
+    for (i, hop) in dijkstra_path.iter().enumerate() {
         if hop == first_hop {
             let routing_scid = if let Some(rscid) = first_hop.channel_state.scid_alias {
                 rscid
             } else {
-                first_hop.short_channel_id
+                first_hop.short_channel_id_dir.short_channel_id
             };
             sendpay_route.insert(
                 0,
                 SendpayRoute {
-                    amount_msat: Amount::from_msat(job.amount_msat),
-                    id: dijkstra_path.first().unwrap().destination.to_pubkey(),
-                    delay,
-                    channel: routing_scid,
+                    amount_msat: Some(Amount::from_msat(job.amount_msat)),
+                    id: Some(dijkstra_path.first().unwrap().destination.to_pubkey()),
+                    delay: Some(delay),
+                    channel: Some(routing_scid),
+                    amount_out_msat: None,
+                    cltv_out: None,
+                    node_id_out: None,
+                    short_channel_id_dir: None,
                 },
             );
         } else {
             let routing_scid = if let Some(rscid) = hop.channel_state.scid_alias {
                 rscid
             } else {
-                hop.short_channel_id
+                hop.short_channel_id_dir.short_channel_id
             };
             sendpay_route.insert(
                 0,
                 SendpayRoute {
-                    amount_msat,
-                    id: hop.destination.to_pubkey(),
-                    delay,
-                    channel: routing_scid,
+                    amount_msat: Some(amount_msat),
+                    id: Some(hop.destination.to_pubkey()),
+                    delay: Some(delay),
+                    channel: Some(routing_scid),
+                    amount_out_msat: None,
+                    cltv_out: None,
+                    node_id_out: None,
+                    short_channel_id_dir: None,
                 },
             );
         }
-        prev_amount_msat = sendpay_route.first().unwrap().amount_msat;
-        amount_msat = Amount::from_msat(
-            Amount::msat(&prev_amount_msat)
-                + fee_total_msat_precise(
-                    hop.channel_state.fee_per_millionth,
-                    hop.channel_state.base_fee_millisatoshi,
-                    Amount::msat(&prev_amount_msat),
+        prev_amount_msat = sendpay_route.first().unwrap().amount_msat.unwrap();
+
+        let outbound_fee_msat = fee_total_msat_precise(
+            hop.channel_state.fee_per_millionth,
+            hop.channel_state.base_fee_millisatoshi,
+            Amount::msat(&prev_amount_msat),
+        )
+        .ceil() as u64;
+
+        let net_received_amt = Amount::msat(&prev_amount_msat) + outbound_fee_msat;
+
+        // inbound fee is charged by the *next* hop's node, so look ahead
+        let inbound_fee_msat = if let Some(next_hop) = dijkstra_path.get(i + 1) {
+            let opposite_dir = ShortChannelIdDir {
+                short_channel_id: next_hop.short_channel_id_dir.short_channel_id,
+                direction: 1 - next_hop.short_channel_id_dir.direction,
+            };
+            if let Some(inf) = lngraph
+                .get_state_direction(opposite_dir)
+                .and_then(|s| s.inbound_fee)
+            {
+                let i = fee_total_msat_precise_i32(
+                    inf.proportional_millionths,
+                    inf.base_msat,
+                    net_received_amt,
                 )
-                .ceil() as u64,
+                .ceil() as i64;
+                log::debug!("{opposite_dir}: inbound fee: {i} msat");
+                i
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+
+        amount_msat = Amount::from_msat(
+            (net_received_amt as i64 + inbound_fee_msat).max(prev_amount_msat.msat() as i64) as u64,
         );
         delay += hop.channel_state.delay;
     }
@@ -268,7 +315,10 @@ fn construct_first_node(
                 score: 0,
                 channel_state: *slingchan_inc,
                 destination,
-                short_channel_id: task.get_chan_id(),
+                short_channel_id_dir: ShortChannelIdDir {
+                    short_channel_id: task.get_chan_id(),
+                    direction: 0,
+                },
                 hops: 0,
             })
         }
@@ -284,7 +334,10 @@ fn construct_first_node(
                 score: 0,
                 channel_state: *slingchan_out,
                 destination,
-                short_channel_id: task.get_chan_id(),
+                short_channel_id_dir: ShortChannelIdDir {
+                    short_channel_id: task.get_chan_id(),
+                    direction: 0,
+                },
                 hops: 0,
             })
         }

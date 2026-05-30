@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{anyhow, Error};
+use anyhow::{Error, anyhow};
 use cln_plugin::Plugin;
 use cln_rpc::{
     model::{requests::SendpayRoute, responses::ListpeerchannelsChannels},
@@ -195,8 +195,8 @@ pub async fn sling(
         };
 
         let fee_ppm_effective = feeppm_effective_from_amts(
-            Amount::msat(&route.first().unwrap().amount_msat),
-            Amount::msat(&route.last().unwrap().amount_msat),
+            Amount::msat(&route.first().unwrap().amount_msat.unwrap()),
+            Amount::msat(&route.last().unwrap().amount_msat.unwrap()),
         );
         log::info!(
             "{}: Found {}ppm route with {} hops. Total: {}ms",
@@ -212,10 +212,12 @@ pub async fn sling(
                 log::debug!(
                     "{}: route: {} {:4} {:17} {}",
                     task_ident,
-                    Amount::msat(&r.amount_msat),
-                    r.delay,
-                    r.channel.to_string(),
-                    alias_map.get(&r.id).unwrap_or(&r.id.to_string()),
+                    Amount::msat(&r.amount_msat.unwrap()),
+                    r.delay.unwrap(),
+                    r.channel.unwrap().to_string(),
+                    alias_map
+                        .get(&r.id.unwrap())
+                        .unwrap_or(&r.id.unwrap().to_string()),
                 );
             }
         }
@@ -234,7 +236,7 @@ pub async fn sling(
 
         let (preimage, payment_hash) = get_preimage_paymend_hash_pair();
 
-        let last_scid = route.last().unwrap().channel;
+        let last_scid = route.last().unwrap().channel.unwrap();
 
         let last_hop = if let Some(l_hop) = peer_channels.get(&last_scid) {
             Some(l_hop)
@@ -416,26 +418,26 @@ fn next_route(
     if let Some(prev_route) = success_route {
         if match job.sat_direction {
             SatDirection::Pull => actual_candidates.iter().any(|c| {
-                c == &prev_route.first().unwrap().channel
+                c == &prev_route.first().unwrap().channel.unwrap()
                     || peer_channels
                         .get(c)
                         .and_then(|chan| {
                             chan.alias.as_ref().and_then(|alias| {
                                 alias.local.map(|local_alias| {
-                                    local_alias == prev_route.first().unwrap().channel
+                                    local_alias == prev_route.first().unwrap().channel.unwrap()
                                 })
                             })
                         })
                         .unwrap_or(false)
             }),
             SatDirection::Push => actual_candidates.iter().any(|c| {
-                c == &prev_route.last().unwrap().channel
+                c == &prev_route.last().unwrap().channel.unwrap()
                     || peer_channels
                         .get(c)
                         .and_then(|chan| {
                             chan.alias.as_ref().and_then(|alias| {
                                 alias.remote.map(|remote_alias| {
-                                    remote_alias == prev_route.last().unwrap().channel
+                                    remote_alias == prev_route.last().unwrap().channel.unwrap()
                                 })
                             })
                         })
@@ -469,8 +471,8 @@ fn next_route(
         )?;
     }
     if route.len() >= 3 {
-        let route_claim_chan = route[route.len() / 2].channel;
-        let route_claim_peer = route[(route.len() / 2) - 1].id;
+        let route_claim_chan = route[route.len() / 2].channel.unwrap();
+        let route_claim_peer = route[(route.len() / 2) - 1].id.unwrap();
         if let Ok((dir_chan, dir_chan_state)) = graph.get_state_no_direction(
             &PubKeyBytes::from_pubkey(&route_claim_peer),
             route_claim_chan,

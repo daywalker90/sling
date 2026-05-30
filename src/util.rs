@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{anyhow, Error};
+use anyhow::{Error, anyhow};
 use bitcoin::{
     consensus::encode::serialize_hex,
     secp256k1::hashes::{Hash, HashEngine},
@@ -16,7 +16,7 @@ use cln_rpc::{
     model::responses::ListpeerchannelsChannels,
     primitives::{Amount, ChannelState, PublicKey, Sha256, ShortChannelId, ShortChannelIdDir},
 };
-use rand::{rng, Rng};
+use rand::{Rng, rng};
 use sling::{Job, SatDirection};
 use tokio::{
     fs::{self, File},
@@ -24,18 +24,19 @@ use tokio::{
 };
 
 use crate::{
+    ShortChannelIdDirState,
+    gossip::InboundFee,
     model::{
-        JobMessage,
-        Liquidity,
-        PluginState,
-        TaskIdentifier,
         EXCEPTS_CHANS_FILE_NAME,
         EXCEPTS_PEERS_FILE_NAME,
         JOB_FILE_NAME,
+        JobMessage,
         LIQUIDITY_FILE_NAME,
+        Liquidity,
         PLUGIN_NAME,
+        PluginState,
+        TaskIdentifier,
     },
-    ShortChannelIdDirState,
 };
 
 pub async fn read_jobs(
@@ -231,8 +232,25 @@ pub fn get_total_htlc_count(channel: &ListpeerchannelsChannels) -> u64 {
     }
 }
 
-pub fn edge_cost(edge: &ShortChannelIdDirState, amount: u64) -> u64 {
-    feeppm_effective(edge.fee_per_millionth, edge.base_fee_millisatoshi, amount) + 2
+pub fn edge_cost(
+    edge: &ShortChannelIdDirState,
+    inbound_fee: Option<InboundFee>,
+    amount: u64,
+) -> u64 {
+    let outbound_fee =
+        fee_total_msat_precise(edge.fee_per_millionth, edge.base_fee_millisatoshi, amount).ceil()
+            as u64;
+
+    let net_received_amt = amount + outbound_fee;
+
+    let inbound_fee_msat = inbound_fee.map_or(0, |inf| {
+        fee_total_msat_precise_i32(inf.proportional_millionths, inf.base_msat, net_received_amt)
+            .ceil() as i64
+    });
+
+    let total_fee = i64::max(outbound_fee as i64 + inbound_fee_msat, 0) as u64;
+
+    (total_fee as f64 / amount as f64 * 1_000_000.0).ceil() as u64
 }
 
 pub fn feeppm_effective(feeppm: u32, basefee_msat: u32, amount_msat: u64) -> u64 {
@@ -241,6 +259,9 @@ pub fn feeppm_effective(feeppm: u32, basefee_msat: u32, amount_msat: u64) -> u64
 }
 
 pub fn fee_total_msat_precise(feeppm: u32, basefee_msat: u32, amount_msat: u64) -> f64 {
+    f64::from(basefee_msat) + (f64::from(feeppm) / 1_000_000.0 * amount_msat as f64)
+}
+pub fn fee_total_msat_precise_i32(feeppm: i32, basefee_msat: i32, amount_msat: u64) -> f64 {
     f64::from(basefee_msat) + (f64::from(feeppm) / 1_000_000.0 * amount_msat as f64)
 }
 

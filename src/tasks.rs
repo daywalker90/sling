@@ -6,12 +6,12 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use anyhow::{anyhow, Error};
+use anyhow::{Error, anyhow};
 use cln_plugin::Plugin;
 use cln_rpc::{
+    ClnRpc,
     model::requests::{AskrenelistlayersRequest, ListnodesRequest, ListpeerchannelsRequest},
     primitives::{Amount, ChannelState, ShortChannelIdDir},
-    ClnRpc,
 };
 use tokio::{
     fs::OpenOptions,
@@ -22,15 +22,15 @@ use tokio::{
 use crate::{
     gossip::read_gossip_store,
     model::{
+        FAILURES_SUFFIX,
         FailureReb,
         Liquidity,
+        PLUGIN_NAME,
         PluginState,
         PubKeyBytes,
+        SUCCESSES_SUFFIX,
         ShortChannelIdDirState,
         SuccessReb,
-        FAILURES_SUFFIX,
-        PLUGIN_NAME,
-        SUCCESSES_SUFFIX,
     },
 };
 
@@ -214,6 +214,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                             active: chan.peer_connected,
                             last_update: u32::try_from(timestamp)?,
                             private: true,
+                            inbound_fee: None,
                         },
                     );
 
@@ -237,6 +238,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                                 active: chan.peer_connected,
                                 last_update: u32::try_from(timestamp)?,
                                 private: true,
+                                inbound_fee: None,
                             },
                         );
                     } else {

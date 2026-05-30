@@ -7,7 +7,7 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{anyhow, Error};
+use anyhow::{Error, anyhow};
 use cln_rpc::{
     model::responses::{GetinfoResponse, ListpeerchannelsChannels},
     primitives::{Amount, PublicKey, ShortChannelId, ShortChannelIdDir},
@@ -18,7 +18,7 @@ use sling::Job;
 use tabled::Tabled;
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 
-use crate::gossip::{ChannelAnnouncement, ChannelUpdate};
+use crate::gossip::{ChannelAnnouncement, ChannelUpdate, InboundFee};
 
 pub const SUCCESSES_SUFFIX: &str = "successes.json";
 pub const FAILURES_SUFFIX: &str = "failures.json";
@@ -420,7 +420,7 @@ impl Display for JobMessage {
 pub struct DijkstraNode {
     pub score: u64,
     pub channel_state: ShortChannelIdDirState,
-    pub short_channel_id: ShortChannelId,
+    pub short_channel_id_dir: ShortChannelIdDir,
     pub destination: PubKeyBytes,
     pub hops: u8,
 }
@@ -430,7 +430,7 @@ impl PartialEq for DijkstraNode {
             && self.hops == other.hops
             && self.channel_state.source == other.channel_state.source
             && self.channel_state.destination == other.channel_state.destination
-            && self.short_channel_id == other.short_channel_id
+            && self.short_channel_id_dir == other.short_channel_id_dir
             && self.destination == other.destination
     }
 }
@@ -455,6 +455,7 @@ pub struct ShortChannelIdDirState {
     pub delay: u32,
     pub last_update: u32,
     pub private: bool,
+    pub inbound_fee: Option<InboundFee>,
 }
 impl ShortChannelIdDirState {
     pub fn update(&mut self, channel_update: ChannelUpdate) {
@@ -465,6 +466,7 @@ impl ShortChannelIdDirState {
         self.delay = channel_update.delay;
         self.htlc_minimum_msat = channel_update.htlc_minimum_msat;
         self.htlc_maximum_msat = channel_update.htlc_maximum_msat;
+        self.inbound_fee = channel_update.inbound_fee;
     }
 }
 
@@ -481,6 +483,7 @@ pub struct ShortChannelIdDirStateBuilder {
     delay: Option<u32>,
     last_update: Option<u32>,
     private: Option<bool>,
+    inbound_fee: Option<InboundFee>,
 }
 pub enum BuildResult {
     Success(ShortChannelIdDirState),
@@ -500,6 +503,7 @@ impl ShortChannelIdDirStateBuilder {
             delay: None,
             last_update: None,
             private: Some(false),
+            inbound_fee: None,
         }
     }
     pub fn has_announcement(&self) -> bool {
@@ -525,6 +529,7 @@ impl ShortChannelIdDirStateBuilder {
         self.delay = Some(update.delay);
         self.htlc_minimum_msat = Some(update.htlc_minimum_msat);
         self.htlc_maximum_msat = Some(update.htlc_maximum_msat);
+        self.inbound_fee = update.inbound_fee;
         self
     }
 
@@ -558,6 +563,7 @@ impl ShortChannelIdDirStateBuilder {
         };
         let private = self.private.unwrap_or(false);
         let scid_alias = self.scid_alias;
+        let inbound_fee = self.inbound_fee;
 
         BuildResult::Success(ShortChannelIdDirState {
             source,
@@ -571,6 +577,7 @@ impl ShortChannelIdDirStateBuilder {
             delay,
             last_update,
             private,
+            inbound_fee,
         })
     }
 }
@@ -767,6 +774,13 @@ impl LnGraph {
         scid_dir: ShortChannelIdDir,
     ) -> Option<&mut ShortChannelIdDirState> {
         self.channels.get_mut(&scid_dir)
+    }
+
+    pub fn get_state_direction(
+        &self,
+        scid_dir: ShortChannelIdDir,
+    ) -> Option<&ShortChannelIdDirState> {
+        self.channels.get(&scid_dir)
     }
 
     pub fn get_state_no_direction(

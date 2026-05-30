@@ -3,6 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::anyhow;
 use cln_plugin::{Error, Plugin};
 use cln_rpc::{
+    ClnRpc,
     model::{
         requests::{
             AskreneinformchannelInform,
@@ -14,21 +15,20 @@ use cln_rpc::{
         responses::SendpayResponse,
     },
     primitives::{Amount, Sha256, ShortChannelIdDir},
-    ClnRpc,
 };
 use sling::{Job, SatDirection};
 use tokio::time::Instant;
 
 use crate::{
+    Config,
+    FailureReb,
+    PluginState,
+    SuccessReb,
     errors::WaitsendpayErrorData,
     feeppm_effective_from_amts,
     model::{Liquidity, PayResolveInfo, TaskIdentifier},
     my_sleep,
     util::get_direction_from_nodes,
-    Config,
-    FailureReb,
-    PluginState,
-    SuccessReb,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -68,8 +68,8 @@ pub async fn waitsendpay_response(
                     Amount::msat(&o.amount_msat.unwrap()),
                 ),
                 channel_partner: match job.sat_direction {
-                    SatDirection::Pull => route.first().unwrap().channel,
-                    SatDirection::Push => route.last().unwrap().channel,
+                    SatDirection::Pull => route.first().unwrap().channel.unwrap(),
+                    SatDirection::Push => route.last().unwrap().channel.unwrap(),
                 },
                 hops: u8::try_from(route.len() - 1)?,
                 completed_at: o.completed_at.unwrap() as u64,
@@ -104,8 +104,8 @@ pub async fn waitsendpay_response(
                 );
 
                 for (i, hop) in route[..route.len() - 1].iter().enumerate() {
-                    let source = route[i].id;
-                    let destination = route[i + 1].id;
+                    let source = route[i].id.unwrap();
+                    let destination = route[i + 1].id.unwrap();
                     let direction = get_direction_from_nodes(source, destination)?;
                     if source == config.pubkey {
                         continue;
@@ -114,7 +114,7 @@ pub async fn waitsendpay_response(
                         continue;
                     }
                     let dir_chan = ShortChannelIdDir {
-                        short_channel_id: hop.channel,
+                        short_channel_id: hop.channel.unwrap(),
                         direction,
                     };
 
@@ -143,8 +143,8 @@ pub async fn waitsendpay_response(
                     failure_reason: "WAITSENDPAY_TIMEOUT".to_string(),
                     failure_node: config.pubkey,
                     channel_partner: match job.sat_direction {
-                        SatDirection::Pull => route.first().unwrap().channel,
-                        SatDirection::Push => route.last().unwrap().channel,
+                        SatDirection::Pull => route.first().unwrap().channel.unwrap(),
+                        SatDirection::Push => route.last().unwrap().channel.unwrap(),
                     },
                     hops: u8::try_from(route.len() - 1)?,
                     created_at: SystemTime::now()
@@ -187,8 +187,8 @@ pub async fn waitsendpay_response(
                     failure_reason: ws_error.failcodename.clone(),
                     failure_node: ws_error.erring_node,
                     channel_partner: match job.sat_direction {
-                        SatDirection::Pull => route.first().unwrap().channel,
-                        SatDirection::Push => route.last().unwrap().channel,
+                        SatDirection::Pull => route.first().unwrap().channel.unwrap(),
+                        SatDirection::Push => route.last().unwrap().channel.unwrap(),
                     },
                     hops: u8::try_from(route.len() - 1)?,
                     created_at: ws_error.created_at,
@@ -204,14 +204,14 @@ pub async fn waitsendpay_response(
                     ));
                 }
 
-                if ws_error.erring_channel == route.last().unwrap().channel {
+                if ws_error.erring_channel == route.last().unwrap().channel.unwrap() {
                     log::warn!(
                         "{}: Last peer has a problem or just updated their fees? {}",
                         task_ident,
                         ws_error.failcodename
                     );
 
-                    let last_hop = route.get(route.len() - 2).unwrap().id;
+                    let last_hop = route.get(route.len() - 2).unwrap().id.unwrap();
                     if err.message.contains("Too many HTLCs") {
                         my_sleep(plugin.clone(), 3, task_ident).await;
                     } else if plugin.state().bad_fwd_nodes.lock().contains_key(&last_hop) {
@@ -221,20 +221,20 @@ pub async fn waitsendpay_response(
                         );
                     } else {
                         plugin.state().temp_chan_bans.lock().insert(
-                            route.last().unwrap().channel,
+                            route.last().unwrap().channel.unwrap(),
                             SystemTime::now()
                                 .duration_since(UNIX_EPOCH)
                                 .unwrap()
                                 .as_secs(),
                         );
                     }
-                } else if ws_error.erring_channel == route.first().unwrap().channel {
+                } else if ws_error.erring_channel == route.first().unwrap().channel.unwrap() {
                     log::warn!("{}: First peer has a problem {}", task_ident, err.message);
                     if err.message.contains("Too many HTLCs") {
                         my_sleep(plugin.clone(), 3, task_ident).await;
                     } else {
                         plugin.state().temp_chan_bans.lock().insert(
-                            route.first().unwrap().channel,
+                            route.first().unwrap().channel.unwrap(),
                             SystemTime::now()
                                 .duration_since(UNIX_EPOCH)
                                 .unwrap()
@@ -348,7 +348,7 @@ pub async fn sendpay_response(
             if e.to_string().contains("First peer not ready") {
                 log::info!("{task_ident}: First peer not ready, banning it for now...");
                 plugin.state().temp_chan_bans.lock().insert(
-                    route.first().unwrap().channel,
+                    route.first().unwrap().channel.unwrap(),
                     SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .unwrap()
@@ -358,10 +358,10 @@ pub async fn sendpay_response(
                 FailureReb {
                     amount_msat: job.amount_msat,
                     failure_reason: "FIRST_PEER_NOT_READY".to_string(),
-                    failure_node: route.first().unwrap().id,
+                    failure_node: route.first().unwrap().id.unwrap(),
                     channel_partner: match job.sat_direction {
-                        SatDirection::Pull => route.first().unwrap().channel,
-                        SatDirection::Push => route.last().unwrap().channel,
+                        SatDirection::Pull => route.first().unwrap().channel.unwrap(),
+                        SatDirection::Push => route.last().unwrap().channel.unwrap(),
                     },
                     hops: u8::try_from(route.len() - 1)?,
                     created_at: SystemTime::now()

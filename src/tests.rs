@@ -5,8 +5,8 @@ use std::{
     path::{Path, PathBuf},
     str::FromStr,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
     thread::{self, sleep},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -21,7 +21,7 @@ use sling::Job;
 use crate::{
     dijkstra::dijkstra,
     gossip::read_gossip_file,
-    model::{Config, IncompleteChannels, JobMessage, LnGraph, Task, PLUGIN_NAME},
+    model::{Config, IncompleteChannels, JobMessage, LnGraph, PLUGIN_NAME, Task},
     util::feeppm_effective,
 };
 
@@ -421,11 +421,11 @@ fn test_dijkstra_speed() {
         // println!("----------------------------------");
         if let Some(hop) = route.first() {
             excepts.push(ShortChannelIdDir {
-                short_channel_id: hop.channel,
+                short_channel_id: hop.channel.unwrap(),
                 direction: 0,
             });
             excepts.push(ShortChannelIdDir {
-                short_channel_id: hop.channel,
+                short_channel_id: hop.channel.unwrap(),
                 direction: 1,
             });
         }
