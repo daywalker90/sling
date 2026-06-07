@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.3.0] - 2026-06-07
+
+### Added
+- read blip 18 inbound fees from the gossip file and make use of them as much as possible
+
+### Changed
+- updated `cln-rpc` and `cln-plugin` to v0.7
+
 ## [4.2.1] - 2026-03-29
 
 ### Changed

@@ -1,6 +1,6 @@
 [package]
 name = "sling"
-version = "4.2.1"
+version = "4.3.0"
 edition = "2024"
 rust-version = "1.85.0"
 
@@ -20,7 +20,7 @@ cln-plugin = "0.7"
 # cln-plugin = { path = "../lightning/plugins/", version = "^0.6" }
 #cln-plugin = { git = "https://github.com/ElementsProject/lightning.git", tag = "v25.05" }
 
-tabled = "0.20"
+tabled = "0.21"
 num-format = "0.4"
 chrono = { version = "0.4", default-features = false, features = [
     "std",
