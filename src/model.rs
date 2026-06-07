@@ -652,7 +652,6 @@ impl IncompleteChannels {
                 match state.build() {
                     BuildResult::Success(state) => {
                         graph.insert(*updated_chan, state);
-                        self.incomplete_channels.remove(updated_chan);
                         count_built += 1;
                     }
                     BuildResult::Failure(builder) => {
@@ -697,6 +696,13 @@ impl LnGraph {
 
     pub fn private_channel_count(&self) -> usize {
         self.channels.iter().filter(|(_, v)| v.private).count()
+    }
+
+    pub fn inbound_fee_channel_count(&self) -> usize {
+        self.channels
+            .iter()
+            .filter(|(_, v)| v.inbound_fee.is_some())
+            .count()
     }
 
     pub fn retain<F>(&mut self, predicate: F)

@@ -265,6 +265,10 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
                     lngraph.private_channel_count(),
                     now.elapsed().as_millis()
                 );
+                log::debug!(
+                    "channels with inbound fees: {}",
+                    lngraph.inbound_fee_channel_count()
+                );
             }
             log::debug!("Refreshed graph in {}ms!", now.elapsed().as_millis());
         }

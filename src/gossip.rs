@@ -157,13 +157,13 @@ pub fn read_gossip_file(
     *is_start_up = false;
 
     log::trace!(
-        "read_gossip_file: post_processing_time: {}ms",
-        post_now.elapsed().as_millis()
-    );
-    log::trace!(
         "read_gossip_file: found {} actual channels and {} incomplete channels",
         graph.public_channel_count(),
         incomplete_channels.len()
+    );
+    log::trace!(
+        "read_gossip_file: post_processing_time: {}ms",
+        post_now.elapsed().as_millis()
     );
     Ok(next_store)
 }
@@ -602,11 +602,15 @@ fn parse_channel_update_tlvs(
                     return Err(anyhow!("inbound_fee TLV length != 8"));
                 }
 
-                *inbound_fee = Some(InboundFee {
-                    base_msat: i32::from_be_bytes(value[0..4].try_into()?),
-                    proportional_millionths: i32::from_be_bytes(value[4..8].try_into()?),
-                });
-                log::debug!("Got inbound_fee: {inbound_fee:?}");
+                let base_msat = i32::from_be_bytes(value[0..4].try_into()?);
+                let proportional_millionths = i32::from_be_bytes(value[4..8].try_into()?);
+
+                if base_msat != 0 || proportional_millionths != 0 {
+                    *inbound_fee = Some(InboundFee {
+                        base_msat,
+                        proportional_millionths,
+                    });
+                }
             }
 
             even if even % 2 == 0 => {

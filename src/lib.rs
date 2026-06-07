@@ -3,7 +3,7 @@ use std::{
     str::FromStr,
 };
 
-use anyhow::{anyhow, Error};
+use anyhow::{Error, anyhow};
 use cln_rpc::{
     model::responses::ListpeerchannelsChannels,
     primitives::{Amount, PublicKey, ShortChannelId},

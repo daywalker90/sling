@@ -250,7 +250,9 @@ pub fn edge_cost(
 
     let total_fee = i64::max(outbound_fee as i64 + inbound_fee_msat, 0) as u64;
 
-    (total_fee as f64 / amount as f64 * 1_000_000.0).ceil() as u64
+    (total_fee as f64 / amount as f64 * 1_000_000.0)
+        .ceil()
+        .max(2.0) as u64
 }
 
 pub fn feeppm_effective(feeppm: u32, basefee_msat: u32, amount_msat: u64) -> u64 {

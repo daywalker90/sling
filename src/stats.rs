@@ -6,7 +6,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use anyhow::{anyhow, Error};
+use anyhow::{Error, anyhow};
 use chrono::{Local, TimeZone};
 use cln_plugin::Plugin;
 use cln_rpc::{
@@ -24,19 +24,19 @@ use sling::{
     SuccessesInTimeWindow,
 };
 use tabled::{
-    settings::{Panel, Rotate},
     Table,
+    settings::{Panel, Rotate},
 };
 
 use crate::{
     model::{
         FailureReb,
         JobMessage,
+        NO_ALIAS_SET,
+        PLUGIN_NAME,
         PluginState,
         StatSummary,
         SuccessReb,
-        NO_ALIAS_SET,
-        PLUGIN_NAME,
     },
     util::{get_all_normal_channels_from_listpeerchannels, read_jobs},
 };
@@ -71,7 +71,7 @@ pub async fn slingstats(
                     _ => {
                         return Err(anyhow!(
                             "invalid `json` flag, not a bool. Use `true` or `false`"
-                        ))
+                        ));
                     }
                 };
                 (Some(scid), json_flag)
@@ -89,7 +89,7 @@ pub async fn slingstats(
                 _ => {
                     return Err(anyhow!(
                         "invalid `json` flag, not a bool. Use `true` or `false`"
-                    ))
+                    ));
                 }
             };
             (scid, json_summary)
@@ -97,7 +97,7 @@ pub async fn slingstats(
         e => {
             return Err(anyhow!(
                 "sling-stats: invalid arguments, expected array or object, got: {e}"
-            ))
+            ));
         }
     };
 
