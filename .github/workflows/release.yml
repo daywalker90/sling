@@ -25,12 +25,6 @@ jobs:
             sudo apt update
             sudo apt install -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
 
-        - name: Install Protoc
-          uses: arduino/setup-protoc@v3
-          with:
-            repo-token: ${{ secrets.GITHUB_TOKEN }}
-            version: "21.12"
-
         - name: Build Linux binaries (release)
           run: |
             cargo build --profile optimized --locked --target x86_64-unknown-linux-gnu
@@ -69,12 +63,6 @@ jobs:
           uses: dtolnay/rust-toolchain@stable
           with:
             targets: x86_64-apple-darwin, aarch64-apple-darwin
-
-        - name: Install Protoc
-          uses: arduino/setup-protoc@v3
-          with:
-            repo-token: ${{ secrets.GITHUB_TOKEN }}
-            version: "21.12"
 
         - name: Build macOS universal (release)
           id: build

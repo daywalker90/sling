@@ -17,6 +17,12 @@ on:
           tagged-release:
             required: true
             type: boolean
+          python-version-1:
+            required: true
+            type: string
+          python-version-2:
+            required: true
+            type: string
 
 jobs:
   build:
@@ -27,7 +33,7 @@ jobs:
             bitcoind-version: ["31.0"]
             experimental: [1]
             deprecated: [0]
-            python-version: ["3.10", "3.14"]
+            python-version: [ "${{ inputs.python-version-1 }}", "${{ inputs.python-version-2 }}"]
             os: ["ubuntu-latest"]
 
     runs-on: ${{ matrix.os }}
@@ -119,21 +125,21 @@ jobs:
         key: ${{ steps.cache-cln.outputs.cache-primary-key }}
 
     - name: Set up Rust
-      if:  ${{ inputs.tagged-release == false}}
+      if:  ${{ inputs.tagged-release == false }}
       uses: dtolnay/rust-toolchain@stable
 
     - name: Install cargo-binstall
-      if: ${{ inputs.tagged-release == false}}
+      if: ${{ inputs.tagged-release == false }}
       uses: taiki-e/install-action@cargo-binstall
 
     - name: Install cargo-msrv
-      if: ${{ inputs.tagged-release == false}}
+      if: ${{ inputs.tagged-release == false }}
       env:
         GITHUB_TOKEN: ${{ github.token }}
       run: cargo binstall --no-confirm cargo-msrv
 
     - name: Verify MSRV
-      if: ${{ inputs.tagged-release == false}}
+      if: ${{ inputs.tagged-release == false }}
       run: cargo msrv verify
 
     - name: Get plugin binary

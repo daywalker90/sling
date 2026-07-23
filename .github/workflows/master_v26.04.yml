@@ -22,3 +22,5 @@ jobs:
             cln-version: "v26.04"
             pyln-version: "26.4"
             tagged-release: false
+            python-version-1: "3.10"
+            python-version-2: "3.12"
