@@ -66,7 +66,7 @@ jobs:
 
     - name: Restore CLN cache
       id: cache-cln
-      uses: actions/cache/restore@v5
+      uses: actions/cache/restore@v6
       with:
         path: |
           /usr/local/bin/lightning*
@@ -75,7 +75,7 @@ jobs:
 
     - name: Restore bitcoind cache
       id: cache-bitcoind
-      uses: actions/cache/restore@v5
+      uses: actions/cache/restore@v6
       with:
         path: /usr/local/bin/bitcoin*
         key: cache-bitcoind-${{ matrix.bitcoind-version }}-${{ steps.exact_versions.outputs.os_version }}
@@ -99,7 +99,7 @@ jobs:
     - name: Save bitcoind cache
       id: save-cache-bitcoind
       if : ${{ success() && steps.cache-bitcoind.outputs.cache-hit != 'true'}}
-      uses: actions/cache/save@v5
+      uses: actions/cache/save@v6
       with:
         path: /usr/local/bin/bitcoin*
         key: ${{ steps.cache-bitcoind.outputs.cache-primary-key }}
@@ -117,7 +117,7 @@ jobs:
     - name: Save CLN cache
       id: save-cache-cln
       if : ${{ success() && steps.cache-cln.outputs.cache-hit != 'true' }}
-      uses: actions/cache/save@v5
+      uses: actions/cache/save@v6
       with:
         path: |
           /usr/local/bin/lightning*
