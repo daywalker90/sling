@@ -1,13 +1,11 @@
-#!/usr/bin/python
-
 import logging
 import math
 import os
 import time
 
 import pytest
-from pyln.client import RpcError, NodeVersion
-from pyln.testing.fixtures import *  # noqa: F403
+from pyln.client import NodeVersion, RpcError
+from pyln.testing.fixtures import *
 from pyln.testing.utils import only_one, sync_blockheight, wait_for
 from util import get_plugin  # noqa: F401
 
@@ -94,7 +92,7 @@ def test_option_errors(node_factory, get_plugin):  # noqa: F811
         }
     )
     assert node.daemon.is_in_log(
-        (r"sling-refresh-aliasmap-interval must be " r"greater than or equal to 1")
+        r"sling-refresh-aliasmap-interval must be " r"greater than or equal to 1"
     )
 
     node = node_factory.get_node(
@@ -104,7 +102,7 @@ def test_option_errors(node_factory, get_plugin):  # noqa: F811
         }
     )
     assert node.daemon.is_in_log(
-        (r"sling-reset-liquidity-interval must be " r"greater than or equal to 1")
+        r"sling-reset-liquidity-interval must be " r"greater than or equal to 1"
     )
 
     node = node_factory.get_node(
@@ -124,7 +122,7 @@ def test_option_errors(node_factory, get_plugin):  # noqa: F811
         }
     )
     assert node.daemon.is_in_log(
-        (r"sling-depleteuptoamount needs to be a positive number")
+        r"sling-depleteuptoamount needs to be a positive number"
     )
 
     node = node_factory.get_node(
@@ -134,7 +132,7 @@ def test_option_errors(node_factory, get_plugin):  # noqa: F811
         }
     )
     assert node.daemon.is_in_log(
-        (r"sling-maxhops must be " r"greater than or equal to 2")
+        r"sling-maxhops must be " r"greater than or equal to 2"
     )
 
     node = node_factory.get_node(
@@ -154,7 +152,7 @@ def test_option_errors(node_factory, get_plugin):  # noqa: F811
         }
     )
     assert node.daemon.is_in_log(
-        (r"sling-paralleljobs must be " r"greater than or equal to 1")
+        r"sling-paralleljobs must be " r"greater than or equal to 1"
     )
 
     node = node_factory.get_node(
@@ -182,10 +180,8 @@ def test_option_errors(node_factory, get_plugin):  # noqa: F811
         }
     )
     assert node.daemon.is_in_log(
-        (
-            r"sling-stats-delete-failures-age needs to be "
-            r"a positive number and smaller than"
-        )
+        r"sling-stats-delete-failures-age needs to be "
+        r"a positive number and smaller than"
     )
 
     node = node_factory.get_node(
@@ -195,10 +191,8 @@ def test_option_errors(node_factory, get_plugin):  # noqa: F811
         }
     )
     assert node.daemon.is_in_log(
-        (
-            r"sling-stats-delete-successes-age needs to be "
-            r"a positive number and smaller than"
-        )
+        r"sling-stats-delete-successes-age needs to be "
+        r"a positive number and smaller than"
     )
 
     node = node_factory.get_node(
@@ -715,7 +709,7 @@ def test_private_channel_receive(node_factory, bitcoind, get_plugin):  # noqa: F
     l1.daemon.wait_for_log(r"already balanced. Taking a break")
     assert l1.daemon.is_in_log(r"Rebalance SUCCESSFULL after")
 
-    assert not l2.daemon.is_in_log(r"No peer channel with scid={}".format(scid_priv))
+    assert not l2.daemon.is_in_log(rf"No peer channel with scid={scid_priv}")
 
 
 def test_private_channel_node(node_factory, bitcoind, get_plugin):  # noqa: F811
@@ -783,7 +777,7 @@ def test_private_channel_node(node_factory, bitcoind, get_plugin):  # noqa: F811
     l1.daemon.wait_for_log(r"Rebalance SUCCESSFULL after")
     l1.daemon.wait_for_log(r"already balanced. Taking a break")
 
-    assert not l3.daemon.is_in_log(r"No peer channel with scid={}".format(scid_l2))
+    assert not l3.daemon.is_in_log(rf"No peer channel with scid={scid_l2}")
 
     l1.rpc.call("sling-deletejob", [scid_l3])
 
@@ -804,7 +798,7 @@ def test_private_channel_node(node_factory, bitcoind, get_plugin):  # noqa: F811
     l1.daemon.wait_for_log(r"Rebalance SUCCESSFULL after")
     l1.daemon.wait_for_log(r"already balanced. Taking a break")
 
-    assert not l3.daemon.is_in_log(r"No peer channel with scid={}".format(scid_l2))
+    assert not l3.daemon.is_in_log(rf"No peer channel with scid={scid_l2}")
 
 
 def test_private_candidates(node_factory, bitcoind, get_plugin):  # noqa: F811
@@ -1586,7 +1580,6 @@ def test_once_close(node_factory, bitcoind, get_plugin):  # noqa: F811
 
     peer_channels = l1.rpc.listpeerchannels()["channels"]
     ch1_scid = peer_channels[0]["short_channel_id"]
-    ch2_scid = peer_channels[1]["short_channel_id"]
 
     l1.rpc.call(
         "sling-once",

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use anyhow::{Error, anyhow};
 use chrono::Utc;
 use cln_plugin::{
@@ -5,7 +7,11 @@ use cln_plugin::{
     Plugin,
     options::{self},
 };
-use cln_rpc::{ClnRpc, RpcError, model::requests::ListconfigsRequest};
+use cln_rpc::{
+    ClnRpc,
+    RpcError,
+    model::requests::{HelpRequest, ListconfigsRequest},
+};
 use serde_json::json;
 
 use crate::{
@@ -24,9 +30,10 @@ use crate::{
     OPT_STATS_DELETE_SUCCESSES_AGE,
     OPT_STATS_DELETE_SUCCESSES_SIZE,
     OPT_TIMEOUTPAY,
-    at_or_above_version,
     model::PluginState,
 };
+
+const ASKRENE_LISTLAYERS: &str = "askrene-listlayers";
 
 pub async fn setconfig_callback(
     plugin: Plugin<PluginState>,
@@ -171,9 +178,29 @@ pub async fn get_startup_options(
         .ok_or_else(|| anyhow!("no cltv-delta config found?! This should not happen!"))?
         .value_int;
 
+    let help = rpc.call_typed(&HelpRequest { command: None }).await?;
+
+    let mut available_commands = HashSet::new();
+    for command in &help.help {
+        if let Some(method) = command.command.split_ascii_whitespace().next() {
+            available_commands.insert(method);
+        }
+    }
+
+    log::debug!(
+        "Found {} commands available: {}",
+        available_commands.len(),
+        available_commands
+            .iter()
+            .copied()
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+
     let mut config = state.config.lock();
     config.cltv_delta = cltv_delta;
-    config.at_or_above_24_11 = at_or_above_version(&config.version, "24.11")?;
+    config.has_askrene_ll = available_commands.contains(ASKRENE_LISTLAYERS);
+    log::debug!("has_askrene_ll: {}", config.has_askrene_ll);
 
     if let Some(rai) = plugin.option_str(OPT_REFRESH_ALIASMAP_INTERVAL)? {
         check_option(&mut config, OPT_REFRESH_ALIASMAP_INTERVAL, &rai)?;
