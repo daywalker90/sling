@@ -1,5 +1,15 @@
 # Changelog
 
+## [4.3.1] - 2026-08-10
+
+### Fixed
+- use the `help` rpc instead of the (custom) version string to determine available rpc methods
+- validate amount in htlc hook handler
+- don't shutdown plugin if a background task fails, increase log level instead and restart task
+- fixed `sling-deletejob` with `delete_stats=true` not deleting stat files
+- fixed typo in `sling-go` output json: `tasks_failed_start:` -> `tasks_failed_start`
+- a few theoretical integer overflows
+
 ## [4.3.0] - 2026-06-07
 
 ### Added

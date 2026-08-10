@@ -673,7 +673,7 @@ fn build_candidatelist(
             continue;
         }
 
-        if scid.block() > blockheight - config.candidates_min_age {
+        if scid.block() > blockheight.saturating_sub(config.candidates_min_age) {
             log::trace!(
                 "{}: build_candidatelist: {} is too new: {}>{}",
                 task_ident,

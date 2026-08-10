@@ -204,7 +204,7 @@ pub async fn slinggo(
         }
     }
 
-    Ok(json!({ "tasks_started": spawn_count , "tasks_failed_start:": spawn_fail_count }))
+    Ok(json!({ "tasks_started": spawn_count , "tasks_failed_start": spawn_fail_count }))
 }
 
 pub async fn slingstop(
@@ -620,11 +620,6 @@ pub async fn slingdeletejob(
     match input {
         inp if inp.eq("all") => {
             stop_job(plugin.clone(), serde_json::Value::Array(vec![])).await?;
-            let jobfile = sling_dir.join(JOB_FILE_NAME);
-            fs::remove_file(jobfile).await?;
-            plugin.state().tasks.lock().remove_all_tasks();
-            log::info!("Deleted all jobs");
-            let except_chans = read_except_chans(&sling_dir).await?;
             if delete_stats {
                 let jobs = read_jobs(&sling_dir, plugin.clone()).await?;
                 for scid in jobs.keys() {
@@ -636,6 +631,13 @@ pub async fn slingdeletejob(
                             .await;
                 }
             }
+
+            let jobfile = sling_dir.join(JOB_FILE_NAME);
+            fs::remove_file(jobfile).await?;
+            plugin.state().tasks.lock().remove_all_tasks();
+            log::info!("Deleted all jobs");
+            let except_chans = read_except_chans(&sling_dir).await?;
+
             let mut config = plugin.state().config.lock();
             config.exclude_chans_pull.clone_from(&except_chans);
             config.exclude_chans_push = except_chans;
