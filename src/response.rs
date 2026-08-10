@@ -275,7 +275,7 @@ pub async fn waitsendpay_response(
                             );
                         }
                     }
-                    if config.at_or_above_24_11 {
+                    if config.has_askrene_ll {
                         for lay in &config.inform_layers {
                             log::debug!(
                                 "{}: Informing layer `{}` about scid_dir:{} amt:{}msat constraint",

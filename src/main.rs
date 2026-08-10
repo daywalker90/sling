@@ -50,7 +50,6 @@ use serde_json::json;
 use stats::slingstats;
 use tokio::{self, time};
 use util::{
-    at_or_above_version,
     feeppm_effective_from_amts,
     get_normal_channel_from_listpeerchannels,
     get_remote_feeppm_effective,
@@ -398,7 +397,7 @@ async fn main() -> Result<(), anyhow::Error> {
                     time::sleep(Duration::from_secs(5)).await;
                 }
             });
-            if plugin.state().config.lock().at_or_above_24_11 {
+            if plugin.state().config.lock().has_askrene_ll {
                 let askrene_clone = plugin.clone();
                 tokio::spawn(async move {
                     loop {
