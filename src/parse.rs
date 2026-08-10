@@ -7,6 +7,7 @@ use sling::{Job, SatDirection};
 
 use crate::model::Config;
 
+#[allow(clippy::too_many_lines)]
 pub async fn parse_job(
     args: serde_json::Value,
     config: &Config,
@@ -223,6 +224,7 @@ pub async fn parse_job(
     }
 }
 
+#[allow(clippy::too_many_lines)]
 pub async fn parse_once_job(
     args: serde_json::Value,
     config: &Config,

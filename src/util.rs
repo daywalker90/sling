@@ -338,7 +338,7 @@ pub async fn my_sleep(plugin: Plugin<PluginState>, seconds: u64, task_ident: &Ta
                 }
             } else {
                 break;
-            };
+            }
         }
     }
 }

@@ -41,6 +41,7 @@ use crate::{
     util::{get_all_normal_channels_from_listpeerchannels, read_jobs},
 };
 
+#[allow(clippy::too_many_lines)]
 pub async fn slingstats(
     plugin: Plugin<PluginState>,
     args: serde_json::Value,
@@ -399,6 +400,7 @@ fn success_stats(
     Some(successes_in_time_window)
 }
 
+#[allow(clippy::too_many_lines)]
 fn failure_stats(
     failures: Vec<FailureReb>,
     time_window: u64,

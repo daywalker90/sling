@@ -30,6 +30,7 @@ use crate::{
     wait_for_gossip,
 };
 
+#[allow(clippy::too_many_lines)]
 pub async fn sling(
     job: &Job,
     task_ident: TaskIdentifier,
@@ -275,6 +276,7 @@ pub async fn sling(
             preimage,
             incoming_scid: last_hop.unwrap().short_channel_id.unwrap(),
             incoming_alias: last_hop.unwrap().alias.as_ref().and_then(|a| a.remote),
+            amount_msat: route.last().unwrap().amount_msat.unwrap().msat(),
         };
 
         let send_response = match sendpay_response(
@@ -336,7 +338,7 @@ pub async fn sling(
                 log::warn!("{e}");
                 break 'outer;
             }
-        };
+        }
     }
     plugin
         .state()
@@ -484,13 +486,15 @@ fn next_route(
             } else {
                 task.parallel_ban = None;
             }
-        };
+        }
     } else {
         task.parallel_ban = None;
     }
     Ok(route)
 }
 
+#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 async fn health_check(
     plugin: Plugin<PluginState>,
     config: &Config,
@@ -589,6 +593,7 @@ async fn health_check(
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn build_candidatelist(
     plugin: &Plugin<PluginState>,
     peer_channels: &HashMap<ShortChannelId, ListpeerchannelsChannels>,
@@ -635,7 +640,7 @@ fn build_candidatelist(
                     direction,
                 };
                 if excepts.contains(&scid_dir) {
-                    log::trace!("{task_ident}: build_candidatelist: {scid_dir} is in excepts",);
+                    log::trace!("{task_ident}: build_candidatelist: {scid_dir} is in excepts");
                     continue;
                 }
             }
@@ -645,7 +650,7 @@ fn build_candidatelist(
                     direction: direction ^ 1,
                 };
                 if excepts.contains(&scid_dir) {
-                    log::trace!("{task_ident}: build_candidatelist: {scid_dir} is in excepts",);
+                    log::trace!("{task_ident}: build_candidatelist: {scid_dir} is in excepts");
                     continue;
                 }
                 if bad_fwd_nodes.contains_key(&channel.peer_id) {
