@@ -93,6 +93,7 @@ pub async fn refresh_listpeerchannels(plugin: Plugin<PluginState>) -> Result<(),
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
     let my_pubkey = plugin.state().config.lock().pubkey_bytes;
     let mut is_startup = true;
@@ -319,6 +320,7 @@ pub async fn clear_tempbans(plugin: Plugin<PluginState>) -> Result<(), Error> {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
     let sling_dir = Path::new(&plugin.configuration().lightning_dir).join(PLUGIN_NAME);
     loop {

@@ -102,13 +102,14 @@ const OPT_AUTOGO: DefaultBooleanConfigOption = ConfigOption::new_bool_with_defau
     "Automatically start all jobs on startup. Default is `false`",
 );
 
+#[allow(clippy::too_many_lines)]
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     unsafe {
         std::env::set_var(
             "CLN_PLUGIN_LOG",
             "cln_plugin=info,cln_rpc=info,sling=trace,debug",
-        )
+        );
     };
     log_panics::init();
     let state;

@@ -31,6 +31,7 @@ use crate::{
     util::get_direction_from_nodes,
 };
 
+#[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)]
 pub async fn waitsendpay_response(
     plugin: Plugin<PluginState>,

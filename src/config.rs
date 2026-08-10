@@ -1,23 +1,21 @@
-use anyhow::{anyhow, Error};
+use anyhow::{Error, anyhow};
 use chrono::Utc;
 use cln_plugin::{
-    options::{self},
     ConfiguredPlugin,
     Plugin,
+    options::{self},
 };
-use cln_rpc::{model::requests::ListconfigsRequest, ClnRpc, RpcError};
+use cln_rpc::{ClnRpc, RpcError, model::requests::ListconfigsRequest};
 use serde_json::json;
 
 use crate::{
-    at_or_above_version,
-    model::PluginState,
     Config,
     OPT_CANDIDATES_MIN_AGE,
     OPT_DEPLETEUPTOAMOUNT,
     OPT_DEPLETEUPTOPERCENT,
     OPT_INFORM_LAYERS,
-    OPT_MAXHOPS,
     OPT_MAX_HTLC_COUNT,
+    OPT_MAXHOPS,
     OPT_PARALLELJOBS,
     OPT_REFRESH_ALIASMAP_INTERVAL,
     OPT_RESET_LIQUIDITY_INTERVAL,
@@ -26,6 +24,8 @@ use crate::{
     OPT_STATS_DELETE_SUCCESSES_AGE,
     OPT_STATS_DELETE_SUCCESSES_SIZE,
     OPT_TIMEOUTPAY,
+    at_or_above_version,
+    model::PluginState,
 };
 
 pub async fn setconfig_callback(
@@ -138,6 +138,7 @@ fn is_valid_hour_timestamp(val: u64) -> bool {
     Utc::now().timestamp().unsigned_abs() > val
 }
 
+#[allow(clippy::cast_sign_loss)]
 fn options_value_to_u64(
     name: &str,
     value: i64,
@@ -220,6 +221,7 @@ pub async fn get_startup_options(
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Result<(), Error> {
     match name {
         n if n.eq(OPT_REFRESH_ALIASMAP_INTERVAL) => {
@@ -252,8 +254,8 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
                 }
                 Err(e) => {
                     return Err(anyhow!(
-                    "Error: {e} could not parse a floating point for `{OPT_DEPLETEUPTOPERCENT}`.",
-                ))
+                        "Error: {e} could not parse a floating point for `{OPT_DEPLETEUPTOPERCENT}`.",
+                    ));
                 }
             }
         }

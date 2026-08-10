@@ -69,6 +69,7 @@ pub struct PayResolveInfo {
     pub preimage: String,
     pub incoming_scid: ShortChannelId,
     pub incoming_alias: Option<ShortChannelId>,
+    pub amount_msat: u64,
 }
 
 #[derive(Clone, Debug)]

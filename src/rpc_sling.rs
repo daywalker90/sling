@@ -17,8 +17,15 @@ use sling::Job;
 use tokio::{fs, time};
 
 use crate::{
+    EXCEPTS_CHANS_FILE_NAME,
+    EXCEPTS_PEERS_FILE_NAME,
+    JOB_FILE_NAME,
+    JobMessage,
+    PLUGIN_NAME,
+    PluginState,
+    Task,
     get_normal_channel_from_listpeerchannels,
-    model::{PubKeyBytes, TaskIdentifier, FAILURES_SUFFIX, SUCCESSES_SUFFIX},
+    model::{FAILURES_SUFFIX, PubKeyBytes, SUCCESSES_SUFFIX, TaskIdentifier},
     parse::{parse_job, parse_once_job},
     read_jobs,
     slings::sling,
@@ -26,13 +33,6 @@ use crate::{
     util::{read_except_chans, read_except_peers, write_liquidity},
     write_excepts,
     write_job,
-    JobMessage,
-    PluginState,
-    Task,
-    EXCEPTS_CHANS_FILE_NAME,
-    EXCEPTS_PEERS_FILE_NAME,
-    JOB_FILE_NAME,
-    PLUGIN_NAME,
 };
 
 pub async fn slingjob(
@@ -69,6 +69,7 @@ pub async fn slingjob(
     Ok(json!({"result":"success"}))
 }
 
+#[allow(clippy::too_many_lines)]
 pub async fn slinggo(
     plugin: Plugin<PluginState>,
     args: serde_json::Value,
@@ -93,7 +94,7 @@ pub async fn slinggo(
             Ordering::Greater => {
                 return Err(anyhow!(
                     "Please provide exactly one ShortChannelId or nothing"
-                ))
+                ));
             }
             Ordering::Equal => match a.first().unwrap() {
                 serde_json::Value::String(start_id) => {
@@ -116,7 +117,7 @@ pub async fn slinggo(
         e => {
             return Err(anyhow!(
                 "sling-go: invalid arguments, expected array or object with `scid`, got: {e}"
-            ))
+            ));
         }
     }
 
@@ -195,7 +196,7 @@ pub async fn slinggo(
                                     t.set_active(false);
                                 }
                             }
-                        };
+                        }
                     });
                 }
             }
@@ -226,7 +227,7 @@ async fn stop_job(plugin: Plugin<PluginState>, args: serde_json::Value) -> Resul
             Ordering::Greater => {
                 return Err(anyhow!(
                     "Please provide exactly one ShortChannelId or nothing"
-                ))
+                ));
             }
             Ordering::Equal => match a.first().unwrap() {
                 serde_json::Value::String(stop_id) => {
@@ -246,7 +247,7 @@ async fn stop_job(plugin: Plugin<PluginState>, args: serde_json::Value) -> Resul
         e => {
             return Err(anyhow!(
                 "sling-stop: invalid arguments, expected array or object with `scid`, got: {e}"
-            ))
+            ));
         }
     }
     {
@@ -312,6 +313,7 @@ async fn stop_job(plugin: Plugin<PluginState>, args: serde_json::Value) -> Resul
     Ok(stopped_count)
 }
 
+#[allow(clippy::too_many_lines)]
 pub async fn slingonce(
     plugin: Plugin<PluginState>,
     args: serde_json::Value,
@@ -555,7 +557,7 @@ pub async fn slingjobsettings(
         _ => {
             return Err(anyhow!(
                 "Invalid: Please provide exactly one ShortChannelId or nothing for all"
-            ))
+            ));
         }
     }
 
@@ -611,7 +613,7 @@ pub async fn slingdeletejob(
         e => {
             return Err(anyhow!(
                 "sling-deletejob: invalid arguments, expected array or object with `job`, got {e}"
-            ))
+            ));
         }
     };
 
@@ -663,6 +665,7 @@ pub async fn slingdeletejob(
     Ok(json!({ "result": "success" }))
 }
 
+#[allow(clippy::too_many_lines)]
 pub async fn slingexceptchan(
     plugin: Plugin<PluginState>,
     args: serde_json::Value,
@@ -682,7 +685,7 @@ pub async fn slingexceptchan(
                 _ => {
                     return Err(anyhow!(
                         "Not a string: Use `add`/`remove` and a ShortChannelId or just `list`"
-                    ))
+                    ));
                 }
             };
             if command == "list" && a.len() == 1 {
@@ -706,7 +709,7 @@ pub async fn slingexceptchan(
                 _ => {
                     return Err(anyhow!(
                         "Not a string: Use `add`/`remove` and a ShortChannelId or just `list`"
-                    ))
+                    ));
                 }
             };
             match o.get("scid") {
@@ -718,7 +721,7 @@ pub async fn slingexceptchan(
         e => {
             return Err(anyhow!(
                 "sling-exceptchan: invalid arguments, expected array or object, got {e}"
-            ))
+            ));
         }
     };
 
@@ -769,7 +772,7 @@ pub async fn slingexceptchan(
                 _ => {
                     return Err(anyhow!(
                         "Use `add`/`remove` and a ShortChannelId or just `list`"
-                    ))
+                    ));
                 }
             }
         }
@@ -785,6 +788,7 @@ pub async fn slingexceptchan(
     }
 }
 
+#[allow(clippy::too_many_lines)]
 pub async fn slingexceptpeer(
     plugin: Plugin<PluginState>,
     args: serde_json::Value,
@@ -804,7 +808,7 @@ pub async fn slingexceptpeer(
                 _ => {
                     return Err(anyhow!(
                         "Not a string. Use `add`/`remove` and a peer `id` or `list`"
-                    ))
+                    ));
                 }
             };
             if com == "list" && a.len() == 1 {
@@ -828,7 +832,7 @@ pub async fn slingexceptpeer(
                 _ => {
                     return Err(anyhow!(
                         "Not a string: Use `add`/`remove` and a peer `id` or just `list`"
-                    ))
+                    ));
                 }
             };
             match o.get("id") {
@@ -840,7 +844,7 @@ pub async fn slingexceptpeer(
         e => {
             return Err(anyhow!(
                 "sling-exceptpeer: invalid arguments, expected array or object, got {e}"
-            ))
+            ));
         }
     };
 
@@ -886,7 +890,7 @@ pub async fn slingexceptpeer(
                 _ => {
                     return Err(anyhow!(
                         "Unknown commmand. Use `add`/`remove` and a peer `id` or `list`"
-                    ))
+                    ));
                 }
             }
         }
