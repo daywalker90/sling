@@ -51,11 +51,11 @@ pub async fn parse_job(
 
             //also convert to msat
             let amount_msat = match ar.get("amount") {
-                Some(amt) => {
-                    amt.as_u64()
-                        .ok_or(anyhow!("amount must be a positive integer"))?
-                        * 1_000
-                }
+                Some(amt) => amt
+                    .as_u64()
+                    .ok_or(anyhow!("amount must be a positive integer"))?
+                    .checked_mul(1_000)
+                    .ok_or_else(|| anyhow!("amount too large"))?,
                 None => return Err(anyhow!("Missing amount")),
             };
             if amount_msat == 0 {
@@ -115,7 +115,8 @@ pub async fn parse_job(
                 job.add_depleteuptoamount_msat(
                     da.as_u64()
                         .ok_or(anyhow!("depleteuptoamount must be an integer"))?
-                        * 1_000,
+                        .checked_mul(1_000)
+                        .ok_or_else(|| anyhow!("depleteuptoamount too large"))?,
                 );
             }
 
