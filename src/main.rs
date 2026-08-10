@@ -340,60 +340,74 @@ async fn main() -> Result<(), anyhow::Error> {
             log::debug!("{:?}", plugin.configuration());
             let peersclone = plugin.clone();
             tokio::spawn(async move {
-                match tasks::refresh_listpeerchannels_loop(peersclone.clone()).await {
-                    Ok(()) => (),
-                    Err(e) => log::warn!("Error in refresh_listpeers thread: {e:?}"),
+                loop {
+                    match tasks::refresh_listpeerchannels_loop(peersclone.clone()).await {
+                        Ok(()) => (),
+                        Err(e) => log::error!("Error in refresh_listpeers thread: {e:?}"),
+                    }
+                    time::sleep(Duration::from_secs(5)).await;
                 }
-                let _res = peersclone.shutdown();
             });
             let channelsclone = plugin.clone();
             tokio::spawn(async move {
-                match tasks::refresh_graph(channelsclone.clone()).await {
-                    Ok(()) => (),
-                    Err(e) => log::warn!("Error in refresh_graph thread: {e:?}"),
+                loop {
+                    match tasks::refresh_graph(channelsclone.clone()).await {
+                        Ok(()) => (),
+                        Err(e) => log::error!("Error in refresh_graph thread: {e:?}"),
+                    }
+                    time::sleep(Duration::from_secs(5)).await;
                 }
-                let _res = channelsclone.shutdown();
             });
             let aliasclone = plugin.clone();
             tokio::spawn(async move {
-                match tasks::refresh_aliasmap(aliasclone.clone()).await {
-                    Ok(()) => (),
-                    Err(e) => log::warn!("Error in refresh_aliasmap thread: {e:?}"),
+                loop {
+                    match tasks::refresh_aliasmap(aliasclone.clone()).await {
+                        Ok(()) => (),
+                        Err(e) => log::error!("Error in refresh_aliasmap thread: {e:?}"),
+                    }
+                    time::sleep(Duration::from_secs(5)).await;
                 }
-                let _res = aliasclone.shutdown();
             });
             let liquidityclone = plugin.clone();
             tokio::spawn(async move {
-                match tasks::refresh_liquidity(liquidityclone.clone()).await {
-                    Ok(()) => (),
-                    Err(e) => log::warn!("Error in refresh_liquidity thread: {e:?}"),
+                loop {
+                    match tasks::refresh_liquidity(liquidityclone.clone()).await {
+                        Ok(()) => (),
+                        Err(e) => log::error!("Error in refresh_liquidity thread: {e:?}"),
+                    }
+                    time::sleep(Duration::from_secs(5)).await;
                 }
-                let _res = liquidityclone.shutdown();
             });
             let tempbanclone = plugin.clone();
             tokio::spawn(async move {
-                match tasks::clear_tempbans(tempbanclone.clone()).await {
-                    Ok(()) => (),
-                    Err(e) => log::warn!("Error in clear_tempbans thread: {e:?}"),
+                loop {
+                    match tasks::clear_tempbans(tempbanclone.clone()).await {
+                        Ok(()) => (),
+                        Err(e) => log::error!("Error in clear_tempbans thread: {e:?}"),
+                    }
+                    time::sleep(Duration::from_secs(5)).await;
                 }
-                let _res = tempbanclone.shutdown();
             });
             let clearstatsclone = plugin.clone();
             tokio::spawn(async move {
-                match tasks::clear_stats(clearstatsclone.clone()).await {
-                    Ok(()) => (),
-                    Err(e) => log::warn!("Error in clear_stats thread: {e:?}"),
+                loop {
+                    match tasks::clear_stats(clearstatsclone.clone()).await {
+                        Ok(()) => (),
+                        Err(e) => log::error!("Error in clear_stats thread: {e:?}"),
+                    }
+                    time::sleep(Duration::from_secs(5)).await;
                 }
-                let _res = clearstatsclone.shutdown();
             });
             if plugin.state().config.lock().at_or_above_24_11 {
                 let askrene_clone = plugin.clone();
                 tokio::spawn(async move {
-                    match tasks::read_askrene_liquidity(askrene_clone.clone()).await {
-                        Ok(()) => (),
-                        Err(e) => log::warn!("Error in read_askrene_liquidity thread: {e:?}"),
+                    loop {
+                        match tasks::read_askrene_liquidity(askrene_clone.clone()).await {
+                            Ok(()) => (),
+                            Err(e) => log::error!("Error in read_askrene_liquidity thread: {e:?}"),
+                        }
+                        time::sleep(Duration::from_secs(5)).await;
                     }
-                    let _res = askrene_clone.shutdown();
                 });
             }
 
