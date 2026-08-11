@@ -44,9 +44,7 @@ jobs:
 
     - name: Create cache paths
       run: |
-        sudo mkdir /usr/local/libexec
-        sudo mkdir /usr/local/libexec/c-lightning
-        sudo mkdir /usr/local/libexec/c-lightning/plugins
+        sudo mkdir -p /usr/local/libexec/c-lightning/plugins
         sudo chown -R $USER /usr/local/libexec
 
     - name: Set up Python ${{ matrix.python-version }}
