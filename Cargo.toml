@@ -36,7 +36,8 @@ mimalloc = "0.1"
 
 [profile.optimized]
 inherits = "release"
-strip = "debuginfo"
+panic = "abort"
+strip = true
 codegen-units = 1
 lto = "fat"
 debug = false
