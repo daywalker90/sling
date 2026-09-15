@@ -106,7 +106,7 @@ jobs:
       if: ${{ contains(matrix.os, 'ubuntu') &&  steps.cache-cln.outputs.cache-hit != 'true' }}
       run: |
           url=$(curl -f --retry 3 --retry-delay 3 -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/repos/ElementsProject/lightning/releases/tags/${{ inputs.cln-version }} \
-            | jq '.assets[] | select(.name | contains("24.04")) | .browser_download_url' \
+            | jq '.assets[] | select(.name | contains("24.04") and contains("amd64")) | .browser_download_url' \
             | tr -d '\"')
           wget --tries=5 --waitretry=5 --retry-connrefused --timeout=20 --continue $url
           sudo tar -xvf ${url##*/} -C /usr/local --strip-components=2
