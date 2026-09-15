@@ -12,6 +12,19 @@ from util import get_plugin  # noqa: F401
 LOGGER = logging.getLogger(__name__)
 
 
+def reconnect(node, peer):
+    address = peer.info["id"] + "@localhost:" + str(peer.port)
+
+    def _try_connect():
+        try:
+            node.rpc.connect(address)
+            return True
+        except RpcError:
+            return False
+
+    wait_for(_try_connect)
+
+
 def test_basic(node_factory, get_plugin):  # noqa: F811
     node = node_factory.get_node(
         options={
@@ -1271,9 +1284,9 @@ def test_gossip(node_factory, bitcoind, get_plugin):  # noqa: F811
     wait_for(lambda: len(l1.rpc.call("listchannels", {})["channels"]) == 6)
 
     l1.restart()
-    l1.rpc.connect(l2.info["id"] + "@localhost:" + str(l2.port))
-    l1.rpc.connect(l3.info["id"] + "@localhost:" + str(l3.port))
-    l1.rpc.connect(l4.info["id"] + "@localhost:" + str(l4.port))
+    reconnect(l1, l2)
+    reconnect(l1, l3)
+    reconnect(l1, l4)
 
     assert len(l1.rpc.call("listchannels", {})["channels"]) == 6
     l1.daemon.wait_for_log(r"4 private channels")
