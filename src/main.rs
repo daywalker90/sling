@@ -130,13 +130,13 @@ async fn main() -> Result<(), anyhow::Error> {
     let opt_depleteuptopercent: DefaultStringConfigOption = ConfigOption::new_str_with_default(
         OPT_DEPLETEUPTOPERCENT,
         "0.2",
-        "Deplete up to percent for candidate search. Default is `0.2`",
+        "Deplete up to percent (written as a decimal) for candidate search. Default is `0.2`",
     )
     .dynamic();
     let opt_depleteuptoamount: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
         OPT_DEPLETEUPTOAMOUNT,
-        2_000_000_000,
-        "Deplete up to amount for candidate search. Default is `2000000000`",
+        2_000_000,
+        "Deplete up to amount for candidate search. Default is `2000000` sats",
     )
     .dynamic();
     let opt_maxhops: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(

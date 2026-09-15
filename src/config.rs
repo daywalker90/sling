@@ -86,21 +86,6 @@ fn parse_option(name: &str, value: &serde_json::Value) -> Result<options::Value,
                 Err(anyhow!("{name} is not a valid string!"))
             }
         }
-        // n if n.eq(OPT_INFORM_LAYERS) => {
-        //     if let Some(layers) = value.as_array() {
-        //         let mut string_array = Vec::new();
-        //         for layer in layers.iter() {
-        //             if layer.is_string() {
-        //                 string_array.push(layer.as_str().unwrap().to_owned());
-        //             } else {
-        //                 return Err(anyhow!("{} is not a valid string!", layer));
-        //             }
-        //         }
-        //         Ok(options::Value::StringArray(string_array))
-        //     } else {
-        //         Err(anyhow!("{} is not a valid string array!", name))
-        //     }
-        // }
         _ => {
             if let Some(n_i64) = value.as_i64() {
                 return Ok(options::Value::Integer(n_i64));
@@ -281,7 +266,8 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
                 }
                 Err(e) => {
                     return Err(anyhow!(
-                        "Error: {e} could not parse a floating point for `{OPT_DEPLETEUPTOPERCENT}`.",
+                        "Error: {e} could not parse a floating point \
+                        for `{OPT_DEPLETEUPTOPERCENT}`.",
                     ));
                 }
             }
@@ -289,7 +275,7 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
         n if n.eq(OPT_DEPLETEUPTOAMOUNT) => {
             config.depleteuptoamount =
                 options_value_to_u64(OPT_DEPLETEUPTOAMOUNT, value.as_i64().unwrap(), 0, None)?
-                    * 1000;
+                    * 1_000;
         }
         n if n.eq(OPT_MAXHOPS) => {
             config.maxhops = u8::try_from(options_value_to_u64(
