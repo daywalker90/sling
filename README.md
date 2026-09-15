@@ -1,42 +1,6 @@
 <table border="0">
   <tr>
     <td>
-      <a href="https://github.com/daywalker90/sling/actions/workflows/latest_v25.09.yml">
-        <img src="https://github.com/daywalker90/sling/actions/workflows/latest_v25.09.yml/badge.svg?branch=master">
-      </a>
-    </td>
-    <td>
-      <a href="https://github.com/daywalker90/sling/actions/workflows/master_v25.09.yml">
-        <img src="https://github.com/daywalker90/sling/actions/workflows/master_v25.09.yml/badge.svg?branch=master">
-      </a>
-    </td>
-  </tr>
-  <tr>
-    <td>
-      <a href="https://github.com/daywalker90/sling/actions/workflows/latest_v25.12.yml">
-        <img src="https://github.com/daywalker90/sling/actions/workflows/latest_v25.12.yml/badge.svg?branch=master">
-      </a>
-    </td>
-    <td>
-      <a href="https://github.com/daywalker90/sling/actions/workflows/master_v25.12.yml">
-        <img src="https://github.com/daywalker90/sling/actions/workflows/master_v25.12.yml/badge.svg?branch=master">
-      </a>
-    </td>
-  </tr>
-  <tr>
-    <td>
-      <a href="https://github.com/daywalker90/sling/actions/workflows/latest_v26.04.yml">
-        <img src="https://github.com/daywalker90/sling/actions/workflows/latest_v26.04.yml/badge.svg?branch=master">
-      </a>
-    </td>
-    <td>
-      <a href="https://github.com/daywalker90/sling/actions/workflows/master_v26.04.yml">
-        <img src="https://github.com/daywalker90/sling/actions/workflows/master_v26.04.yml/badge.svg?branch=master">
-      </a>
-    </td>
-  </tr>
-  <tr>
-    <td>
       <a href="https://github.com/daywalker90/sling/actions/workflows/latest_v26.06.yml">
         <img src="https://github.com/daywalker90/sling/actions/workflows/latest_v26.06.yml/badge.svg?branch=master">
       </a>
@@ -201,11 +165,11 @@ Formula is ``min(depleteuptopercent * channel_capacity, depleteuptoamount)``. If
 
 1. When starting the plugin dynamically.
 
-* Example: ``lightning-cli -k plugin subcommand=start plugin=/path/to/sling sling-refresh-peers-interval=6``
+* Example: ``lightning-cli -k plugin subcommand=start plugin=/path/to/sling sling-timeoutpay=180``
 
 2. Permanently saving them in the CLN config file. :warning:If you want to do this while CLN is running you must use [setconfig](https://docs.corelightning.org/reference/lightning-setconfig) instead of manually editing your config file! :warning:If you have options in the config file (either by manually editing it or by using the ``setconfig`` command) make sure the plugin will start automatically with CLN (include ``plugin=/path/to/sling`` or have a symlink to ``sling`` in your ``plugins`` folder). This is because CLN will refuse to start with config options that don't have a corresponding plugin loaded. :warning:If you edit your config file manually while CLN is running and a line changes their line number CLN will crash when you use the [setconfig](https://docs.corelightning.org/reference/lightning-setconfig) command, so better stick to ``setconfig`` only during CLN's uptime!
 
-* Example: ``lightning-cli setconfig sling-refresh-peers-interval 6``
+* Example: ``lightning-cli setconfig sling-timeoutpay 180``
 
 You can mix two methods and if you set the same option with different methods, it will pick the value from your most recently used method.
 

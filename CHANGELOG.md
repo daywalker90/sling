@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.3.2] - 2026-09-15
+
+### Changed
+- reverted log level of task errors to `warn` again to fix CI flake
+
+### Fixed
+- `sling-depleteuptoamount`: the default value was effectively 1000x too large. The default is now `2000000` sats as documented
+
 ## [4.3.1] - 2026-08-10
 
 ### Fixed
