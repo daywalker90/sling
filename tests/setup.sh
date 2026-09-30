@@ -47,7 +47,7 @@ github_url="https://github.com/daywalker90/$name/releases/download/v$version/$ar
 
 
 # Download the archive using curl
-if ! curl -L "$github_url" -o "$script_dir/$archive_file"; then
+if ! curl -fL --retry 3 --retry-delay 3 "$github_url" -o "$script_dir/$archive_file"; then
     echo "Error downloading the file from $github_url" >&2
     exit 1
 fi
