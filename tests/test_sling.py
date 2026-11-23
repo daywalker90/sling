@@ -86,7 +86,8 @@ def test_setconfig_options(node_factory, get_plugin):  # noqa: F811
     node.rpc.setconfig("sling-depleteuptopercent", 0.12)
 
     with pytest.raises(
-        RpcError, match="out of range integral type conversion attempted"
+        RpcError,
+        match="out of range integral type conversion attempted|number too large to fit in target type",
     ):
         node.rpc.setconfig("sling-paralleljobs", 100_000)
     node.rpc.setconfig("sling-paralleljobs", 50)
