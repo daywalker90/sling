@@ -30,7 +30,7 @@ jobs:
     strategy:
         fail-fast: false
         matrix:
-            bitcoind-version: ["31.0"]
+            bitcoind-version: ["31.3"]
             experimental: [1]
             deprecated: [0]
             python-version: [ "${{ inputs.python-version-1 }}", "${{ inputs.python-version-2 }}"]
@@ -79,7 +79,7 @@ jobs:
         key: cache-bitcoind-${{ matrix.bitcoind-version }}-${{ steps.exact_versions.outputs.os_version }}
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v7
+      uses: astral-sh/setup-uv@v10.4.0
       with:
         enable-cache: true
         cache-dependency-glob: "**/pyproject.toml"
