@@ -190,6 +190,9 @@ impl PubKeyBytes {
     pub fn to_pubkey(self) -> PublicKey {
         PublicKey::from_slice(&self.0).unwrap()
     }
+    pub fn try_to_pubkey(self) -> Result<PublicKey, anyhow::Error> {
+        Ok(PublicKey::from_slice(&self.0)?)
+    }
 }
 
 impl Display for PubKeyBytes {
