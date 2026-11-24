@@ -287,7 +287,8 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
         n if n.eq(OPT_DEPLETEUPTOAMOUNT) => {
             config.depleteuptoamount =
                 options_value_to_u64(OPT_DEPLETEUPTOAMOUNT, value.as_i64().unwrap(), 0, None)?
-                    * 1_000;
+                    .checked_mul(1_000)
+                    .ok_or_else(|| anyhow!("{OPT_DEPLETEUPTOAMOUNT} too large"))?;
         }
         n if n.eq(OPT_MAXHOPS) => {
             config.maxhops = u8::try_from(options_value_to_u64(
