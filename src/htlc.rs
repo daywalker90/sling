@@ -65,7 +65,7 @@ impl ToString for HtlcAcceptedOnionType {
 pub struct HtlcAcceptedOnion {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub forward_msat: Option<Amount>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub item_type: Option<HtlcAcceptedOnionType>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_node_id: Option<PublicKey>,
@@ -113,8 +113,30 @@ pub async fn htlc_handler(
             .outgoing_cltv_value
             .is_some_and(|outgoing_cltv| hook.htlc.cltv_expiry >= outgoing_cltv);
         let sufficient_cltv = hook.htlc.cltv_expiry_relative >= cltv_final;
+        let is_final_hop = hook.onion.short_channel_id.is_none()
+            && hook.onion.next_node_id.is_none()
+            && hook.onion.item_type == Some(HtlcAcceptedOnionType::TLV);
+        let matching_onion_amount = hook
+            .onion
+            .forward_msat
+            .is_some_and(|amt| amt.msat() == pi.amount_msat)
+            && hook
+                .onion
+                .total_msat
+                .is_some_and(|amt| amt.msat() == pi.amount_msat);
+        let matching_payment_secret = hook
+            .onion
+            .payment_secret
+            .is_some_and(|ps| ps.to_vec() == pi.payment_secret.to_vec());
 
-        if matching_scid && expected_amount && matching_cltv && sufficient_cltv {
+        if matching_scid
+            && expected_amount
+            && matching_cltv
+            && sufficient_cltv
+            && is_final_hop
+            && matching_onion_amount
+            && matching_payment_secret
+        {
             log::debug!("resolving htlc. payment_hash: {payment_hash}");
             Ok(json!({"result":"resolve","payment_key":pi.preimage}))
         } else if let Some(peer) = plugin
@@ -163,6 +185,36 @@ pub async fn htlc_handler(
                 );
             }
 
+            if !is_final_hop {
+                log::warn!(
+                    "NOT resolving HTLC from {}: INVALID FINAL HOP ONION (item_type={:?}, \
+                    short_channel_id={:?}, next_node_id={:?}). payment_hash: {payment_hash}",
+                    peer.peer_id,
+                    hook.onion.item_type,
+                    hook.onion.short_channel_id,
+                    hook.onion.next_node_id
+                );
+            }
+
+            if !matching_onion_amount {
+                log::warn!(
+                    "NOT resolving HTLC from {}: WRONG ONION AMOUNT (forward_msat={:?}, \
+                    total_msat={:?}, EXPECTED={}). payment_hash: {payment_hash}",
+                    peer.peer_id,
+                    hook.onion.forward_msat,
+                    hook.onion.total_msat,
+                    pi.amount_msat
+                );
+            }
+
+            if !matching_payment_secret {
+                log::warn!(
+                    "NOT resolving HTLC from {}: WRONG OR MISSING PAYMENT SECRET. \
+                    payment_hash: {payment_hash}",
+                    peer.peer_id
+                );
+            }
+
             plugin.state().bad_fwd_nodes.lock().insert(
                 peer.peer_id,
                 SystemTime::now()
@@ -178,7 +230,9 @@ pub async fn htlc_handler(
             log::warn!(
                 "NOT resolving HTLC on unknown channel {}: matching_scid={matching_scid}, \
                 expected_amount={expected_amount}, matching_cltv={matching_cltv}, \
-                sufficient_cltv={sufficient_cltv}. payment_hash: {payment_hash}",
+                sufficient_cltv={sufficient_cltv}, is_final_hop={is_final_hop}, \
+                matching_onion_amount={matching_onion_amount}, \
+                matching_payment_secret={matching_payment_secret}. payment_hash: {payment_hash}",
                 hook.htlc.short_channel_id
             );
             Ok(json!({"result": "fail", "failure_message": "1007"}))

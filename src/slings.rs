@@ -22,6 +22,7 @@ use crate::{
         feeppm_effective,
         feeppm_effective_from_amts,
         get_normal_channel_from_listpeerchannels,
+        get_payment_secret,
         get_preimage_paymend_hash_pair,
         get_total_htlc_count,
         is_channel_normal,
@@ -236,6 +237,7 @@ pub async fn sling(
         }
 
         let (preimage, payment_hash) = get_preimage_paymend_hash_pair();
+        let payment_secret = get_payment_secret();
 
         let last_scid = route.last().unwrap().channel.unwrap();
 
@@ -274,6 +276,7 @@ pub async fn sling(
 
         let pay_resolve_info = PayResolveInfo {
             preimage,
+            payment_secret,
             incoming_scid: last_hop.unwrap().short_channel_id.unwrap(),
             incoming_alias: last_hop.unwrap().alias.as_ref().and_then(|a| a.remote),
             amount_msat: route.last().unwrap().amount_msat.unwrap().msat(),
