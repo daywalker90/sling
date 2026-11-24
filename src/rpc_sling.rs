@@ -370,36 +370,45 @@ pub async fn slingonce(
         return Err(anyhow!("There is already a job for that scid!"));
     }
 
-    let parallel_jobs;
+    let parallel_jobs = {
+        let config = plugin.state().config.lock();
+        match job.sat_direction {
+            sling::SatDirection::Pull => job.get_paralleljobs(config.paralleljobs),
+            sling::SatDirection::Push => std::cmp::min(
+                job.get_paralleljobs(config.paralleljobs),
+                u16::try_from(config.max_htlc_count)?,
+            ),
+        }
+    };
+
+    {
+        let mut tasks = plugin.state().tasks.lock();
+        if let Some(existing) = tasks.get_scid_tasks(chan_id) {
+            if existing.values().any(|t| !t.is_once()) {
+                return Err(anyhow!(
+                    "There is already a job for that scid! Please delete it first."
+                ));
+            }
+            if existing.values().any(Task::is_active) {
+                return Err(anyhow!("There is already a job for that scid running!"));
+            }
+        }
+        tasks.remove_task(chan_id);
+        for i in 1..=parallel_jobs {
+            tasks.insert_task(
+                chan_id,
+                i,
+                Task::new(chan_id, i, JobMessage::Starting, true, other_peer),
+            )?;
+        }
+    }
+
     {
         let mut config = plugin.state().config.lock();
         match job.sat_direction {
             sling::SatDirection::Pull => config.exclude_chans_pull.insert(chan_id),
             sling::SatDirection::Push => config.exclude_chans_push.insert(chan_id),
         };
-        parallel_jobs = match job.sat_direction {
-            sling::SatDirection::Pull => job.get_paralleljobs(config.paralleljobs),
-            sling::SatDirection::Push => std::cmp::min(
-                job.get_paralleljobs(config.paralleljobs),
-                u16::try_from(config.max_htlc_count)?,
-            ),
-        };
-    }
-
-    for i in 1..=parallel_jobs {
-        let task_ident = TaskIdentifier::new(chan_id, i);
-        let mut tasks = plugin.state().tasks.lock();
-        let task = tasks.get_task_mut(&task_ident);
-        if let Some(t) = task {
-            if !t.is_once() {
-                return Err(anyhow!(
-                    "There is already a job for that scid! Please delete it first."
-                ));
-            }
-            if t.is_active() {
-                return Err(anyhow!("There is already a job for that scid running!"));
-            }
-        }
     }
 
     let p_clone = plugin.clone();
@@ -412,71 +421,64 @@ pub async fn slingonce(
             let total_rebalanced = total_rebalanced.clone();
             tokio::spawn(async move {
                 let task_ident = TaskIdentifier::new(chan_id, i);
-                {
-                    let mut tasks = plugin.state().tasks.lock();
-                    let task = tasks.get_task_mut(&task_ident);
-                    if task.is_none() || !task.as_ref().unwrap().is_active() {
-                        match task {
-                            Some(jts) => {
-                                jts.set_state(JobMessage::Starting);
-                                jts.set_active(true);
-                            }
-                            None => {
-                                match tasks.insert_task(
-                                    chan_id,
-                                    i,
-                                    Task::new(chan_id, i, JobMessage::Starting, true, other_peer),
-                                ) {
-                                    Ok(()) => {}
-                                    Err(e) => {
-                                        log::error!("Error inserting task: {e}");
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
                 loop {
                     {
                         let mut tasks = plugin.state().tasks.lock();
-                        let task_map = tasks.get_scid_tasks_mut(chan_id).unwrap();
+                        let Some(task_map) = tasks.get_scid_tasks_mut(chan_id) else {
+                            let mut config = plugin.state().config.lock();
+                            match job.sat_direction {
+                                sling::SatDirection::Pull => {
+                                    config.exclude_chans_pull.remove(&chan_id);
+                                }
+                                sling::SatDirection::Push => {
+                                    config.exclude_chans_push.remove(&chan_id);
+                                }
+                            }
+                            break;
+                        };
                         let mut total_rebalanced = total_rebalanced.lock();
-                        if task_map.get(&i).unwrap().should_stop() {
+                        let should_stop = task_map.get(&i).is_none_or(Task::should_stop);
+                        if should_stop {
                             log::info!("{chan_id}/{i}: Spawned once-job exited.");
                             for task in task_map.values_mut() {
                                 task.stop();
                                 log::debug!("{}: Stopping once-job...", task.get_identifier());
                             }
 
-                            let task = task_map.get_mut(&i).unwrap();
-                            task.set_state(JobMessage::Stopped);
-                            task.set_active(false);
-                            let mut config = plugin.state().config.lock();
-                            match job.sat_direction {
-                                sling::SatDirection::Pull => {
-                                    config.exclude_chans_pull.remove(&chan_id)
+                            if let Some(task) = task_map.get_mut(&i) {
+                                task.set_state(JobMessage::Stopped);
+                                task.set_active(false);
+                            }
+                            if !tasks.is_any_active(chan_id) {
+                                let mut config = plugin.state().config.lock();
+                                match job.sat_direction {
+                                    sling::SatDirection::Pull => {
+                                        config.exclude_chans_pull.remove(&chan_id);
+                                    }
+                                    sling::SatDirection::Push => {
+                                        config.exclude_chans_push.remove(&chan_id);
+                                    }
                                 }
-                                sling::SatDirection::Push => {
-                                    config.exclude_chans_push.remove(&chan_id)
-                                }
-                            };
+                            }
                             break;
                         }
                         if *total_rebalanced + job.amount_msat > job.onceamount_msat.unwrap() {
                             log::info!("{chan_id}/{i}: Done rebalancing.");
-                            let task = task_map.get_mut(&i).unwrap();
-                            task.set_state(JobMessage::Balanced);
-                            task.set_active(false);
-                            let mut config = plugin.state().config.lock();
-                            match job.sat_direction {
-                                sling::SatDirection::Pull => {
-                                    config.exclude_chans_pull.remove(&chan_id)
+                            if let Some(task) = task_map.get_mut(&i) {
+                                task.set_state(JobMessage::Balanced);
+                                task.set_active(false);
+                            }
+                            if !tasks.is_any_active(chan_id) {
+                                let mut config = plugin.state().config.lock();
+                                match job.sat_direction {
+                                    sling::SatDirection::Pull => {
+                                        config.exclude_chans_pull.remove(&chan_id);
+                                    }
+                                    sling::SatDirection::Push => {
+                                        config.exclude_chans_push.remove(&chan_id);
+                                    }
                                 }
-                                sling::SatDirection::Push => {
-                                    config.exclude_chans_push.remove(&chan_id)
-                                }
-                            };
+                            }
                             break;
                         }
                         *total_rebalanced += job.amount_msat;
@@ -487,13 +489,23 @@ pub async fn slingonce(
                             if o == 0 {
                                 *total_rebalanced.lock() -= job.amount_msat;
                             }
+                            let mut tasks = plugin.state().tasks.lock();
+                            if let Some(task) = tasks.get_task_mut(&task_ident) {
+                                if !task.is_active() {
+                                    task.stop();
+                                    continue;
+                                }
+                            }
                         }
                         Err(e) => {
-                            log::warn!("{chan_id}/{e}: Error in once-job: {i}");
-                            let mut tasks = plugin.state().tasks.lock();
-                            let task = tasks.get_task_mut(&task_ident).unwrap();
-                            task.set_state(JobMessage::Error);
+                            log::warn!("{chan_id}/{i}: Error in once-job: {e}");
                             *total_rebalanced.lock() -= job.amount_msat;
+                            let mut tasks = plugin.state().tasks.lock();
+                            if let Some(task) = tasks.get_task_mut(&task_ident) {
+                                task.set_state(JobMessage::Error);
+                                task.stop();
+                            }
+                            continue;
                         }
                     }
 
