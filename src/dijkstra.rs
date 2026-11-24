@@ -82,6 +82,17 @@ pub fn dijkstra(
         if current_hops + 2 > job.get_maxhops(config.maxhops) {
             continue;
         }
+        // Inbound fee is charged by `node` on the channel it received the HTLC from.
+        let node_inbound_fee = if *node == config.pubkey_bytes {
+            None
+        } else {
+            lngraph
+                .get_state_direction(ShortChannelIdDir {
+                    short_channel_id: current_node.short_channel_id_dir.short_channel_id,
+                    direction: 1 - current_node.short_channel_id_dir.direction,
+                })
+                .and_then(|s| s.inbound_fee)
+        };
         for (scid, edge) in lngraph.edges(
             node,
             two_weeks_ago,
@@ -110,16 +121,7 @@ pub fn dijkstra(
             let mut next_score = if edge.source == config.pubkey_bytes {
                 0
             } else {
-                // Inbound fee is charged by `edge.source` on the channel it received
-                // the HTLC from (`current_node.short_channel_id_dir`).
-                let inbound_fee = lngraph
-                    .get_state_direction(ShortChannelIdDir {
-                        short_channel_id: current_node.short_channel_id_dir.short_channel_id,
-                        direction: 1 - current_node.short_channel_id_dir.direction,
-                    })
-                    .and_then(|s| s.inbound_fee);
-
-                let out_cost = edge_cost(edge, inbound_fee, job.amount_msat);
+                let out_cost = edge_cost(edge, node_inbound_fee, job.amount_msat);
                 node_score.saturating_add(out_cost)
             };
             if job.sat_direction == SatDirection::Pull && edge.destination == goal {
