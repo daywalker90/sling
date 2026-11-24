@@ -250,11 +250,14 @@ fn build_route(
             } else {
                 first_hop.short_channel_id_dir.short_channel_id
             };
+            let Ok(dest_pubkey) = dijkstra_path.first().unwrap().destination.try_to_pubkey() else {
+                return vec![];
+            };
             sendpay_route.insert(
                 0,
                 SendpayRoute {
                     amount_msat: Some(Amount::from_msat(job.amount_msat)),
-                    id: Some(dijkstra_path.first().unwrap().destination.to_pubkey()),
+                    id: Some(dest_pubkey),
                     delay: Some(delay),
                     channel: Some(routing_scid),
                     amount_out_msat: None,
@@ -269,11 +272,14 @@ fn build_route(
             } else {
                 hop.short_channel_id_dir.short_channel_id
             };
+            let Ok(dest_pubkey) = hop.destination.try_to_pubkey() else {
+                return vec![];
+            };
             sendpay_route.insert(
                 0,
                 SendpayRoute {
                     amount_msat: Some(amount_msat),
-                    id: Some(hop.destination.to_pubkey()),
+                    id: Some(dest_pubkey),
                     delay: Some(delay),
                     channel: Some(routing_scid),
                     amount_out_msat: None,

@@ -7,7 +7,7 @@ use std::{
 use anyhow::{Error, anyhow};
 use bitcoin::consensus::encode::serialize_hex;
 use cln_plugin::Plugin;
-use cln_rpc::primitives::{Amount, PublicKey, ShortChannelId, ShortChannelIdDir};
+use cln_rpc::primitives::{Amount, ShortChannelId, ShortChannelIdDir};
 use serde::Serialize;
 
 use crate::{
@@ -622,8 +622,9 @@ fn parse_channel_announcement(
     let scid = extract_scid(&input[(290 + len)..(298 + len)])?;
     let source_bytes: [u8; 33] = input[(298 + len)..(331 + len)].try_into()?;
     let dest_bytes: [u8; 33] = input[(331 + len)..(364 + len)].try_into()?;
-    PublicKey::from_slice(&source_bytes)?;
-    PublicKey::from_slice(&dest_bytes)?;
+    if !matches!(source_bytes[0], 0x02 | 0x03) || !matches!(dest_bytes[0], 0x02 | 0x03) {
+        return Err(anyhow!("channel_announcement has invalid compressed pubkey prefix"));
+    }
     let source = PubKeyBytes::new(source_bytes);
     let destination = PubKeyBytes::new(dest_bytes);
     Ok((
@@ -920,6 +921,7 @@ mod tests {
 
     fn make_pubkey_bytes(seed: u8) -> [u8; 33] {
         use bitcoin::secp256k1::{Secp256k1, SecretKey};
+        use cln_rpc::primitives::PublicKey;
         let secp = Secp256k1::new();
         let mut bytes = [0u8; 32];
         bytes[31] = seed;
