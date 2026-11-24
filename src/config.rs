@@ -163,6 +163,17 @@ pub async fn get_startup_options(
         .ok_or_else(|| anyhow!("no cltv-delta config found?! This should not happen!"))?
         .value_int;
 
+    let cltv_final = rpc
+        .call_typed(&ListconfigsRequest {
+            config: Some("cltv-final".to_string()),
+        })
+        .await?
+        .configs
+        .ok_or_else(|| anyhow!("no configs found?! This should not happen!"))?
+        .cltv_final
+        .ok_or_else(|| anyhow!("no cltv-final config found?! This should not happen!"))?
+        .value_int;
+
     let help = rpc.call_typed(&HelpRequest { command: None }).await?;
 
     let mut available_commands = HashSet::new();
@@ -184,6 +195,7 @@ pub async fn get_startup_options(
 
     let mut config = state.config.lock();
     config.cltv_delta = cltv_delta;
+    config.cltv_final = cltv_final;
     config.has_askrene_ll = available_commands.contains(ASKRENE_LISTLAYERS);
     log::debug!("has_askrene_ll: {}", config.has_askrene_ll);
 
