@@ -246,27 +246,36 @@ pub fn get_total_htlc_count(channel: &ListpeerchannelsChannels) -> u64 {
     }
 }
 
+pub fn div_ceil_i128(a: i128, b: i128) -> i128 {
+    debug_assert!(b > 0);
+    let q = a / b;
+    let r = a % b;
+    if r > 0 { q + 1 } else { q }
+}
+
 pub fn edge_cost(
     edge: &ShortChannelIdDirState,
     inbound_fee: Option<InboundFee>,
     amount: u64,
 ) -> u64 {
-    let outbound_fee =
-        fee_total_msat_precise(edge.fee_per_millionth, edge.base_fee_millisatoshi, amount).ceil()
-            as u64;
+    let amt = u128::from(amount);
+    let outbound_fee = u128::from(edge.base_fee_millisatoshi)
+        + (amt * u128::from(edge.fee_per_millionth)).div_ceil(1_000_000);
 
-    let net_received_amt = amount + outbound_fee;
+    let net_received_amt = amt + outbound_fee;
 
-    let inbound_fee_msat = inbound_fee.map_or(0, |inf| {
-        fee_total_msat_precise_i32(inf.proportional_millionths, inf.base_msat, net_received_amt)
-            .ceil() as i64
+    let inbound_fee_msat: i128 = inbound_fee.map_or(0, |inf| {
+        i128::from(inf.base_msat)
+            + div_ceil_i128(
+                net_received_amt as i128 * i128::from(inf.proportional_millionths),
+                1_000_000,
+            )
     });
 
-    let total_fee = i64::max(outbound_fee as i64 + inbound_fee_msat, 0) as u64;
+    let total_fee = (outbound_fee as i128 + inbound_fee_msat).max(0) as u128;
 
-    (total_fee as f64 / amount as f64 * 1_000_000.0)
-        .ceil()
-        .max(2.0) as u64
+    let ppm = total_fee.saturating_mul(1_000_000).div_ceil(amt);
+    u64::try_from(ppm).unwrap_or(u64::MAX).max(2)
 }
 
 pub fn feeppm_effective(feeppm: u32, basefee_msat: u32, amount_msat: u64) -> u64 {
@@ -275,9 +284,6 @@ pub fn feeppm_effective(feeppm: u32, basefee_msat: u32, amount_msat: u64) -> u64
 }
 
 pub fn fee_total_msat_precise(feeppm: u32, basefee_msat: u32, amount_msat: u64) -> f64 {
-    f64::from(basefee_msat) + (f64::from(feeppm) / 1_000_000.0 * amount_msat as f64)
-}
-pub fn fee_total_msat_precise_i32(feeppm: i32, basefee_msat: i32, amount_msat: u64) -> f64 {
     f64::from(basefee_msat) + (f64::from(feeppm) / 1_000_000.0 * amount_msat as f64)
 }
 
