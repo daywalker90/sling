@@ -203,7 +203,7 @@ fn build_route(
     let mut sendpay_route = Vec::new();
     let mut prev_amount_msat;
     let mut amount_msat = Amount::from_msat(0);
-    let mut delay = config.cltv_delta;
+    let mut delay = std::cmp::max(config.cltv_delta, config.cltv_final);
 
     let first_hop = if dijkstra_path.is_empty() {
         return sendpay_route;

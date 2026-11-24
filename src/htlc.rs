@@ -2,10 +2,87 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Error, anyhow};
 use cln_plugin::Plugin;
-use cln_rpc::hooks::events::HtlcAcceptedEvent;
+use cln_rpc::primitives::{Amount, PublicKey, Secret, Sha256, ShortChannelId};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::model::PluginState;
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct HtlcAcceptedEvent {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forward_to: Option<Sha256>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub peer_id: Option<PublicKey>,
+    pub htlc: HtlcAcceptedHtlc,
+    pub onion: HtlcAcceptedOnion,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct HtlcAcceptedHtlc {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra_tlvs: Option<String>,
+    pub amount_msat: Amount,
+    pub cltv_expiry: u32,
+    pub cltv_expiry_relative: i64,
+    pub id: u64,
+    pub payment_hash: Sha256,
+    pub short_channel_id: ShortChannelId,
+}
+
+/// ['Indicates that the payload is TLV formatted.', 'Only present if the payload was successfully parsed.']
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[allow(non_camel_case_types, clippy::upper_case_acronyms)]
+pub enum HtlcAcceptedOnionType {
+    #[serde(rename = "tlv")]
+    TLV = 0,
+}
+
+impl TryFrom<i32> for HtlcAcceptedOnionType {
+    type Error = anyhow::Error;
+    fn try_from(c: i32) -> Result<HtlcAcceptedOnionType, anyhow::Error> {
+        match c {
+            0 => Ok(HtlcAcceptedOnionType::TLV),
+            o => Err(anyhow::anyhow!(
+                "Unknown variant {} for enum HtlcAcceptedOnionType",
+                o
+            )),
+        }
+    }
+}
+
+#[allow(clippy::to_string_trait_impl)]
+impl ToString for HtlcAcceptedOnionType {
+    fn to_string(&self) -> String {
+        match self {
+            HtlcAcceptedOnionType::TLV => "TLV",
+        }
+        .to_string()
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct HtlcAcceptedOnion {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forward_msat: Option<Amount>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub item_type: Option<HtlcAcceptedOnionType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_node_id: Option<PublicKey>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outgoing_cltv_value: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payment_metadata: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payment_secret: Option<Secret>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub short_channel_id: Option<ShortChannelId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_msat: Option<Amount>,
+    pub next_onion: String,
+    pub payload: String,
+    pub shared_secret: Secret,
+}
 
 pub async fn htlc_handler(
     plugin: Plugin<PluginState>,
@@ -23,6 +100,7 @@ pub async fn htlc_handler(
     }
 
     let payment_hash = hook.htlc.payment_hash.to_string();
+    let cltv_final = i64::from(plugin.state().config.lock().cltv_final);
 
     let mut pays = plugin.state().pays.write();
     if let Some(pi) = pays.remove(&payment_hash) {
@@ -30,7 +108,13 @@ pub async fn htlc_handler(
             || (pi.incoming_alias.is_some()
                 && hook.htlc.short_channel_id == pi.incoming_alias.unwrap());
         let expected_amount = hook.htlc.amount_msat.msat() == pi.amount_msat;
-        if matching_scid && expected_amount {
+        let matching_cltv = hook
+            .onion
+            .outgoing_cltv_value
+            .is_some_and(|outgoing_cltv| hook.htlc.cltv_expiry >= outgoing_cltv);
+        let sufficient_cltv = hook.htlc.cltv_expiry_relative >= cltv_final;
+
+        if matching_scid && expected_amount && matching_cltv && sufficient_cltv {
             log::debug!("resolving htlc. payment_hash: {payment_hash}");
             Ok(json!({"result":"resolve","payment_key":pi.preimage}))
         } else if let Some(peer) = plugin
@@ -59,6 +143,26 @@ pub async fn htlc_handler(
                 );
             }
 
+            if !matching_cltv {
+                log::warn!(
+                    "NOT resolving HTLC from {}: CLTV EXPIRY TOO LOW FOR ONION: {} EXPECTED >= {:?}. \
+                    payment_hash: {payment_hash}",
+                    peer.peer_id,
+                    hook.htlc.cltv_expiry,
+                    hook.onion.outgoing_cltv_value
+                );
+            }
+
+            if !sufficient_cltv {
+                log::warn!(
+                    "NOT resolving HTLC from {}: CLTV EXPIRY RELATIVE TOO LOW: {} EXPECTED >= {}. \
+                    payment_hash: {payment_hash}",
+                    peer.peer_id,
+                    hook.htlc.cltv_expiry_relative,
+                    cltv_final
+                );
+            }
+
             plugin.state().bad_fwd_nodes.lock().insert(
                 peer.peer_id,
                 SystemTime::now()
@@ -71,6 +175,12 @@ pub async fn htlc_handler(
 
             Ok(json!({"result": "fail", "failure_message": "1007"}))
         } else {
+            log::warn!(
+                "NOT resolving HTLC on unknown channel {}: matching_scid={matching_scid}, \
+                expected_amount={expected_amount}, matching_cltv={matching_cltv}, \
+                sufficient_cltv={sufficient_cltv}. payment_hash: {payment_hash}",
+                hook.htlc.short_channel_id
+            );
             Ok(json!({"result": "fail", "failure_message": "1007"}))
         }
     } else {
