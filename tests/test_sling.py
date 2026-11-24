@@ -1,5 +1,4 @@
 import logging
-import math
 import os
 import time
 
@@ -488,21 +487,16 @@ def test_pull_and_push(node_factory, bitcoind, get_plugin):  # noqa: F811
     cl5 = cl5s[0]["short_channel_id"]
 
     fee_base_l2 = cl2s[0]["updates"]["local"]["fee_base_msat"]
-    fee_decimal_l2 = (
-        float(cl2s[0]["updates"]["local"]["fee_proportional_millionths"]) / 1_000_000.0
-    )
+    fee_ppm_l2 = cl2s[0]["updates"]["local"]["fee_proportional_millionths"]
     fee_base_l3 = cl3s[0]["updates"]["local"]["fee_base_msat"]
-    fee_decimal_l3 = (
-        float(cl3s[0]["updates"]["local"]["fee_proportional_millionths"]) / 1_000_000.0
-    )
+    fee_ppm_l3 = cl3s[0]["updates"]["local"]["fee_proportional_millionths"]
     fee_base_l4 = cl4s[0]["updates"]["local"]["fee_base_msat"]
-    fee_decimal_l4 = (
-        float(cl4s[0]["updates"]["local"]["fee_proportional_millionths"]) / 1_000_000.0
-    )
+    fee_ppm_l4 = cl4s[0]["updates"]["local"]["fee_proportional_millionths"]
     fee_base_l5 = cl5s[0]["updates"]["local"]["fee_base_msat"]
-    fee_decimal_l5 = (
-        float(cl5s[0]["updates"]["local"]["fee_proportional_millionths"]) / 1_000_000.0
-    )
+    fee_ppm_l5 = cl5s[0]["updates"]["local"]["fee_proportional_millionths"]
+
+    def ceil_fee(amt, ppm, base):
+        return (amt * ppm + 999_999) // 1_000_000 + base
 
     LOGGER.info(f"cl1:{cl1}")
     LOGGER.info(f"cl5:{cl5}")
@@ -535,20 +529,17 @@ def test_pull_and_push(node_factory, bitcoind, get_plugin):  # noqa: F811
     )
     pull_pay = l1.rpc.call("listpays", {"status": "complete"})["pays"][0]
     LOGGER.info(f"{pull_pay}")
-    first_fee = math.ceil(pull_pay["amount_msat"] * fee_decimal_l5) + fee_base_l5
-    second_fee = (
-        math.ceil((pull_pay["amount_msat"] + first_fee) * fee_decimal_l4) + fee_base_l4
+    first_fee = ceil_fee(pull_pay["amount_msat"], fee_ppm_l5, fee_base_l5)
+    second_fee = ceil_fee(
+        pull_pay["amount_msat"] + first_fee, fee_ppm_l4, fee_base_l4
     )
-    third_fee = (
-        math.ceil((pull_pay["amount_msat"] + first_fee + second_fee) * fee_decimal_l3)
-        + fee_base_l3
+    third_fee = ceil_fee(
+        pull_pay["amount_msat"] + first_fee + second_fee, fee_ppm_l3, fee_base_l3
     )
-    fourth_fee = (
-        math.ceil(
-            (pull_pay["amount_msat"] + first_fee + second_fee + third_fee)
-            * fee_decimal_l2
-        )
-        + fee_base_l2
+    fourth_fee = ceil_fee(
+        pull_pay["amount_msat"] + first_fee + second_fee + third_fee,
+        fee_ppm_l2,
+        fee_base_l2,
     )
     assert (
         pull_pay["amount_sent_msat"] - pull_pay["amount_msat"]
@@ -580,20 +571,17 @@ def test_pull_and_push(node_factory, bitcoind, get_plugin):  # noqa: F811
     pays = l1.rpc.call("listpays", {"status": "complete"})["pays"]
     push_pay = pays[len(pays) - 1]
     LOGGER.info(f"{push_pay}")
-    first_fee = math.ceil(push_pay["amount_msat"] * fee_decimal_l5) + fee_base_l5
-    second_fee = (
-        math.ceil((push_pay["amount_msat"] + first_fee) * fee_decimal_l4) + fee_base_l4
+    first_fee = ceil_fee(push_pay["amount_msat"], fee_ppm_l5, fee_base_l5)
+    second_fee = ceil_fee(
+        push_pay["amount_msat"] + first_fee, fee_ppm_l4, fee_base_l4
     )
-    third_fee = (
-        math.ceil((push_pay["amount_msat"] + first_fee + second_fee) * fee_decimal_l3)
-        + fee_base_l3
+    third_fee = ceil_fee(
+        push_pay["amount_msat"] + first_fee + second_fee, fee_ppm_l3, fee_base_l3
     )
-    fourth_fee = (
-        math.ceil(
-            (push_pay["amount_msat"] + first_fee + second_fee + third_fee)
-            * fee_decimal_l2
-        )
-        + fee_base_l2
+    fourth_fee = ceil_fee(
+        push_pay["amount_msat"] + first_fee + second_fee + third_fee,
+        fee_ppm_l2,
+        fee_base_l2,
     )
     assert (
         push_pay["amount_sent_msat"] - push_pay["amount_msat"]
