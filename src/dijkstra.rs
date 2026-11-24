@@ -27,7 +27,7 @@ use crate::{
         PubKeyBytes,
         Task,
     },
-    util::{div_ceil_i128, edge_cost},
+    util::{div_ceil_i64, edge_cost},
 };
 pub fn dijkstra(
     config: &Config,
@@ -286,14 +286,21 @@ fn build_route(
         prev_amount_msat = sendpay_route.first().unwrap().amount_msat.unwrap();
 
         if i + 1 < dijkstra_path.len() {
-            let prev_amt = u128::from(prev_amount_msat.msat());
-            let outbound_fee_msat = u128::from(hop.channel_state.base_fee_millisatoshi)
-                + (prev_amt * u128::from(hop.channel_state.fee_per_millionth)).div_ceil(1_000_000);
+            let prev_amt = prev_amount_msat.msat();
+            let Some(outbound_fee_msat) = prev_amt
+                .checked_mul(u64::from(hop.channel_state.fee_per_millionth))
+                .map(|p| p.div_ceil(1_000_000))
+                .and_then(|f| f.checked_add(u64::from(hop.channel_state.base_fee_millisatoshi)))
+            else {
+                return vec![];
+            };
 
-            let net_received_amt = prev_amt + outbound_fee_msat;
+            let Some(net_received_amt) = prev_amt.checked_add(outbound_fee_msat) else {
+                return vec![];
+            };
 
             // inbound fee is charged by the *next* hop's node, so look ahead
-            let inbound_fee_msat: i128 = if let Some(next_hop) = dijkstra_path.get(i + 1) {
+            let inbound_fee_msat: i64 = if let Some(next_hop) = dijkstra_path.get(i + 1) {
                 let opposite_dir = ShortChannelIdDir {
                     short_channel_id: next_hop.short_channel_id_dir.short_channel_id,
                     direction: 1 - next_hop.short_channel_id_dir.direction,
@@ -302,12 +309,18 @@ fn build_route(
                     .get_state_direction(opposite_dir)
                     .and_then(|s| s.inbound_fee)
                 {
-                    let Some(prop_product) = (net_received_amt as i128)
-                        .checked_mul(i128::from(inf.proportional_millionths))
+                    let Ok(net_i64) = i64::try_from(net_received_amt) else {
+                        return vec![];
+                    };
+                    let Some(prop_fee) = net_i64
+                        .checked_mul(i64::from(inf.proportional_millionths))
+                        .map(|p| div_ceil_i64(p, 1_000_000))
                     else {
                         return vec![];
                     };
-                    let fee = i128::from(inf.base_msat) + div_ceil_i128(prop_product, 1_000_000);
+                    let Some(fee) = prop_fee.checked_add(i64::from(inf.base_msat)) else {
+                        return vec![];
+                    };
                     log::debug!("{opposite_dir}: inbound fee: {fee} msat");
                     fee
                 } else {
@@ -317,11 +330,17 @@ fn build_route(
                 0
             };
 
-            let next_amt_i128 = (net_received_amt as i128 + inbound_fee_msat).max(prev_amt as i128);
-            let Ok(next_amt_u64) = u64::try_from(next_amt_i128) else {
-                return vec![];
+            let next_amt = if inbound_fee_msat >= 0 {
+                let Some(amt) = net_received_amt.checked_add(inbound_fee_msat as u64) else {
+                    return vec![];
+                };
+                amt
+            } else {
+                net_received_amt
+                    .saturating_sub(inbound_fee_msat.unsigned_abs())
+                    .max(prev_amt)
             };
-            amount_msat = Amount::from_msat(next_amt_u64);
+            amount_msat = Amount::from_msat(next_amt);
             delay = delay.saturating_add(hop.channel_state.delay);
         }
     }

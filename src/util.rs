@@ -246,7 +246,7 @@ pub fn get_total_htlc_count(channel: &ListpeerchannelsChannels) -> u64 {
     }
 }
 
-pub fn div_ceil_i128(a: i128, b: i128) -> i128 {
+pub fn div_ceil_i64(a: i64, b: i64) -> i64 {
     debug_assert!(b > 0);
     let q = a / b;
     let r = a % b;
@@ -258,24 +258,50 @@ pub fn edge_cost(
     inbound_fee: Option<InboundFee>,
     amount: u64,
 ) -> u64 {
-    let amt = u128::from(amount);
-    let outbound_fee = u128::from(edge.base_fee_millisatoshi)
-        + (amt * u128::from(edge.fee_per_millionth)).div_ceil(1_000_000);
+    let Some(outbound_fee) = amount
+        .checked_mul(u64::from(edge.fee_per_millionth))
+        .map(|p| p.div_ceil(1_000_000))
+        .and_then(|f| f.checked_add(u64::from(edge.base_fee_millisatoshi)))
+    else {
+        return u64::MAX;
+    };
 
-    let net_received_amt = amt + outbound_fee;
+    let Some(net_received_amt) = amount.checked_add(outbound_fee) else {
+        return u64::MAX;
+    };
 
-    let inbound_fee_msat: i128 = inbound_fee.map_or(0, |inf| {
-        i128::from(inf.base_msat)
-            + div_ceil_i128(
-                net_received_amt as i128 * i128::from(inf.proportional_millionths),
-                1_000_000,
-            )
-    });
+    let inbound_fee_msat: i64 = match inbound_fee {
+        Some(inf) => {
+            let Ok(net_i64) = i64::try_from(net_received_amt) else {
+                return u64::MAX;
+            };
+            let Some(prop_fee) = net_i64
+                .checked_mul(i64::from(inf.proportional_millionths))
+                .map(|p| div_ceil_i64(p, 1_000_000))
+            else {
+                return u64::MAX;
+            };
+            let Some(fee) = prop_fee.checked_add(i64::from(inf.base_msat)) else {
+                return u64::MAX;
+            };
+            fee
+        }
+        None => 0,
+    };
 
-    let total_fee = (outbound_fee as i128 + inbound_fee_msat).max(0) as u128;
+    let total_fee = if inbound_fee_msat >= 0 {
+        let Some(fee) = outbound_fee.checked_add(inbound_fee_msat as u64) else {
+            return u64::MAX;
+        };
+        fee
+    } else {
+        outbound_fee.saturating_sub(inbound_fee_msat.unsigned_abs())
+    };
 
-    let ppm = total_fee.saturating_mul(1_000_000).div_ceil(amt);
-    u64::try_from(ppm).unwrap_or(u64::MAX).max(2)
+    total_fee
+        .checked_mul(1_000_000)
+        .map_or(u64::MAX, |p| p.div_ceil(amount))
+        .max(2)
 }
 
 pub fn feeppm_effective(feeppm: u32, basefee_msat: u32, amount_msat: u64) -> u64 {
