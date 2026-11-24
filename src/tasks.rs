@@ -105,6 +105,7 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
     let mut reader = BufReader::new(gossip_file);
 
     let mut store_hint = None;
+    let mut reset_graph = false;
 
     let interval;
     {
@@ -122,16 +123,22 @@ pub async fn refresh_graph(plugin: Plugin<PluginState>) -> Result<(), Error> {
             {
                 log::debug!("Getting all channels in gossip_store...");
                 loop {
+                    let do_reset = reset_graph;
+                    reset_graph = false;
                     match read_gossip_store(
                         plugin.clone(),
                         &mut reader,
                         &mut is_startup,
                         store_hint,
+                        do_reset,
                     )
                     .await
                     {
                         Ok(Some(ns)) => {
-                            if ns.equivalent_offset != 0 {
+                            if ns.missed_compaction {
+                                store_hint = None;
+                                reset_graph = true;
+                            } else if ns.equivalent_offset != 0 {
                                 store_hint = Some(ns);
                             } else {
                                 store_hint = None;

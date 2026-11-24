@@ -7,7 +7,7 @@ use std::{
 use anyhow::{Error, anyhow};
 use bitcoin::consensus::encode::serialize_hex;
 use cln_plugin::Plugin;
-use cln_rpc::primitives::{Amount, ShortChannelId, ShortChannelIdDir};
+use cln_rpc::primitives::{Amount, PublicKey, ShortChannelId, ShortChannelIdDir};
 use serde::Serialize;
 
 use crate::{
@@ -47,6 +47,7 @@ pub struct ChannelAnnouncement {
 pub struct NextGossipStore {
     pub equivalent_offset: u64,
     pub uuid: [u8; 32],
+    pub missed_compaction: bool,
 }
 
 const CHUNK_SIZE: usize = 1024 * 1024;
@@ -56,9 +57,15 @@ pub async fn read_gossip_store(
     reader: &mut BufReader<File>,
     is_start_up: &mut bool,
     store_hint: Option<NextGossipStore>,
+    reset_graph: bool,
 ) -> Result<Option<NextGossipStore>, Error> {
     let mut graph = plugin.state().graph.lock();
     let mut incomplete_channels = plugin.state().incomplete_channels.lock();
+
+    if reset_graph {
+        graph.clear();
+        incomplete_channels.clear();
+    }
 
     let mut offset = 0;
 
@@ -138,8 +145,14 @@ pub fn read_gossip_file(
         }
         if *offset < bytes_read {
             reader.seek_relative(*offset as i64 - bytes_read as i64)?;
+            let should_break = *offset == 0 || bytes_read < CHUNK_SIZE;
+            *offset = 0;
+            if should_break {
+                break;
+            }
+        } else {
+            *offset = 0;
         }
-        *offset = 0;
     }
     log::trace!(
         "read_gossip_file: gossip_store read in: {}ms",
@@ -180,50 +193,47 @@ fn read_gossip_file_chunk(
         "read_gossip_file_chunk: reading gossip_store chunk of size {}",
         gossip_file.len()
     );
-    while *offset + 14 < gossip_file.len() {
-        // Read the record header + type
+    while *offset + 12 <= gossip_file.len() {
+        // Read the 12-byte record header: flags (2), len (2), crc (4), timestamp (4)
         let flags = u16::from_be_bytes(gossip_file[*offset..*offset + 2].try_into()?);
-        *offset += 2;
-        let len = u16::from_be_bytes(gossip_file[*offset..*offset + 2].try_into()?) as usize;
-        *offset += 10;
-        if *offset + len > gossip_file.len() {
-            *offset -= 12;
+        let len = u16::from_be_bytes(gossip_file[*offset + 2..*offset + 4].try_into()?) as usize;
+        if *offset + 12 + len > gossip_file.len() {
             break;
         }
-        // let crc;
-        // let timestamp;
+        *offset += 12;
+
+        if len < 2 {
+            log::warn!("read_gossip_file_chunk: record length {len} < 2, skipping");
+            *offset += len;
+            continue;
+        }
+
         let msg_type = u16::from_be_bytes(gossip_file[*offset..*offset + 2].try_into()?);
-        *offset += 2;
+        let body = &gossip_file[*offset + 2..*offset + len];
+        *offset += len;
 
         // Check if the record is marked as deleted
         if flags & 0x8000 != 0 {
-            *offset += len - 2;
             continue;
         }
         // Check if the record is marked as dying
         if flags & 0x0800 != 0 {
-            *offset += len - 2;
             continue;
         }
 
         match msg_type {
             256 => {
                 // public channel_announcement
-                let (scid, chan_ann) =
-                    match parse_channel_announcement(&gossip_file[*offset..*offset + len - 2]) {
-                        Ok(x) => {
-                            *offset += len - 2;
-                            x
-                        }
-                        Err(e) => {
-                            log::warn!(
-                                "read_gossip_file_chunk: Error parsing \
+                let (scid, chan_ann) = match parse_channel_announcement(body) {
+                    Ok(x) => x,
+                    Err(e) => {
+                        log::warn!(
+                            "read_gossip_file_chunk: Error parsing \
                             channel_announcement: {e}"
-                            );
-                            *offset += len - 2;
-                            continue;
-                        }
-                    };
+                        );
+                        continue;
+                    }
+                };
 
                 let dir_chan_0 = ShortChannelIdDir {
                     short_channel_id: scid,
@@ -261,22 +271,36 @@ fn read_gossip_file_chunk(
             4104 => {
                 // private_channel_announcement
                 //  `gossip_store_private_channel` (4104)
-                //   - `amount_sat`: u64
-                //   - `len`: u16
-                //   - `msg_type + announcement`: u16 + u8[len-2]
-                let (scid, chan_ann) = match parse_channel_announcement(
-                    &gossip_file[*offset + 12..*offset + 10 + len],
-                ) {
-                    Ok(x) => {
-                        *offset += len + 10;
-                        x
-                    }
+                //   - `amount_sat`: u64 (body[0..8])
+                //   - `inner_len`: u16 (body[8..10])
+                //   - `inner_msg_type + announcement`: u16 + u8[inner_len-2] (body[10..10+inner_len])
+                if body.len() < 12 {
+                    log::warn!(
+                        "read_gossip_file_chunk: truncated private_channel_announcement ({} bytes)",
+                        body.len()
+                    );
+                    continue;
+                }
+                let inner_len = u16::from_be_bytes(body[8..10].try_into()?) as usize;
+                let Some(end) = 10usize.checked_add(inner_len) else {
+                    log::warn!("read_gossip_file_chunk: private_channel_announcement length overflow");
+                    continue;
+                };
+                if inner_len < 2 || end > body.len() {
+                    log::warn!(
+                        "read_gossip_file_chunk: invalid private_channel_announcement inner_len \
+                        {inner_len} for body len {}",
+                        body.len()
+                    );
+                    continue;
+                }
+                let (scid, chan_ann) = match parse_channel_announcement(&body[12..end]) {
+                    Ok(x) => x,
                     Err(e) => {
                         log::warn!(
                             "read_gossip_file_chunk: Error parsing \
                             channel_announcement: {e}"
                         );
-                        *offset += len + 10;
                         continue;
                     }
                 };
@@ -317,21 +341,16 @@ fn read_gossip_file_chunk(
             }
             258 => {
                 // channel_update
-                let (scid_dir, chan_up) =
-                    match parse_channel_update(&gossip_file[*offset..*offset + len - 2]) {
-                        Ok(x) => {
-                            *offset += len - 2;
-                            x
-                        }
-                        Err(e) => {
-                            log::warn!(
-                                "read_gossip_file_chunk: Error parsing \
+                let (scid_dir, chan_up) = match parse_channel_update(body) {
+                    Ok(x) => x,
+                    Err(e) => {
+                        log::warn!(
+                            "read_gossip_file_chunk: Error parsing \
                             channel_update: {e}"
-                            );
-                            *offset += len - 2;
-                            continue;
-                        }
-                    };
+                        );
+                        continue;
+                    }
+                };
 
                 let mut updated = false;
 
@@ -353,23 +372,38 @@ fn read_gossip_file_chunk(
             }
             4102 => {
                 //   - `gossip_store_private_update` (4102)
-                //   - `len`: u16
-                //   - `msg_type + update`: u16 + u8[len-2]
-                let (scid_dir, chan_up) =
-                    match parse_channel_update(&gossip_file[*offset + 4..*offset + 2 + len]) {
-                        Ok(x) => {
-                            *offset += len + 2;
-                            x
-                        }
-                        Err(e) => {
-                            log::warn!(
-                                "read_gossip_file_chunk: Error parsing \
+                //   - `inner_len`: u16 (body[0..2])
+                //   - `inner_msg_type + update`: u16 + u8[inner_len-2] (body[2..2+inner_len])
+                if body.len() < 4 {
+                    log::warn!(
+                        "read_gossip_file_chunk: truncated private_update ({} bytes)",
+                        body.len()
+                    );
+                    continue;
+                }
+                let inner_len = u16::from_be_bytes(body[0..2].try_into()?) as usize;
+                let Some(end) = 2usize.checked_add(inner_len) else {
+                    log::warn!("read_gossip_file_chunk: private_update length overflow");
+                    continue;
+                };
+                if inner_len < 2 || end > body.len() {
+                    log::warn!(
+                        "read_gossip_file_chunk: invalid private_update inner_len \
+                        {inner_len} for body len {}",
+                        body.len()
+                    );
+                    continue;
+                }
+                let (scid_dir, chan_up) = match parse_channel_update(&body[4..end]) {
+                    Ok(x) => x,
+                    Err(e) => {
+                        log::warn!(
+                            "read_gossip_file_chunk: Error parsing \
                             channel_update: {e}"
-                            );
-                            *offset += len + 2;
-                            continue;
-                        }
-                    };
+                        );
+                        continue;
+                    }
+                };
                 let mut updated = false;
                 if let Some(chan_state) = graph.get_state_mut_direction(scid_dir) {
                     chan_state.update(chan_up);
@@ -389,19 +423,21 @@ fn read_gossip_file_chunk(
             4101 => {
                 // gossip_store_channel_amount
                 //  - `satoshis`: u64
-                *offset += 8;
             }
             4103 => {
                 // 4103 gossip_store_delete_chan
                 //  - `scid`: u64
-                let scid = match extract_scid(&gossip_file[*offset..*offset + 8]) {
-                    Ok(x) => {
-                        *offset += 8;
-                        x
-                    }
+                if body.len() < 8 {
+                    log::warn!(
+                        "read_gossip_file_chunk: truncated delete_chan ({} bytes)",
+                        body.len()
+                    );
+                    continue;
+                }
+                let scid = match extract_scid(&body[0..8]) {
+                    Ok(x) => x,
                     Err(e) => {
                         log::warn!("read_gossip_file_chunk: Error parsing scid: {e}");
-                        *offset += 8;
                         continue;
                     }
                 };
@@ -423,16 +459,17 @@ fn read_gossip_file_chunk(
                 // 4106 WIRE_GOSSIP_STORE_CHAN_DYING
                 //  - `scid`: u64
                 //  - `blockheight`: u32
-                let scid = match extract_scid(&gossip_file[*offset..*offset + 8]) {
-                    Ok(x) => {
-                        // skip blockheight aswell (+4)
-                        *offset += 12;
-                        x
-                    }
+                if body.len() < 12 {
+                    log::warn!(
+                        "read_gossip_file_chunk: truncated chan_dying ({} bytes)",
+                        body.len()
+                    );
+                    continue;
+                }
+                let scid = match extract_scid(&body[0..8]) {
+                    Ok(x) => x,
                     Err(e) => {
                         log::warn!("read_gossip_file_chunk: Error parsing scid: {e}");
-                        // skip blockheight aswell (+4)
-                        *offset += 12;
                         continue;
                     }
                 };
@@ -454,10 +491,14 @@ fn read_gossip_file_chunk(
                 // 4105 gossip_store_ended
                 //  - `equivalent_offset`: u64
                 //  - `uuid`: [u8; 32]
-                let equivalent_offset =
-                    u64::from_be_bytes(gossip_file[*offset..*offset + 8].try_into()?);
-                *offset += 8;
-                let uuid: [u8; 32] = gossip_file[*offset..*offset + 32].try_into()?;
+                if body.len() < 40 {
+                    return Err(anyhow!(
+                        "read_gossip_file_chunk: truncated gossip_store_ended ({} bytes)",
+                        body.len()
+                    ));
+                }
+                let equivalent_offset = u64::from_be_bytes(body[0..8].try_into()?);
+                let uuid: [u8; 32] = body[8..40].try_into()?;
                 log::trace!(
                     "read_gossip_file_chunk: encountered gossip_store_ended with \
                 equivalent_offset: {equivalent_offset} and next uuid: {}",
@@ -466,13 +507,20 @@ fn read_gossip_file_chunk(
                 let next_store = NextGossipStore {
                     equivalent_offset,
                     uuid,
+                    missed_compaction: false,
                 };
                 return Ok(Some(next_store));
             }
             4107 => {
                 // 4107 uuid
                 //  - `uuid`: [u8; 32]
-                let uuid: [u8; 32] = gossip_file[*offset..*offset + 32].try_into()?;
+                if body.len() < 32 {
+                    return Err(anyhow!(
+                        "read_gossip_file_chunk: truncated uuid record ({} bytes)",
+                        body.len()
+                    ));
+                }
+                let uuid: [u8; 32] = body[0..32].try_into()?;
                 log::trace!(
                     "read_gossip_file_chunk: opened gossip_store with uuid: {}",
                     serialize_hex(&uuid)
@@ -483,6 +531,7 @@ fn read_gossip_file_chunk(
                         let next_store = NextGossipStore {
                             equivalent_offset: 0,
                             uuid,
+                            missed_compaction: true,
                         };
                         log::info!(
                             "read_gossip_file_chunk: missed gossip_store compaction, \
@@ -499,13 +548,9 @@ fn read_gossip_file_chunk(
                     *offset = gossip_file.len();
                     break;
                 }
-
-                *offset += 32;
             }
             _e => {
                 // Unknown message type
-                // debug!("unknown: {}", e);
-                *offset += len - 2;
             }
         }
     }
@@ -558,12 +603,29 @@ fn parse_channel_announcement(
     // 64..128 sig2
     // 128..192 bc_sig_1
     // 192..256 bc_sig_2
+    if input.len() < 258 {
+        return Err(anyhow!("channel_announcement < 258 bytes"));
+    }
     let len = u16::from_be_bytes(input[256..258].try_into()?) as usize;
+    let required_len = 364usize
+        .checked_add(len)
+        .ok_or_else(|| anyhow!("channel_announcement length overflow"))?;
+    if input.len() < required_len {
+        return Err(anyhow!(
+            "channel_announcement truncated: {} < {}",
+            input.len(),
+            required_len
+        ));
+    }
     // 258..258+len features
     // 258+len..290+len chain_hash
     let scid = extract_scid(&input[(290 + len)..(298 + len)])?;
-    let source = PubKeyBytes::new(input[(298 + len)..(331 + len)].try_into()?);
-    let destination = PubKeyBytes::new(input[(331 + len)..(364 + len)].try_into()?);
+    let source_bytes: [u8; 33] = input[(298 + len)..(331 + len)].try_into()?;
+    let dest_bytes: [u8; 33] = input[(331 + len)..(364 + len)].try_into()?;
+    PublicKey::from_slice(&source_bytes)?;
+    PublicKey::from_slice(&dest_bytes)?;
+    let source = PubKeyBytes::new(source_bytes);
+    let destination = PubKeyBytes::new(dest_bytes);
     Ok((
         scid,
         ChannelAnnouncement {
@@ -578,23 +640,24 @@ fn parse_channel_update_tlvs(
     mut data: &[u8],
     inbound_fee: &mut Option<InboundFee>,
 ) -> Result<(), Error> {
-    let mut last_type = 0;
+    let mut last_type: Option<u64> = None;
 
     while !data.is_empty() {
         let (ty, rest) = read_bigsize(data)?;
         let (len, rest) = read_bigsize(rest)?;
 
-        if ty <= last_type {
+        if last_type.is_some_and(|prev| ty <= prev) {
             return Err(anyhow!("TLV types not strictly increasing"));
         }
 
-        last_type = ty;
+        last_type = Some(ty);
 
-        if rest.len() < len as usize {
+        let len_usize = usize::try_from(len).map_err(|_| anyhow!("TLV length overflow"))?;
+        if rest.len() < len_usize {
             return Err(anyhow!("TLV truncated"));
         }
 
-        let (value, remaining) = rest.split_at(len as usize);
+        let (value, remaining) = rest.split_at(len_usize);
 
         match ty {
             55555 => {
@@ -853,5 +916,382 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn make_pubkey_bytes(seed: u8) -> [u8; 33] {
+        use bitcoin::secp256k1::{Secp256k1, SecretKey};
+        let secp = Secp256k1::new();
+        let mut bytes = [0u8; 32];
+        bytes[31] = seed;
+        let sk = SecretKey::from_slice(&bytes).unwrap();
+        PublicKey::from_secret_key(&secp, &sk).serialize()
+    }
+
+    fn make_record(flags: u16, msg_type: u16, body: &[u8]) -> Vec<u8> {
+        let len = (2 + body.len()) as u16;
+        let mut out = Vec::with_capacity(12 + len as usize);
+        out.extend_from_slice(&flags.to_be_bytes());
+        out.extend_from_slice(&len.to_be_bytes());
+        out.extend_from_slice(&0u32.to_be_bytes()); // crc
+        out.extend_from_slice(&0u32.to_be_bytes()); // timestamp
+        out.extend_from_slice(&msg_type.to_be_bytes());
+        out.extend_from_slice(body);
+        out
+    }
+
+    fn make_chan_ann_body(scid: u64, node1: [u8; 33], node2: [u8; 33]) -> Vec<u8> {
+        let mut body = vec![0u8; 364];
+        // 0..256 sigs, 256..258 features_len = 0, 258..290 chain_hash
+        body[290..298].copy_from_slice(&scid.to_be_bytes());
+        body[298..331].copy_from_slice(&node1);
+        body[331..364].copy_from_slice(&node2);
+        body
+    }
+
+    fn make_chan_update_body(scid: u64, direction: u8, fee_ppm: u32, delay: u16) -> Vec<u8> {
+        let mut body = vec![0u8; 136];
+        // 0..64 sig, 64..96 chain_hash
+        body[96..104].copy_from_slice(&scid.to_be_bytes());
+        body[104..108].copy_from_slice(&1_700_000_000u32.to_be_bytes()); // timestamp
+        body[108] = 1; // message_flags (dont_forward=0, option_channel_htlc_max=1)
+        body[109] = direction & 1; // channel_flags (disabled=0)
+        body[110..112].copy_from_slice(&delay.to_be_bytes());
+        body[112..120].copy_from_slice(&1_000u64.to_be_bytes()); // htlc_min
+        body[120..124].copy_from_slice(&1_000u32.to_be_bytes()); // base_fee
+        body[124..128].copy_from_slice(&fee_ppm.to_be_bytes());
+        body[128..136].copy_from_slice(&1_000_000_000u64.to_be_bytes()); // htlc_max
+        body
+    }
+
+    fn write_temp_gossip(name: &str, bytes: &[u8]) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "sling_test_{}_{}_{name}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    #[test]
+    fn test_gossip_4104_and_4102_no_oob_or_offset_desync() {
+        let n1 = make_pubkey_bytes(1);
+        let n2 = make_pubkey_bytes(2);
+        let n3 = make_pubkey_bytes(3);
+        let priv_scid: u64 = (100 << 40) | (1 << 16);
+        let pub_scid: u64 = (100 << 40) | (2 << 16);
+
+        let mut store = vec![0u8]; // gossip_store v0
+
+        // 4104 private channel announcement: amount_sat (8) + inner_len (2) + inner_type (2) + ann
+        let priv_ann = make_chan_ann_body(priv_scid, n1, n2);
+        let mut body_4104 = Vec::new();
+        body_4104.extend_from_slice(&1_000_000u64.to_be_bytes());
+        body_4104.extend_from_slice(&((2 + priv_ann.len()) as u16).to_be_bytes());
+        body_4104.extend_from_slice(&256u16.to_be_bytes());
+        body_4104.extend_from_slice(&priv_ann);
+        store.extend_from_slice(&make_record(0, 4104, &body_4104));
+
+        // 4102 private channel update: inner_len (2) + inner_type (2) + update
+        let priv_upd = make_chan_update_body(priv_scid, 0, 50, 34);
+        let mut body_4102 = Vec::new();
+        body_4102.extend_from_slice(&((2 + priv_upd.len()) as u16).to_be_bytes());
+        body_4102.extend_from_slice(&258u16.to_be_bytes());
+        body_4102.extend_from_slice(&priv_upd);
+        store.extend_from_slice(&make_record(0, 4102, &body_4102));
+
+        // Immediately followed by a public channel announcement + update (would be corrupted
+        // or cause OOB panic under the old `*offset += len + 10` / `len + 2` bug!)
+        let pub_ann = make_chan_ann_body(pub_scid, n2, n3);
+        let pub_upd = make_chan_update_body(pub_scid, 0, 75, 40);
+        store.extend_from_slice(&make_record(0, 256, &pub_ann));
+        store.extend_from_slice(&make_record(0, 258, &pub_upd));
+
+        let path = write_temp_gossip("4104_4102", &store);
+        let mut reader = BufReader::new(File::open(&path).unwrap());
+        let mut is_start_up = true;
+        let mut offset = 0;
+        let mut graph = LnGraph::new();
+        let mut incomplete = IncompleteChannels::new();
+
+        read_gossip_file(
+            &mut is_start_up,
+            &mut reader,
+            &mut graph,
+            &mut incomplete,
+            &mut offset,
+            None,
+        )
+        .unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        let priv_dir0 = ShortChannelIdDir {
+            short_channel_id: ShortChannelId::from(priv_scid),
+            direction: 0,
+        };
+        let pub_dir0 = ShortChannelIdDir {
+            short_channel_id: ShortChannelId::from(pub_scid),
+            direction: 0,
+        };
+        assert_eq!(graph.get_state_direction(priv_dir0).unwrap().fee_per_millionth, 50);
+        assert_eq!(graph.get_state_direction(pub_dir0).unwrap().fee_per_millionth, 75);
+    }
+
+    #[test]
+    fn test_gossip_malformed_and_truncated_records_no_panic() {
+        let n1 = make_pubkey_bytes(1);
+        let n2 = make_pubkey_bytes(2);
+        let valid_scid: u64 = (200 << 40) | (1 << 16);
+
+        let mut store = vec![0u8]; // gossip_store v0
+
+        // Record with len = 0 (previously underflowed `len - 2`)
+        store.extend_from_slice(&0u16.to_be_bytes());
+        store.extend_from_slice(&0u16.to_be_bytes());
+        store.extend_from_slice(&0u32.to_be_bytes());
+        store.extend_from_slice(&0u32.to_be_bytes());
+
+        // Record with len = 1 (previously underflowed `len - 2`)
+        store.extend_from_slice(&0u16.to_be_bytes());
+        store.extend_from_slice(&1u16.to_be_bytes());
+        store.extend_from_slice(&0u32.to_be_bytes());
+        store.extend_from_slice(&0u32.to_be_bytes());
+        store.push(0xff);
+
+        // Truncated 256, 4104, 4102, 4103, 4106
+        store.extend_from_slice(&make_record(0, 256, &[0u8; 10]));
+        store.extend_from_slice(&make_record(0, 4104, &[0u8; 6]));
+        store.extend_from_slice(&make_record(0, 4102, &[0u8; 2]));
+        store.extend_from_slice(&make_record(0, 4103, &[0u8; 4]));
+        store.extend_from_slice(&make_record(0, 4106, &[0u8; 8]));
+
+        // 256 with invalid pubkeys (all zeros)
+        let bad_ann = make_chan_ann_body(valid_scid + 1, [0u8; 33], [0u8; 33]);
+        store.extend_from_slice(&make_record(0, 256, &bad_ann));
+
+        // 4104 with bogus huge inner_len exceeding record body
+        let mut bad_4104 = vec![0u8; 16];
+        bad_4104[8..10].copy_from_slice(&500u16.to_be_bytes());
+        store.extend_from_slice(&make_record(0, 4104, &bad_4104));
+
+        // Valid channel at the end must still parse cleanly
+        let good_ann = make_chan_ann_body(valid_scid, n1, n2);
+        let good_upd = make_chan_update_body(valid_scid, 0, 123, 34);
+        store.extend_from_slice(&make_record(0, 256, &good_ann));
+        store.extend_from_slice(&make_record(0, 258, &good_upd));
+
+        let path = write_temp_gossip("malformed", &store);
+        let mut reader = BufReader::new(File::open(&path).unwrap());
+        let mut is_start_up = true;
+        let mut offset = 0;
+        let mut graph = LnGraph::new();
+        let mut incomplete = IncompleteChannels::new();
+
+        read_gossip_file(
+            &mut is_start_up,
+            &mut reader,
+            &mut graph,
+            &mut incomplete,
+            &mut offset,
+            None,
+        )
+        .unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        let dir0 = ShortChannelIdDir {
+            short_channel_id: ShortChannelId::from(valid_scid),
+            direction: 0,
+        };
+        assert_eq!(graph.get_state_direction(dir0).unwrap().fee_per_millionth, 123);
+    }
+
+    #[test]
+    fn test_gossip_partial_eof_and_14byte_record_no_infinite_loop() {
+        use std::io::Write;
+
+        let n1 = make_pubkey_bytes(1);
+        let n2 = make_pubkey_bytes(2);
+        let scid1: u64 = (300 << 40) | (1 << 16);
+        let scid2: u64 = (300 << 40) | (2 << 16);
+
+        let mut store = vec![0u8]; // gossip_store v0
+        store.extend_from_slice(&make_record(0, 256, &make_chan_ann_body(scid1, n1, n2)));
+        store.extend_from_slice(&make_record(0, 258, &make_chan_update_body(scid1, 0, 42, 34)));
+        // Exact 14-byte record (12 header + 2 msg_type, empty body) — previously left unparsed
+        // at EOF due to `*offset + 14 < len` and caused an infinite seek-back busy loop!
+        store.extend_from_slice(&make_record(0, 9999, &[]));
+
+        // Append ONLY the first half of the next channel announcement (partial EOF write)
+        let rec2_ann = make_record(0, 256, &make_chan_ann_body(scid2, n1, n2));
+        let rec2_upd = make_record(0, 258, &make_chan_update_body(scid2, 0, 88, 34));
+        let split_at = 20;
+        store.extend_from_slice(&rec2_ann[..split_at]);
+
+        let path = write_temp_gossip("partial_eof", &store);
+        let mut reader = BufReader::new(File::open(&path).unwrap());
+        let mut is_start_up = true;
+        let mut offset = 0;
+        let mut graph = LnGraph::new();
+        let mut incomplete = IncompleteChannels::new();
+
+        // Must return cleanly (no infinite loop!) with scid1 parsed and partial scid2 left for later
+        read_gossip_file(
+            &mut is_start_up,
+            &mut reader,
+            &mut graph,
+            &mut incomplete,
+            &mut offset,
+            None,
+        )
+        .unwrap();
+
+        let dir1 = ShortChannelIdDir {
+            short_channel_id: ShortChannelId::from(scid1),
+            direction: 0,
+        };
+        let dir2 = ShortChannelIdDir {
+            short_channel_id: ShortChannelId::from(scid2),
+            direction: 0,
+        };
+        assert_eq!(graph.get_state_direction(dir1).unwrap().fee_per_millionth, 42);
+        assert!(graph.get_state_direction(dir2).is_none());
+
+        // Now append the remaining bytes and re-read: scid2 must now parse cleanly!
+        let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+        f.write_all(&rec2_ann[split_at..]).unwrap();
+        f.write_all(&rec2_upd).unwrap();
+        drop(f);
+
+        read_gossip_file(
+            &mut is_start_up,
+            &mut reader,
+            &mut graph,
+            &mut incomplete,
+            &mut offset,
+            None,
+        )
+        .unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(graph.get_state_direction(dir2).unwrap().fee_per_millionth, 88);
+    }
+
+    #[test]
+    fn test_gossip_missed_compaction_clears_stale_channels() {
+        let n1 = make_pubkey_bytes(1);
+        let n2 = make_pubkey_bytes(2);
+        let n3 = make_pubkey_bytes(3);
+        let closed_scid: u64 = (400 << 40) | (1 << 16);
+        let live_scid: u64 = (400 << 40) | (2 << 16);
+        let uuid_2 = [2u8; 32];
+        let uuid_3 = [3u8; 32];
+
+        // Store #1: contains both closed_scid and live_scid, ending with 4105 pointing to uuid_2
+        let mut store1 = vec![0u8];
+        store1.extend_from_slice(&make_record(0, 256, &make_chan_ann_body(closed_scid, n1, n2)));
+        store1.extend_from_slice(&make_record(0, 258, &make_chan_update_body(closed_scid, 0, 10, 34)));
+        store1.extend_from_slice(&make_record(0, 256, &make_chan_ann_body(live_scid, n2, n3)));
+        store1.extend_from_slice(&make_record(0, 258, &make_chan_update_body(live_scid, 0, 20, 34)));
+        let mut ended_body = Vec::new();
+        ended_body.extend_from_slice(&100u64.to_be_bytes());
+        ended_body.extend_from_slice(&uuid_2);
+        store1.extend_from_slice(&make_record(0, 4105, &ended_body));
+
+        // Store #3 (compacted after closed_scid was deleted in store #2):
+        // starts with uuid_3 (!= uuid_2) and ONLY contains live_scid (no delete_chan for closed_scid)
+        let mut store3 = vec![0u8];
+        store3.extend_from_slice(&make_record(0, 4107, &uuid_3));
+        store3.extend_from_slice(&make_record(0, 256, &make_chan_ann_body(live_scid, n2, n3)));
+        store3.extend_from_slice(&make_record(0, 258, &make_chan_update_body(live_scid, 0, 25, 34)));
+
+        let path1 = write_temp_gossip("compact1", &store1);
+        let path3 = write_temp_gossip("compact3", &store3);
+
+        let mut graph = LnGraph::new();
+        let mut incomplete = IncompleteChannels::new();
+        let mut is_start_up = true;
+        let mut offset = 0;
+
+        // Read store #1 -> returns store_hint for uuid_2
+        let mut reader1 = BufReader::new(File::open(&path1).unwrap());
+        let hint = read_gossip_file(
+            &mut is_start_up,
+            &mut reader1,
+            &mut graph,
+            &mut incomplete,
+            &mut offset,
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(!hint.missed_compaction);
+        assert_eq!(hint.uuid, uuid_2);
+        assert!(
+            graph
+                .get_state_direction(ShortChannelIdDir {
+                    short_channel_id: ShortChannelId::from(closed_scid),
+                    direction: 0,
+                })
+                .is_some()
+        );
+
+        // Open store #3 with hint for uuid_2 -> detects missed_compaction!
+        let mut reader3 = BufReader::new(File::open(&path3).unwrap());
+        is_start_up = true;
+        offset = 0;
+        let missed = read_gossip_file(
+            &mut is_start_up,
+            &mut reader3,
+            &mut graph,
+            &mut incomplete,
+            &mut offset,
+            Some(hint),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(missed.missed_compaction);
+
+        // Reopen store #3 from offset 0 with reset_graph (graph.clear() + incomplete.clear())
+        graph.clear();
+        incomplete.clear();
+        let mut reader3_fresh = BufReader::new(File::open(&path3).unwrap());
+        is_start_up = true;
+        offset = 0;
+        let next = read_gossip_file(
+            &mut is_start_up,
+            &mut reader3_fresh,
+            &mut graph,
+            &mut incomplete,
+            &mut offset,
+            None,
+        )
+        .unwrap();
+        assert!(next.is_none());
+
+        let _ = std::fs::remove_file(&path1);
+        let _ = std::fs::remove_file(&path3);
+
+        // closed_scid must be gone, live_scid must have its updated fee (25 ppm)!
+        assert!(
+            graph
+                .get_state_direction(ShortChannelIdDir {
+                    short_channel_id: ShortChannelId::from(closed_scid),
+                    direction: 0,
+                })
+                .is_none()
+        );
+        assert_eq!(
+            graph
+                .get_state_direction(ShortChannelIdDir {
+                    short_channel_id: ShortChannelId::from(live_scid),
+                    direction: 0,
+                })
+                .unwrap()
+                .fee_per_millionth,
+            25
+        );
     }
 }
