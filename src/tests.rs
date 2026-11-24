@@ -311,6 +311,397 @@ fn test_parse_once_job_overflow() {
     assert!(res.is_err());
 }
 
+fn make_pubkey(seed: u8) -> PublicKey {
+    use bitcoin::secp256k1::{Secp256k1, SecretKey};
+    let secp = Secp256k1::new();
+    let mut bytes = [0u8; 32];
+    bytes[31] = seed;
+    let sk = SecretKey::from_slice(&bytes).unwrap();
+    PublicKey::from_secret_key(&secp, &sk)
+}
+
+fn insert_edge(
+    graph: &mut LnGraph,
+    scid: ShortChannelId,
+    source: PublicKey,
+    destination: PublicKey,
+    fee_ppm: u32,
+    base_msat: u32,
+    delay: u32,
+    inbound_fee: Option<crate::gossip::InboundFee>,
+) {
+    use crate::model::{PubKeyBytes, ShortChannelIdDirState};
+    let direction = if source < destination { 0 } else { 1 };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as u32;
+    graph.insert(
+        ShortChannelIdDir {
+            short_channel_id: scid,
+            direction,
+        },
+        ShortChannelIdDirState {
+            source: PubKeyBytes::from_pubkey(&source),
+            destination: PubKeyBytes::from_pubkey(&destination),
+            active: true,
+            scid_alias: None,
+            fee_per_millionth: fee_ppm,
+            base_fee_millisatoshi: base_msat,
+            htlc_maximum_msat: Amount::from_msat(10_000_000_000),
+            htlc_minimum_msat: Amount::from_msat(1_000),
+            delay,
+            last_update: now,
+            private: false,
+            inbound_fee,
+        },
+    );
+}
+
+#[test]
+fn test_dijkstra_build_route_extreme_fees_no_overflow_or_panic() {
+    use crate::model::PubKeyBytes;
+    use crate::util::feeppm_effective_from_amts;
+
+    // 4-hop chain with u32::MAX ppm on every forwarding hop would overflow u64/i64
+    // in old build_route and could panic in feeppm_effective_from_amts.
+    let us = make_pubkey(1);
+    let a = make_pubkey(2);
+    let b = make_pubkey(3);
+    let c = make_pubkey(4);
+    let d = make_pubkey(5);
+
+    let scid_ua = ShortChannelId::from_str("100x1x0").unwrap();
+    let scid_ab = ShortChannelId::from_str("100x2x0").unwrap();
+    let scid_bc = ShortChannelId::from_str("100x3x0").unwrap();
+    let scid_cd = ShortChannelId::from_str("100x4x0").unwrap();
+    let scid_du = ShortChannelId::from_str("100x5x0").unwrap();
+
+    let mut graph = LnGraph::new();
+    insert_edge(&mut graph, scid_ua, us, a, 0, 0, 34, None);
+    insert_edge(&mut graph, scid_ab, a, b, u32::MAX, u32::MAX, 34, None);
+    insert_edge(&mut graph, scid_bc, b, c, u32::MAX, u32::MAX, 34, None);
+    insert_edge(&mut graph, scid_cd, c, d, u32::MAX, u32::MAX, 34, None);
+    insert_edge(&mut graph, scid_du, d, us, u32::MAX, u32::MAX, 34, None);
+
+    let mut config = make_test_config(us);
+    config.cltv_delta = 34;
+    config.cltv_final = 18;
+    let job = Job::new(sling::SatDirection::Pull, 500_000_000, Some(1000), 1000);
+    let mut task = Task::new(
+        scid_du,
+        1,
+        JobMessage::Starting,
+        false,
+        PubKeyBytes::from_pubkey(&d),
+    );
+
+    let route = dijkstra(
+        &config,
+        &graph,
+        &job,
+        &mut task,
+        &[scid_ua],
+        &[],
+        &HashMap::new(),
+    )
+    .unwrap();
+
+    // Must either return empty route (fee exceeds u64::MAX) or a valid route where
+    // amount_sent_msat >= amount_msat (never panicking or wrapping).
+    if !route.is_empty() {
+        let sent = route.first().unwrap().amount_msat.unwrap().msat();
+        let recv = route.last().unwrap().amount_msat.unwrap().msat();
+        assert!(sent >= recv);
+        assert!(feeppm_effective_from_amts(sent, recv) > job.maxppm);
+    }
+}
+
+#[test]
+fn test_dijkstra_negative_inbound_fee_cannot_hide_upstream_outbound_fee() {
+    use crate::gossip::InboundFee;
+    use crate::model::PubKeyBytes;
+
+    // Two paths from us -> dest:
+    // Path 1 (trap): us -> a -> trap -> dest where a->trap charges 1_000_000 ppm outbound
+    //   and trap advertises -1_000_000 ppm inbound on trap->a (cannot offset a's fee!).
+    // Path 2 (cheap): us -> a -> good -> dest where every hop charges 50 ppm.
+    let us = make_pubkey(1);
+    let a = make_pubkey(2);
+    let trap = make_pubkey(3);
+    let good = make_pubkey(4);
+    let dest = make_pubkey(5);
+
+    let scid_ua = ShortChannelId::from_str("200x1x0").unwrap();
+    let scid_at = ShortChannelId::from_str("200x2x0").unwrap();
+    let scid_td = ShortChannelId::from_str("200x3x0").unwrap();
+    let scid_ag = ShortChannelId::from_str("200x4x0").unwrap();
+    let scid_gd = ShortChannelId::from_str("200x5x0").unwrap();
+    let scid_du = ShortChannelId::from_str("200x6x0").unwrap();
+
+    let mut graph = LnGraph::new();
+    insert_edge(&mut graph, scid_ua, us, a, 0, 0, 34, None);
+    insert_edge(&mut graph, scid_ua, a, us, 0, 0, 34, None);
+
+    // Trap path: `a` charges huge outbound, `trap` advertises huge negative inbound on `trap->a`
+    insert_edge(&mut graph, scid_at, a, trap, 1_000_000, 0, 34, None);
+    insert_edge(
+        &mut graph,
+        scid_at,
+        trap,
+        a,
+        0,
+        0,
+        34,
+        Some(InboundFee {
+            base_msat: 0,
+            proportional_millionths: -1_000_000,
+        }),
+    );
+    insert_edge(&mut graph, scid_td, trap, dest, 0, 0, 34, None);
+    insert_edge(&mut graph, scid_td, dest, trap, 0, 0, 34, None);
+
+    // Good path: 50 ppm per hop
+    insert_edge(&mut graph, scid_ag, a, good, 50, 0, 34, None);
+    insert_edge(&mut graph, scid_ag, good, a, 50, 0, 34, None);
+    insert_edge(&mut graph, scid_gd, good, dest, 50, 0, 34, None);
+    insert_edge(&mut graph, scid_gd, dest, good, 50, 0, 34, None);
+
+    insert_edge(&mut graph, scid_du, dest, us, 10, 0, 34, None);
+
+    let mut config = make_test_config(us);
+    config.cltv_delta = 34;
+    config.cltv_final = 18;
+    let job = Job::new(sling::SatDirection::Pull, 100_000_000, Some(1000), 500);
+    let mut task = Task::new(
+        scid_du,
+        1,
+        JobMessage::Starting,
+        false,
+        PubKeyBytes::from_pubkey(&dest),
+    );
+
+    let route = dijkstra(
+        &config,
+        &graph,
+        &job,
+        &mut task,
+        &[scid_ua],
+        &[],
+        &HashMap::new(),
+    )
+    .unwrap();
+
+    assert!(!route.is_empty());
+    // Must pick the genuinely cheap `good` path, NOT the `trap` path.
+    assert!(route.iter().any(|h| h.channel == Some(scid_ag)));
+    assert!(!route.iter().any(|h| h.channel == Some(scid_at)));
+}
+
+#[test]
+fn test_dijkstra_push_first_hop_direction_inbound_fee() {
+    use crate::gossip::InboundFee;
+    use crate::model::PubKeyBytes;
+
+    // Ensure `us > peer` so `us -> peer` has direction = 1 and `peer -> us` has direction = 0.
+    // Previously construct_first_node hardcoded direction = 0, reading `us -> peer`'s inbound fee
+    // instead of `peer -> us`'s inbound fee!
+    let k1 = make_pubkey(1);
+    let k2 = make_pubkey(2);
+    let (peer, us) = if k1 < k2 { (k1, k2) } else { (k2, k1) };
+    assert!(us > peer);
+    let mid = make_pubkey(3);
+
+    let scid_push = ShortChannelId::from_str("300x1x0").unwrap();
+    let scid_pm = ShortChannelId::from_str("300x2x0").unwrap();
+    let scid_mu = ShortChannelId::from_str("300x3x0").unwrap();
+
+    let mut graph = LnGraph::new();
+    // `us -> peer` (dir 1): we advertise a bogus inbound_fee (999_999 msat) that must NOT be used
+    insert_edge(
+        &mut graph,
+        scid_push,
+        us,
+        peer,
+        0,
+        0,
+        34,
+        Some(InboundFee {
+            base_msat: 999_999,
+            proportional_millionths: 0,
+        }),
+    );
+    // `peer -> us` (dir 0): peer charges 5_000 msat inbound fee on incoming HTLCs from us
+    insert_edge(
+        &mut graph,
+        scid_push,
+        peer,
+        us,
+        0,
+        0,
+        34,
+        Some(InboundFee {
+            base_msat: 5_000,
+            proportional_millionths: 0,
+        }),
+    );
+    // `peer -> mid`: 1_000 msat base outbound
+    insert_edge(&mut graph, scid_pm, peer, mid, 0, 1_000, 34, None);
+    insert_edge(&mut graph, scid_pm, mid, peer, 0, 0, 34, None);
+    // `mid -> us`: 0 fee
+    insert_edge(&mut graph, scid_mu, mid, us, 0, 0, 34, None);
+
+    let mut config = make_test_config(us);
+    config.cltv_delta = 34;
+    config.cltv_final = 18;
+    let amount = 100_000_000;
+    let job = Job::new(sling::SatDirection::Push, amount, Some(0), 1000);
+    let mut task = Task::new(
+        scid_push,
+        1,
+        JobMessage::Starting,
+        false,
+        PubKeyBytes::from_pubkey(&peer),
+    );
+
+    let route = dijkstra(
+        &config,
+        &graph,
+        &job,
+        &mut task,
+        &[scid_mu],
+        &[],
+        &HashMap::new(),
+    )
+    .unwrap();
+
+    assert_eq!(route.len(), 3);
+    // Expected total fee = peer's 1_000 msat outbound + peer's 5_000 msat inbound = 6_000 msat
+    // (NOT 1_000 + 999_999!).
+    assert_eq!(
+        route.first().unwrap().amount_msat.unwrap().msat(),
+        amount + 6_000
+    );
+}
+
+#[test]
+fn test_dijkstra_rejects_excessive_cltv_delay() {
+    use crate::model::{MAX_HOP_CLTV_DELTA, MAX_ROUTE_CLTV_DELTA, PubKeyBytes};
+
+    let us = make_pubkey(1);
+    let high_cltv = make_pubkey(2);
+    let safe_node = make_pubkey(3);
+    let dest = make_pubkey(4);
+
+    let scid_uh = ShortChannelId::from_str("400x1x0").unwrap();
+    let scid_hd = ShortChannelId::from_str("400x2x0").unwrap();
+    let scid_us = ShortChannelId::from_str("400x3x0").unwrap();
+    let scid_sd = ShortChannelId::from_str("400x4x0").unwrap();
+    let scid_du = ShortChannelId::from_str("400x5x0").unwrap();
+
+    let mut graph = LnGraph::new();
+    // 0-ppm path with malicious 1800-block CLTV delta (> MAX_HOP_CLTV_DELTA)
+    insert_edge(&mut graph, scid_uh, us, high_cltv, 0, 0, 34, None);
+    insert_edge(
+        &mut graph,
+        scid_hd,
+        high_cltv,
+        dest,
+        0,
+        0,
+        MAX_HOP_CLTV_DELTA + 100,
+        None,
+    );
+
+    // Safe path with 100 ppm and normal 40-block CLTV delta
+    insert_edge(&mut graph, scid_us, us, safe_node, 0, 0, 34, None);
+    insert_edge(&mut graph, scid_sd, safe_node, dest, 100, 0, 40, None);
+
+    insert_edge(&mut graph, scid_du, dest, us, 10, 0, 34, None);
+
+    let mut config = make_test_config(us);
+    config.cltv_delta = 34;
+    config.cltv_final = 18;
+    let job = Job::new(sling::SatDirection::Pull, 100_000_000, Some(1000), 1000);
+    let mut task = Task::new(
+        scid_du,
+        1,
+        JobMessage::Starting,
+        false,
+        PubKeyBytes::from_pubkey(&dest),
+    );
+
+    let route = dijkstra(
+        &config,
+        &graph,
+        &job,
+        &mut task,
+        &[scid_uh, scid_us],
+        &[],
+        &HashMap::new(),
+    )
+    .unwrap();
+
+    assert!(!route.is_empty());
+    assert!(route.iter().any(|h| h.channel == Some(scid_sd)));
+    assert!(!route.iter().any(|h| h.channel == Some(scid_hd)));
+    assert!(route.first().unwrap().delay.unwrap() <= MAX_ROUTE_CLTV_DELTA);
+}
+
+#[test]
+fn test_dijkstra_rejects_cumulative_route_cltv_exceeding_cap() {
+    use crate::model::{MAX_ROUTE_CLTV_DELTA, PubKeyBytes};
+
+    // Each individual hop has delay 400 (<= MAX_HOP_CLTV_DELTA = 500),
+    // but 3 hops sum to 34 + 34 + 400 + 400 + 400 = 1268 > MAX_ROUTE_CLTV_DELTA (1008).
+    let us = make_pubkey(1);
+    let n1 = make_pubkey(2);
+    let n2 = make_pubkey(3);
+    let n3 = make_pubkey(4);
+    let dest = make_pubkey(5);
+
+    let scid_u1 = ShortChannelId::from_str("500x1x0").unwrap();
+    let scid_12 = ShortChannelId::from_str("500x2x0").unwrap();
+    let scid_23 = ShortChannelId::from_str("500x3x0").unwrap();
+    let scid_3d = ShortChannelId::from_str("500x4x0").unwrap();
+    let scid_du = ShortChannelId::from_str("500x5x0").unwrap();
+
+    let mut graph = LnGraph::new();
+    insert_edge(&mut graph, scid_u1, us, n1, 0, 0, 34, None);
+    insert_edge(&mut graph, scid_12, n1, n2, 0, 0, 400, None);
+    insert_edge(&mut graph, scid_23, n2, n3, 0, 0, 400, None);
+    insert_edge(&mut graph, scid_3d, n3, dest, 0, 0, 400, None);
+    insert_edge(&mut graph, scid_du, dest, us, 0, 0, 34, None);
+
+    let mut config = make_test_config(us);
+    config.cltv_delta = 34;
+    config.cltv_final = 18;
+    let job = Job::new(sling::SatDirection::Pull, 100_000_000, Some(1000), 1000);
+    let mut task = Task::new(
+        scid_du,
+        1,
+        JobMessage::Starting,
+        false,
+        PubKeyBytes::from_pubkey(&dest),
+    );
+
+    let route = dijkstra(
+        &config,
+        &graph,
+        &job,
+        &mut task,
+        &[scid_u1],
+        &[],
+        &HashMap::new(),
+    )
+    .unwrap();
+
+    assert!(
+        route.is_empty(),
+        "route with cumulative delay > {MAX_ROUTE_CLTV_DELTA} should be rejected"
+    );
+}
+
 // Read current RSS from /proc/self/statm (Linux-specific)
 fn get_current_rss() -> Option<u64> {
     let mut file = File::open("/proc/self/statm").ok()?;

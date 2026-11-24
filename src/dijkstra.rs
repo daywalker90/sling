@@ -17,8 +17,17 @@ use cln_rpc::{
 use sling::{Job, SatDirection};
 
 use crate::{
-    model::{Config, DijkstraNode, JobMessage, Liquidity, LnGraph, PubKeyBytes, Task},
-    util::{edge_cost, fee_total_msat_precise, fee_total_msat_precise_i32},
+    model::{
+        Config,
+        DijkstraNode,
+        JobMessage,
+        Liquidity,
+        LnGraph,
+        MAX_ROUTE_CLTV_DELTA,
+        PubKeyBytes,
+        Task,
+    },
+    util::{div_ceil_i128, edge_cost},
 };
 pub fn dijkstra(
     config: &Config,
@@ -68,7 +77,8 @@ pub fn dijkstra(
             // );
             break;
         }
-        let current_hops = scores.get(&node).unwrap().hops;
+        let current_node = *scores.get(&node).unwrap();
+        let current_hops = current_node.hops;
         if current_hops + 2 > job.get_maxhops(config.maxhops) {
             continue;
         }
@@ -89,19 +99,39 @@ pub fn dijkstra(
                 // );
                 continue;
             }
-            let next_score = if edge.source == config.pubkey_bytes {
+            let next_delay = if edge.source == config.pubkey_bytes {
+                current_node.delay
+            } else {
+                current_node.delay.saturating_add(edge.delay)
+            };
+            if next_delay > MAX_ROUTE_CLTV_DELTA {
+                continue;
+            }
+            let mut next_score = if edge.source == config.pubkey_bytes {
                 0
             } else {
+                // Inbound fee is charged by `edge.source` on the channel it received
+                // the HTLC from (`current_node.short_channel_id_dir`).
                 let inbound_fee = lngraph
                     .get_state_direction(ShortChannelIdDir {
-                        short_channel_id: scid.short_channel_id,
-                        direction: 1 - scid.direction, // opposite direction
+                        short_channel_id: current_node.short_channel_id_dir.short_channel_id,
+                        direction: 1 - current_node.short_channel_id_dir.direction,
                     })
                     .and_then(|s| s.inbound_fee);
 
                 let out_cost = edge_cost(edge, inbound_fee, job.amount_msat);
-                node_score + out_cost
+                node_score.saturating_add(out_cost)
             };
+            if job.sat_direction == SatDirection::Pull && edge.destination == goal {
+                let goal_inbound_fee = lngraph
+                    .get_state_direction(ShortChannelIdDir {
+                        short_channel_id: scid.short_channel_id,
+                        direction: 1 - scid.direction,
+                    })
+                    .and_then(|s| s.inbound_fee);
+                let goal_cost = edge_cost(&slingchan.channel_state, goal_inbound_fee, job.amount_msat);
+                next_score = next_score.saturating_add(goal_cost);
+            }
             // debug!(
             //     "{}: next: {} node_score:{} next_score:{}",
             //     slingchan.channel.short_channel_id.to_string(),
@@ -124,6 +154,7 @@ pub fn dijkstra(
                             destination: edge.destination,
                             hops: current_hops + 1,
                             short_channel_id_dir: *scid,
+                            delay: next_delay,
                         };
                         *ent.into_mut() = dijkstra_node;
                         visit_next.push(MinScored(next_score, &edge.destination));
@@ -143,6 +174,7 @@ pub fn dijkstra(
                         destination: edge.destination,
                         hops: current_hops + 1,
                         short_channel_id_dir: *scid,
+                        delay: next_delay,
                     };
                     ent.insert(dijkstra_node);
                     visit_next.push(MinScored(next_score, &edge.destination));
@@ -253,44 +285,52 @@ fn build_route(
         }
         prev_amount_msat = sendpay_route.first().unwrap().amount_msat.unwrap();
 
-        let outbound_fee_msat = fee_total_msat_precise(
-            hop.channel_state.fee_per_millionth,
-            hop.channel_state.base_fee_millisatoshi,
-            Amount::msat(&prev_amount_msat),
-        )
-        .ceil() as u64;
+        if i + 1 < dijkstra_path.len() {
+            let prev_amt = u128::from(prev_amount_msat.msat());
+            let outbound_fee_msat = u128::from(hop.channel_state.base_fee_millisatoshi)
+                + (prev_amt * u128::from(hop.channel_state.fee_per_millionth)).div_ceil(1_000_000);
 
-        let net_received_amt = Amount::msat(&prev_amount_msat) + outbound_fee_msat;
+            let net_received_amt = prev_amt + outbound_fee_msat;
 
-        // inbound fee is charged by the *next* hop's node, so look ahead
-        let inbound_fee_msat = if let Some(next_hop) = dijkstra_path.get(i + 1) {
-            let opposite_dir = ShortChannelIdDir {
-                short_channel_id: next_hop.short_channel_id_dir.short_channel_id,
-                direction: 1 - next_hop.short_channel_id_dir.direction,
-            };
-            if let Some(inf) = lngraph
-                .get_state_direction(opposite_dir)
-                .and_then(|s| s.inbound_fee)
-            {
-                let i = fee_total_msat_precise_i32(
-                    inf.proportional_millionths,
-                    inf.base_msat,
-                    net_received_amt,
-                )
-                .ceil() as i64;
-                log::debug!("{opposite_dir}: inbound fee: {i} msat");
-                i
+            // inbound fee is charged by the *next* hop's node, so look ahead
+            let inbound_fee_msat: i128 = if let Some(next_hop) = dijkstra_path.get(i + 1) {
+                let opposite_dir = ShortChannelIdDir {
+                    short_channel_id: next_hop.short_channel_id_dir.short_channel_id,
+                    direction: 1 - next_hop.short_channel_id_dir.direction,
+                };
+                if let Some(inf) = lngraph
+                    .get_state_direction(opposite_dir)
+                    .and_then(|s| s.inbound_fee)
+                {
+                    let Some(prop_product) = (net_received_amt as i128)
+                        .checked_mul(i128::from(inf.proportional_millionths))
+                    else {
+                        return vec![];
+                    };
+                    let fee = i128::from(inf.base_msat) + div_ceil_i128(prop_product, 1_000_000);
+                    log::debug!("{opposite_dir}: inbound fee: {fee} msat");
+                    fee
+                } else {
+                    0
+                }
             } else {
                 0
-            }
-        } else {
-            0
-        };
+            };
 
-        amount_msat = Amount::from_msat(
-            (net_received_amt as i64 + inbound_fee_msat).max(prev_amount_msat.msat() as i64) as u64,
-        );
-        delay += hop.channel_state.delay;
+            let next_amt_i128 = (net_received_amt as i128 + inbound_fee_msat).max(prev_amt as i128);
+            let Ok(next_amt_u64) = u64::try_from(next_amt_i128) else {
+                return vec![];
+            };
+            amount_msat = Amount::from_msat(next_amt_u64);
+            delay = delay.saturating_add(hop.channel_state.delay);
+        }
+    }
+    if sendpay_route
+        .first()
+        .and_then(|h| h.delay)
+        .is_some_and(|d| d > MAX_ROUTE_CLTV_DELTA)
+    {
+        return vec![];
     }
     sendpay_route
 }
@@ -302,9 +342,10 @@ fn construct_first_node(
     sat_direction: SatDirection,
     destination: PubKeyBytes,
 ) -> Result<DijkstraNode, Error> {
+    let base_delay = std::cmp::max(config.cltv_delta, config.cltv_final);
     match sat_direction {
         SatDirection::Pull => {
-            let Ok((_scid_dir, slingchan_inc)) =
+            let Ok((scid_dir, slingchan_inc)) =
                 lngraph.get_state_no_direction(&task.other_pubkey, task.get_chan_id())
             else {
                 log::warn!("{task}: channel not found in graph!");
@@ -315,15 +356,13 @@ fn construct_first_node(
                 score: 0,
                 channel_state: *slingchan_inc,
                 destination,
-                short_channel_id_dir: ShortChannelIdDir {
-                    short_channel_id: task.get_chan_id(),
-                    direction: 0,
-                },
+                short_channel_id_dir: scid_dir,
                 hops: 0,
+                delay: base_delay.saturating_add(slingchan_inc.delay),
             })
         }
         SatDirection::Push => {
-            let Ok((_scid_dir, slingchan_out)) =
+            let Ok((scid_dir, slingchan_out)) =
                 lngraph.get_state_no_direction(&config.pubkey_bytes, task.get_chan_id())
             else {
                 log::warn!("{task}: channel not found in graph!");
@@ -334,11 +373,9 @@ fn construct_first_node(
                 score: 0,
                 channel_state: *slingchan_out,
                 destination,
-                short_channel_id_dir: ShortChannelIdDir {
-                    short_channel_id: task.get_chan_id(),
-                    direction: 0,
-                },
+                short_channel_id_dir: scid_dir,
                 hops: 0,
+                delay: base_delay,
             })
         }
     }

@@ -29,6 +29,8 @@ pub const LIQUIDITY_FILE_NAME: &str = "liquidity.json";
 pub const JOB_FILE_NAME: &str = "jobs.json";
 pub const EXCEPTS_CHANS_FILE_NAME: &str = "excepts.json";
 pub const EXCEPTS_PEERS_FILE_NAME: &str = "excepts_peers.json";
+pub const MAX_HOP_CLTV_DELTA: u32 = 500;
+pub const MAX_ROUTE_CLTV_DELTA: u32 = 1008;
 
 #[derive(Clone)]
 pub struct PluginState {
@@ -425,6 +427,7 @@ pub struct DijkstraNode {
     pub short_channel_id_dir: ShortChannelIdDir,
     pub destination: PubKeyBytes,
     pub hops: u8,
+    pub delay: u32,
 }
 impl PartialEq for DijkstraNode {
     fn eq(&self, other: &Self) -> bool {
@@ -835,6 +838,8 @@ impl LnGraph {
                 if let Some(dir_chan_state) = self.channels.get(dir_chan) {
                     if dir_chan_state.active
                         && dir_chan_state.last_update >= two_weeks_ago
+                        && (dir_chan_state.source == config.pubkey_bytes
+                            || dir_chan_state.delay <= MAX_HOP_CLTV_DELTA)
                         && !excepts.contains(dir_chan)
                         && Amount::msat(&dir_chan_state.htlc_minimum_msat) <= job.amount_msat
                         && Amount::msat(&dir_chan_state.htlc_maximum_msat) >= job.amount_msat
