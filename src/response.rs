@@ -82,11 +82,12 @@ pub async fn waitsendpay_response(
         }
         Err(err) => {
             *success_route = None;
-            plugin
+            let was_unresolved = plugin
                 .state()
                 .pays
                 .write()
-                .remove(&payment_hash.to_string());
+                .remove(&payment_hash.to_string())
+                .is_some();
             let mut special_stop = false;
             let Some(ws_code) = err.code else {
                 return Err(anyhow!(
@@ -103,6 +104,15 @@ pub async fn waitsendpay_response(
                     now.elapsed().as_secs(),
                     err.message,
                 );
+
+                if !was_unresolved {
+                    log::warn!(
+                        "{task_ident}: HTLC preimage was already released before timeout; \
+                        counting {}msat as rebalanced to avoid over-rebalancing",
+                        job.amount_msat
+                    );
+                    return Ok(job.amount_msat);
+                }
 
                 for (i, hop) in route[..route.len() - 1].iter().enumerate() {
                     let source = route[i].id.unwrap();
@@ -321,6 +331,13 @@ pub async fn sendpay_response(
     success_route: &mut Option<Vec<SendpayRoute>>,
 ) -> Result<Option<SendpayResponse>, Error> {
     let mut rpc = ClnRpc::new(&config.rpc_path).await?;
+    let payment_secret = pay_resolve_info.payment_secret;
+    let payment_hash_str = payment_hash.to_string();
+    plugin
+        .state()
+        .pays
+        .write()
+        .insert(payment_hash_str.clone(), pay_resolve_info);
     match rpc
         .call_typed(&SendpayRequest {
             route: route.to_vec(),
@@ -328,7 +345,7 @@ pub async fn sendpay_response(
             label: None,
             amount_msat: None,
             bolt11: None,
-            payment_secret: Some(pay_resolve_info.payment_secret),
+            payment_secret: Some(payment_secret),
             partid: None,
             localinvreqid: None,
             groupid: None,
@@ -337,15 +354,9 @@ pub async fn sendpay_response(
         })
         .await
     {
-        Ok(resp) => {
-            plugin
-                .state()
-                .pays
-                .write()
-                .insert(payment_hash.to_string(), pay_resolve_info);
-            Ok(Some(resp))
-        }
+        Ok(resp) => Ok(Some(resp)),
         Err(e) => {
+            plugin.state().pays.write().remove(&payment_hash_str);
             if e.to_string().contains("First peer not ready") {
                 log::info!("{task_ident}: First peer not ready, banning it for now...");
                 plugin.state().temp_chan_bans.lock().insert(

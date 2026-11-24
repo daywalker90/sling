@@ -103,7 +103,7 @@ pub async fn htlc_handler(
     let cltv_final = i64::from(plugin.state().config.lock().cltv_final);
 
     let mut pays = plugin.state().pays.write();
-    if let Some(pi) = pays.remove(&payment_hash) {
+    if let Some(pi) = pays.get(&payment_hash) {
         let matching_scid = hook.htlc.short_channel_id == pi.incoming_scid
             || (pi.incoming_alias.is_some()
                 && hook.htlc.short_channel_id == pi.incoming_alias.unwrap());
@@ -137,6 +137,7 @@ pub async fn htlc_handler(
             && matching_onion_amount
             && matching_payment_secret
         {
+            let pi = pays.remove(&payment_hash).unwrap();
             log::debug!("resolving htlc. payment_hash: {payment_hash}");
             Ok(json!({"result":"resolve","payment_key":pi.preimage}))
         } else if let Some(peer) = plugin
@@ -222,8 +223,6 @@ pub async fn htlc_handler(
                     .unwrap()
                     .as_secs(),
             );
-
-            pays.insert(payment_hash, pi);
 
             Ok(json!({"result": "fail", "failure_message": "1007"}))
         } else {
