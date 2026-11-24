@@ -624,6 +624,10 @@ impl IncompleteChannels {
     pub fn len(&self) -> usize {
         self.incomplete_channels.len()
     }
+    pub fn clear(&mut self) {
+        self.incomplete_channels.clear();
+        self.updated_channels.clear();
+    }
     pub fn get_mut(
         &mut self,
         scid_dir: &ShortChannelIdDir,
@@ -693,6 +697,11 @@ impl LnGraph {
 
     pub fn is_empty(&self) -> bool {
         self.graph.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.channels.clear();
+        self.graph.clear();
     }
 
     pub fn public_channel_count(&self) -> usize {
