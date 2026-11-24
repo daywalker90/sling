@@ -10,7 +10,7 @@ use std::{
 use anyhow::{Error, anyhow};
 use cln_rpc::{
     model::responses::{GetinfoResponse, ListpeerchannelsChannels},
-    primitives::{Amount, PublicKey, ShortChannelId, ShortChannelIdDir},
+    primitives::{Amount, PublicKey, Secret, ShortChannelId, ShortChannelIdDir},
 };
 use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize, Serializer};
@@ -67,6 +67,7 @@ impl PluginState {
 #[derive(Clone, Debug)]
 pub struct PayResolveInfo {
     pub preimage: String,
+    pub payment_secret: Secret,
     pub incoming_scid: ShortChannelId,
     pub incoming_alias: Option<ShortChannelId>,
     pub amount_msat: u64,

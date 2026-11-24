@@ -14,7 +14,15 @@ use bitcoin::{
 use cln_plugin::Plugin;
 use cln_rpc::{
     model::responses::ListpeerchannelsChannels,
-    primitives::{Amount, ChannelState, PublicKey, Sha256, ShortChannelId, ShortChannelIdDir},
+    primitives::{
+        Amount,
+        ChannelState,
+        PublicKey,
+        Secret,
+        Sha256,
+        ShortChannelId,
+        ShortChannelIdDir,
+    },
 };
 use rand::{Rng, rng};
 use sling::{Job, SatDirection};
@@ -223,6 +231,12 @@ pub fn get_preimage_paymend_hash_pair() -> (String, Sha256) {
     hasher.input(&preimage);
     let payment_hash = Sha256::from_engine(hasher);
     (pi_str, payment_hash)
+}
+
+pub fn get_payment_secret() -> Secret {
+    let mut secret = [0u8; 32];
+    rng().fill_bytes(&mut secret[..]);
+    Secret::try_from(secret.to_vec()).expect("32 bytes is always a valid Secret")
 }
 
 pub fn get_total_htlc_count(channel: &ListpeerchannelsChannels) -> u64 {

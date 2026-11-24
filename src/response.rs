@@ -328,7 +328,7 @@ pub async fn sendpay_response(
             label: None,
             amount_msat: None,
             bolt11: None,
-            payment_secret: None,
+            payment_secret: Some(pay_resolve_info.payment_secret),
             partid: None,
             localinvreqid: None,
             groupid: None,
