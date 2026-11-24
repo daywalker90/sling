@@ -77,11 +77,13 @@ pub async fn parse_job(
             let mut job = Job::new(sat_direction, amount_msat, outppm, maxppm);
 
             if let Some(target) = ar.get("target") {
-                job.add_target(
-                    target
-                        .as_f64()
-                        .ok_or(anyhow!("target must be a floating point"))?,
-                );
+                let target_val = target
+                    .as_f64()
+                    .ok_or(anyhow!("target must be a floating point"))?;
+                if !(0.0..=1.0).contains(&target_val) {
+                    return Err(anyhow!("target must be between 0.0 and 1.0"));
+                }
+                job.add_target(target_val);
             }
 
             let maxhops = match ar.get("maxhops") {
@@ -274,11 +276,11 @@ pub async fn parse_once_job(
 
             //also convert to msat
             let amount_msat = match ar.get("amount") {
-                Some(amt) => {
-                    amt.as_u64()
-                        .ok_or(anyhow!("amount must be a positive integer"))?
-                        * 1_000
-                }
+                Some(amt) => amt
+                    .as_u64()
+                    .ok_or(anyhow!("amount must be a positive integer"))?
+                    .checked_mul(1_000)
+                    .ok_or_else(|| anyhow!("amount too large"))?,
                 None => return Err(anyhow!("Missing amount")),
             };
             if amount_msat == 0 {
@@ -300,11 +302,11 @@ pub async fn parse_once_job(
             let mut job = Job::new(sat_direction, amount_msat, outppm, maxppm);
 
             let onceamount_msat = match ar.get("onceamount") {
-                Some(amt) => {
-                    amt.as_u64()
-                        .ok_or(anyhow!("onceamount must be a positive integer"))?
-                        * 1_000
-                }
+                Some(amt) => amt
+                    .as_u64()
+                    .ok_or(anyhow!("onceamount must be a positive integer"))?
+                    .checked_mul(1_000)
+                    .ok_or_else(|| anyhow!("onceamount too large"))?,
                 None => return Err(anyhow!("Missing onceamount")),
             };
             if onceamount_msat == 0 {
@@ -358,7 +360,8 @@ pub async fn parse_once_job(
                 job.add_depleteuptoamount_msat(
                     da.as_u64()
                         .ok_or(anyhow!("depleteuptoamount must be an integer"))?
-                        * 1_000,
+                        .checked_mul(1_000)
+                        .ok_or_else(|| anyhow!("depleteuptoamount too large"))?,
                 );
             }
 

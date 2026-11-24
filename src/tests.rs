@@ -177,6 +177,140 @@ fn test_feeppm_effective_from_amts() {
     assert!(result1.is_err());
 }
 
+fn make_test_config(node: PublicKey) -> Config {
+    let getinfo = GetinfoResponse {
+        lightning_dir: String::new(),
+        alias: "test".to_owned(),
+        our_features: None,
+        warning_bitcoind_sync: None,
+        warning_lightningd_sync: None,
+        address: Vec::new(),
+        binding: None,
+        blockheight: 100,
+        color: String::new(),
+        fees_collected_msat: Amount::from_msat(0),
+        id: node,
+        network: "regtest".to_owned(),
+        num_active_channels: 1,
+        num_inactive_channels: 0,
+        num_peers: 1,
+        num_pending_channels: 0,
+        version: "v25.02".to_owned(),
+    };
+    Config::new(
+        getinfo,
+        PathBuf::from("lightning-rpc"),
+        PathBuf::from(PLUGIN_NAME),
+        HashSet::new(),
+        HashSet::new(),
+        HashSet::new(),
+    )
+}
+
+#[test]
+fn test_parse_job_target_validation() {
+    use crate::parse::parse_job;
+    use serde_json::json;
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let node =
+        PublicKey::from_str("0221299f99b760f35851a3a6ae60f62680b79ec02a34c3b25f6ba1e0ce9da62ba7")
+            .unwrap();
+    let config = make_test_config(node);
+
+    // Out-of-range targets must be rejected (e.g. passing percentage 50 instead of 0.5)
+    for bad_target in [json!(50), json!(1.01), json!(-0.1)] {
+        let res = rt.block_on(parse_job(
+            json!({
+                "scid": "100x1x0",
+                "direction": "pull",
+                "amount": 10_000,
+                "maxppm": 500,
+                "outppm": 500,
+                "target": bad_target,
+            }),
+            &config,
+        ));
+        assert!(res.is_err(), "expected error for target={bad_target}");
+    }
+
+    // Valid targets in [0.0, 1.0] must succeed
+    for good_target in [json!(0.0), json!(0.5), json!(1.0), json!(1)] {
+        let res = rt.block_on(parse_job(
+            json!({
+                "scid": "100x1x0",
+                "direction": "pull",
+                "amount": 10_000,
+                "maxppm": 500,
+                "outppm": 500,
+                "target": good_target,
+            }),
+            &config,
+        ));
+        assert!(res.is_ok(), "expected ok for target={good_target}: {res:?}");
+    }
+}
+
+#[test]
+fn test_parse_once_job_overflow() {
+    use crate::parse::parse_once_job;
+    use serde_json::json;
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let node =
+        PublicKey::from_str("0221299f99b760f35851a3a6ae60f62680b79ec02a34c3b25f6ba1e0ce9da62ba7")
+            .unwrap();
+    let config = make_test_config(node);
+    let huge = u64::MAX / 1_000 + 1;
+
+    // amount overflow
+    let res = rt.block_on(parse_once_job(
+        json!({
+            "scid": "100x1x0",
+            "direction": "pull",
+            "amount": huge,
+            "onceamount": huge,
+            "maxppm": 500,
+            "outppm": 500,
+        }),
+        &config,
+    ));
+    assert!(res.is_err());
+
+    // onceamount overflow
+    let res = rt.block_on(parse_once_job(
+        json!({
+            "scid": "100x1x0",
+            "direction": "pull",
+            "amount": 1_000,
+            "onceamount": huge,
+            "maxppm": 500,
+            "outppm": 500,
+        }),
+        &config,
+    ));
+    assert!(res.is_err());
+
+    // depleteuptoamount overflow
+    let res = rt.block_on(parse_once_job(
+        json!({
+            "scid": "100x1x0",
+            "direction": "pull",
+            "amount": 1_000,
+            "onceamount": 2_000,
+            "maxppm": 500,
+            "outppm": 500,
+            "depleteuptoamount": huge,
+        }),
+        &config,
+    ));
+    assert!(res.is_err());
+}
+
 // Read current RSS from /proc/self/statm (Linux-specific)
 fn get_current_rss() -> Option<u64> {
     let mut file = File::open("/proc/self/statm").ok()?;

@@ -179,13 +179,23 @@ impl Job {
         let mut target_cap = (total_msat as f64 * target) as u64;
         match self.sat_direction {
             SatDirection::Pull => {
-                if target_cap >= total_msat - their_reserve_msat - 1_000 {
-                    target_cap = total_msat - their_reserve_msat - 2_000;
+                let max_cap = total_msat
+                    .saturating_sub(their_reserve_msat)
+                    .saturating_sub(1_000);
+                if target_cap >= max_cap {
+                    target_cap = total_msat
+                        .saturating_sub(their_reserve_msat)
+                        .saturating_sub(2_000);
                 }
             }
             SatDirection::Push => {
-                if target_cap >= total_msat - our_reserve_msat - 1_000 {
-                    target_cap = total_msat - our_reserve_msat - 2_000;
+                let max_cap = total_msat
+                    .saturating_sub(our_reserve_msat)
+                    .saturating_sub(1_000);
+                if target_cap >= max_cap {
+                    target_cap = total_msat
+                        .saturating_sub(our_reserve_msat)
+                        .saturating_sub(2_000);
                 }
             }
         }
