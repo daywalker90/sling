@@ -224,22 +224,25 @@ pub async fn slingstats(
             let task_states: Vec<String> =
                 task_states.into_iter().map(|(_id, state)| state).collect();
 
-            let mut total_amount_msat = 0;
+            let mut total_amount_msat: u64 = 0;
             let mut most_recent_completed_at = 0;
-            let mut weighted_fee_ppm = 0;
+            let mut weighted_fee_ppm: u128 = 0;
+            let cutoff = now.saturating_sub(stats_delete_successes_age.saturating_mul(24 * 60 * 60));
             for success_reb in successes.get(scid).unwrap_or(&Vec::new()) {
-                if stats_delete_successes_age == 0
-                    || success_reb.completed_at >= now - stats_delete_successes_age * 24 * 60 * 60
-                {
-                    total_amount_msat += success_reb.amount_msat;
-                    weighted_fee_ppm += u64::from(success_reb.fee_ppm) * success_reb.amount_msat;
+                if stats_delete_successes_age == 0 || success_reb.completed_at >= cutoff {
+                    total_amount_msat = total_amount_msat.saturating_add(success_reb.amount_msat);
+                    weighted_fee_ppm = weighted_fee_ppm.saturating_add(
+                        u128::from(success_reb.fee_ppm) * u128::from(success_reb.amount_msat),
+                    );
                     most_recent_completed_at =
                         std::cmp::max(most_recent_completed_at, success_reb.completed_at);
                 }
             }
-            if total_amount_msat > 0 {
-                weighted_fee_ppm /= total_amount_msat;
-            }
+            let weighted_fee_ppm: u64 = if total_amount_msat > 0 {
+                u64::try_from(weighted_fee_ppm / u128::from(total_amount_msat)).unwrap_or(u64::MAX)
+            } else {
+                0
+            };
 
             let last_route_failure = match failures.get(scid).unwrap_or(&Vec::new()).last() {
                 Some(o) => o.created_at,
@@ -303,7 +306,7 @@ pub async fn slingstats(
     }
 }
 
-fn success_stats(
+pub(crate) fn success_stats(
     successes: Vec<SuccessReb>,
     time_window: u64,
     alias_map: &HashMap<PublicKey, String>,
@@ -312,23 +315,26 @@ fn success_stats(
     if successes.is_empty() {
         return None;
     }
-    let mut total_amount_msat = 0;
+    let mut total_amount_msat: u64 = 0;
     let mut channel_partner_counts = HashMap::new();
     let mut hop_counts = HashMap::new();
     let mut most_recent_completed_at = 0;
     let mut last_channel_partner = None;
     let mut total_transactions = 0;
-    let mut weighted_fee_ppm = 0;
+    let mut weighted_fee_ppm: u128 = 0;
     let mut fee_ppms = Vec::new();
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
+    let cutoff = now.saturating_sub(time_window.saturating_mul(24 * 60 * 60));
 
     for success_reb in successes {
-        if time_window == 0 || success_reb.completed_at >= now - time_window * 24 * 60 * 60 {
-            total_amount_msat += success_reb.amount_msat;
-            weighted_fee_ppm += u64::from(success_reb.fee_ppm) * success_reb.amount_msat;
+        if time_window == 0 || success_reb.completed_at >= cutoff {
+            total_amount_msat = total_amount_msat.saturating_add(success_reb.amount_msat);
+            weighted_fee_ppm = weighted_fee_ppm.saturating_add(
+                u128::from(success_reb.fee_ppm) * u128::from(success_reb.amount_msat),
+            );
             *channel_partner_counts
                 .entry(success_reb.channel_partner)
                 .or_insert(0) += success_reb.amount_msat / 1_000;
@@ -349,7 +355,11 @@ fn success_stats(
         .into_iter()
         .max_by_key(|&(_, count)| count)
         .map(|(hops, _)| hops);
-    weighted_fee_ppm /= total_amount_msat;
+    let weighted_fee_ppm: u64 = if total_amount_msat > 0 {
+        u64::try_from(weighted_fee_ppm / u128::from(total_amount_msat)).unwrap_or(u64::MAX)
+    } else {
+        0
+    };
 
     let mut channel_partners = channel_partner_counts.into_iter().collect::<Vec<_>>();
 
@@ -410,7 +420,7 @@ fn failure_stats(
     if failures.is_empty() {
         return None;
     }
-    let mut total_amount_msat = 0;
+    let mut total_amount_msat: u64 = 0;
     let mut channel_partner_counts = HashMap::new();
     let mut hop_counts = HashMap::new();
     let mut reason_counts = HashMap::new();
@@ -422,9 +432,10 @@ fn failure_stats(
         .unwrap()
         .as_secs();
 
+    let cutoff = now.saturating_sub(time_window.saturating_mul(24 * 60 * 60));
     for fail_reb in failures {
-        if time_window == 0 || fail_reb.created_at >= now - time_window * 24 * 60 * 60 {
-            total_amount_msat += fail_reb.amount_msat;
+        if time_window == 0 || fail_reb.created_at >= cutoff {
+            total_amount_msat = total_amount_msat.saturating_add(fail_reb.amount_msat);
             *channel_partner_counts
                 .entry(fail_reb.channel_partner)
                 .or_insert(0) += fail_reb.amount_msat / 1_000;

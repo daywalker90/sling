@@ -871,6 +871,43 @@ fn test_push_job_with_large_max_htlc_count_does_not_fail() {
     );
 }
 
+#[test]
+fn test_success_stats_weighted_fee_ppm_no_u64_overflow() {
+    use crate::model::SuccessReb;
+    use crate::stats::success_stats;
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let scid = ShortChannelId::from_str("700x1x0").unwrap();
+    // Each entry: 100_000_000_000_000 msat (1000 BTC) * 5000 ppm = 5e17;
+    // 50 entries = 2.5e19 > u64::MAX (would overflow u64!).
+    let rebs: Vec<SuccessReb> = (0..50)
+        .map(|_| SuccessReb {
+            amount_msat: 100_000_000_000_000,
+            fee_ppm: 5_000,
+            channel_partner: scid,
+            hops: 3,
+            completed_at: now,
+        })
+        .collect();
+
+    let stats = success_stats(rebs, 30, &HashMap::new(), &HashMap::new()).unwrap();
+    assert_eq!(stats.feeppm_weighted_avg, 5_000);
+
+    // Zero-amount entry must not divide by zero
+    let zero_rebs = vec![SuccessReb {
+        amount_msat: 0,
+        fee_ppm: 100,
+        channel_partner: scid,
+        hops: 2,
+        completed_at: now,
+    }];
+    let zero_stats = success_stats(zero_rebs, 0, &HashMap::new(), &HashMap::new()).unwrap();
+    assert_eq!(zero_stats.feeppm_weighted_avg, 0);
+}
+
 // Read current RSS from /proc/self/statm (Linux-specific)
 fn get_current_rss() -> Option<u64> {
     let mut file = File::open("/proc/self/statm").ok()?;
