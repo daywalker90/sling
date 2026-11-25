@@ -702,6 +702,56 @@ fn test_dijkstra_rejects_cumulative_route_cltv_exceeding_cap() {
     );
 }
 
+#[test]
+fn test_timeout_intermediate_channels_skips_own_chans_and_pairs_scid_correctly() {
+    use crate::response::timeout_intermediate_channels;
+    use crate::util::get_direction_from_nodes;
+    use cln_rpc::model::requests::SendpayRoute;
+
+    let us = make_pubkey(1);
+    let peer_a = make_pubkey(2);
+    let peer_b = make_pubkey(3);
+    let peer_c = make_pubkey(4);
+
+    let scid_first = ShortChannelId::from_str("600x1x0").unwrap();
+    let scid_ab = ShortChannelId::from_str("600x2x0").unwrap();
+    let scid_bc = ShortChannelId::from_str("600x3x0").unwrap();
+    let scid_last = ShortChannelId::from_str("600x4x0").unwrap();
+
+    let mk_hop = |id: PublicKey, channel: ShortChannelId| SendpayRoute {
+        id: Some(id),
+        channel: Some(channel),
+        amount_msat: Some(Amount::from_msat(100_000)),
+        delay: Some(34),
+        amount_out_msat: None,
+        cltv_out: None,
+        node_id_out: None,
+        short_channel_id_dir: None,
+    };
+
+    let route = vec![
+        mk_hop(peer_a, scid_first),
+        mk_hop(peer_b, scid_ab),
+        mk_hop(peer_c, scid_bc),
+        mk_hop(us, scid_last),
+    ];
+
+    let chans = timeout_intermediate_channels(&route, us).unwrap();
+    assert_eq!(
+        chans,
+        vec![
+            ShortChannelIdDir {
+                short_channel_id: scid_ab,
+                direction: get_direction_from_nodes(peer_a, peer_b).unwrap(),
+            },
+            ShortChannelIdDir {
+                short_channel_id: scid_bc,
+                direction: get_direction_from_nodes(peer_b, peer_c).unwrap(),
+            },
+        ]
+    );
+}
+
 // Read current RSS from /proc/self/statm (Linux-specific)
 fn get_current_rss() -> Option<u64> {
     let mut file = File::open("/proc/self/statm").ok()?;

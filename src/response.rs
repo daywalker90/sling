@@ -14,7 +14,7 @@ use cln_rpc::{
         },
         responses::SendpayResponse,
     },
-    primitives::{Amount, Sha256, ShortChannelIdDir},
+    primitives::{Amount, PublicKey, Sha256, ShortChannelIdDir},
 };
 use sling::{Job, SatDirection};
 use tokio::time::Instant;
@@ -114,37 +114,21 @@ pub async fn waitsendpay_response(
                     return Ok(job.amount_msat);
                 }
 
-                for (i, hop) in route[..route.len() - 1].iter().enumerate() {
-                    let source = route[i].id.unwrap();
-                    let destination = route[i + 1].id.unwrap();
-                    let direction = get_direction_from_nodes(source, destination)?;
-                    if source == config.pubkey {
-                        continue;
-                    }
-                    if destination == config.pubkey {
-                        continue;
-                    }
-                    let dir_chan = ShortChannelIdDir {
-                        short_channel_id: hop.channel.unwrap(),
-                        direction,
-                    };
-
+                let now_secs = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                for dir_chan in timeout_intermediate_channels(route, config.pubkey)? {
                     let mut liquidity = plugin.state().liquidity.lock();
                     if let Some(liq) = liquidity.get_mut(&dir_chan) {
                         liq.liquidity_msat = 0;
-                        liq.liquidity_age = SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs();
+                        liq.liquidity_age = now_secs;
                     } else {
                         liquidity.insert(
                             dir_chan,
                             Liquidity {
                                 liquidity_msat: 0,
-                                liquidity_age: SystemTime::now()
-                                    .duration_since(UNIX_EPOCH)
-                                    .unwrap()
-                                    .as_secs(),
+                                liquidity_age: now_secs,
                             },
                         );
                     }
@@ -389,4 +373,31 @@ pub async fn sendpay_response(
             Err(anyhow!("{task_ident}: Unexpected sendpay error: {e}"))
         }
     }
+}
+
+pub(crate) fn timeout_intermediate_channels(
+    route: &[SendpayRoute],
+    our_pubkey: PublicKey,
+) -> Result<Vec<ShortChannelIdDir>, Error> {
+    let mut chans = Vec::new();
+    for pair in route.windows(2) {
+        let Some(source) = pair[0].id else {
+            continue;
+        };
+        let Some(destination) = pair[1].id else {
+            continue;
+        };
+        if source == our_pubkey || destination == our_pubkey {
+            continue;
+        }
+        let Some(scid) = pair[1].channel else {
+            continue;
+        };
+        let direction = get_direction_from_nodes(source, destination)?;
+        chans.push(ShortChannelIdDir {
+            short_channel_id: scid,
+            direction,
+        });
+    }
+    Ok(chans)
 }
