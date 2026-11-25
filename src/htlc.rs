@@ -140,17 +140,23 @@ pub async fn htlc_handler(
             let pi = pays.remove(&payment_hash).unwrap();
             log::debug!("resolving htlc. payment_hash: {payment_hash}");
             Ok(json!({"result":"resolve","payment_key":pi.preimage}))
-        } else if let Some(peer) = plugin
-            .state()
-            .peer_channels
-            .lock()
-            .get(&hook.htlc.short_channel_id)
-        {
+        } else if let Some(peer_id) = {
+            let peer_channels = plugin.state().peer_channels.lock();
+            peer_channels
+                .get(&hook.htlc.short_channel_id)
+                .or_else(|| {
+                    peer_channels.values().find(|c| {
+                        c.alias
+                            .as_ref()
+                            .is_some_and(|a| a.local == Some(hook.htlc.short_channel_id))
+                    })
+                })
+                .map(|c| c.peer_id)
+        } {
             if !matching_scid {
                 log::info!(
-                    "NOT resolving HTLC from {}: WRONG SCID: {} EXPECTED: {}. \
+                    "NOT resolving HTLC from {peer_id}: WRONG SCID: {} EXPECTED: {}. \
                     payment_hash: {payment_hash}",
-                    peer.peer_id,
                     hook.htlc.short_channel_id,
                     pi.incoming_scid
                 );
@@ -158,9 +164,8 @@ pub async fn htlc_handler(
 
             if !expected_amount {
                 log::warn!(
-                    "NOT resolving HTLC from {}: WRONG AMOUNT: {} EXPECTED: {}. \
+                    "NOT resolving HTLC from {peer_id}: WRONG AMOUNT: {} EXPECTED: {}. \
                     payment_hash: {payment_hash}",
-                    peer.peer_id,
                     hook.htlc.amount_msat.msat(),
                     pi.amount_msat
                 );
@@ -168,9 +173,8 @@ pub async fn htlc_handler(
 
             if !matching_cltv {
                 log::warn!(
-                    "NOT resolving HTLC from {}: CLTV EXPIRY TOO LOW FOR ONION: {} EXPECTED >= {:?}. \
+                    "NOT resolving HTLC from {peer_id}: CLTV EXPIRY TOO LOW FOR ONION: {} EXPECTED >= {:?}. \
                     payment_hash: {payment_hash}",
-                    peer.peer_id,
                     hook.htlc.cltv_expiry,
                     hook.onion.outgoing_cltv_value
                 );
@@ -178,9 +182,8 @@ pub async fn htlc_handler(
 
             if !sufficient_cltv {
                 log::warn!(
-                    "NOT resolving HTLC from {}: CLTV EXPIRY RELATIVE TOO LOW: {} EXPECTED >= {}. \
+                    "NOT resolving HTLC from {peer_id}: CLTV EXPIRY RELATIVE TOO LOW: {} EXPECTED >= {}. \
                     payment_hash: {payment_hash}",
-                    peer.peer_id,
                     hook.htlc.cltv_expiry_relative,
                     cltv_final
                 );
@@ -188,9 +191,8 @@ pub async fn htlc_handler(
 
             if !is_final_hop {
                 log::warn!(
-                    "NOT resolving HTLC from {}: INVALID FINAL HOP ONION (item_type={:?}, \
+                    "NOT resolving HTLC from {peer_id}: INVALID FINAL HOP ONION (item_type={:?}, \
                     short_channel_id={:?}, next_node_id={:?}). payment_hash: {payment_hash}",
-                    peer.peer_id,
                     hook.onion.item_type,
                     hook.onion.short_channel_id,
                     hook.onion.next_node_id
@@ -199,9 +201,8 @@ pub async fn htlc_handler(
 
             if !matching_onion_amount {
                 log::warn!(
-                    "NOT resolving HTLC from {}: WRONG ONION AMOUNT (forward_msat={:?}, \
+                    "NOT resolving HTLC from {peer_id}: WRONG ONION AMOUNT (forward_msat={:?}, \
                     total_msat={:?}, EXPECTED={}). payment_hash: {payment_hash}",
-                    peer.peer_id,
                     hook.onion.forward_msat,
                     hook.onion.total_msat,
                     pi.amount_msat
@@ -210,14 +211,13 @@ pub async fn htlc_handler(
 
             if !matching_payment_secret {
                 log::warn!(
-                    "NOT resolving HTLC from {}: WRONG OR MISSING PAYMENT SECRET. \
-                    payment_hash: {payment_hash}",
-                    peer.peer_id
+                    "NOT resolving HTLC from {peer_id}: WRONG OR MISSING PAYMENT SECRET. \
+                    payment_hash: {payment_hash}"
                 );
             }
 
             plugin.state().bad_fwd_nodes.lock().insert(
-                peer.peer_id,
+                peer_id,
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()

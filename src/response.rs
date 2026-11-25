@@ -1,4 +1,7 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    collections::HashMap,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use anyhow::anyhow;
 use cln_plugin::{Error, Plugin};
@@ -12,7 +15,7 @@ use cln_rpc::{
             SendpayRoute,
             WaitsendpayRequest,
         },
-        responses::SendpayResponse,
+        responses::{ListpeerchannelsChannels, SendpayResponse},
     },
     primitives::{Amount, PublicKey, Sha256, ShortChannelId, ShortChannelIdDir},
 };
@@ -237,7 +240,16 @@ pub async fn waitsendpay_response(
                     return Ok(0);
                 };
 
-                if erring_channel == route.last().unwrap().channel.unwrap() {
+                let (resolved_erring, resolved_first, resolved_last) = {
+                    let peer_channels = plugin.state().peer_channels.lock();
+                    (
+                        resolve_local_scid(&peer_channels, erring_channel),
+                        resolve_local_scid(&peer_channels, route.first().unwrap().channel.unwrap()),
+                        resolve_local_scid(&peer_channels, route.last().unwrap().channel.unwrap()),
+                    )
+                };
+
+                if resolved_erring == resolved_last {
                     log::warn!(
                         "{}: Last peer has a problem or just updated their fees? {}",
                         task_ident,
@@ -261,20 +273,20 @@ pub async fn waitsendpay_response(
                         );
                     } else {
                         plugin.state().temp_chan_bans.lock().insert(
-                            route.last().unwrap().channel.unwrap(),
+                            resolved_last,
                             SystemTime::now()
                                 .duration_since(UNIX_EPOCH)
                                 .unwrap()
                                 .as_secs(),
                         );
                     }
-                } else if erring_channel == route.first().unwrap().channel.unwrap() {
+                } else if resolved_erring == resolved_first {
                     log::warn!("{}: First peer has a problem {}", task_ident, err.message);
                     if err.message.contains("Too many HTLCs") {
                         my_sleep(plugin.clone(), 3, task_ident).await;
                     } else {
                         plugin.state().temp_chan_bans.lock().insert(
-                            route.first().unwrap().channel.unwrap(),
+                            resolved_first,
                             SystemTime::now()
                                 .duration_since(UNIX_EPOCH)
                                 .unwrap()
@@ -399,8 +411,12 @@ pub async fn sendpay_response(
             plugin.state().pays.write().remove(&payment_hash_str);
             if e.to_string().contains("First peer not ready") {
                 log::info!("{task_ident}: First peer not ready, banning it for now...");
+                let first_scid = {
+                    let peer_channels = plugin.state().peer_channels.lock();
+                    resolve_local_scid(&peer_channels, route.first().unwrap().channel.unwrap())
+                };
                 plugin.state().temp_chan_bans.lock().insert(
-                    route.first().unwrap().channel.unwrap(),
+                    first_scid,
                     SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .unwrap()
@@ -456,4 +472,23 @@ pub(crate) fn timeout_intermediate_channels(
         });
     }
     Ok(chans)
+}
+
+fn resolve_local_scid(
+    peer_channels: &HashMap<ShortChannelId, ListpeerchannelsChannels>,
+    scid_or_alias: ShortChannelId,
+) -> ShortChannelId {
+    if peer_channels.contains_key(&scid_or_alias) {
+        return scid_or_alias;
+    }
+    for chan in peer_channels.values() {
+        if let Some(alias) = &chan.alias {
+            if alias.local == Some(scid_or_alias) || alias.remote == Some(scid_or_alias) {
+                if let Some(real_scid) = chan.short_channel_id {
+                    return real_scid;
+                }
+            }
+        }
+    }
+    scid_or_alias
 }
