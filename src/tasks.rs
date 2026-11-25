@@ -294,7 +294,8 @@ pub async fn refresh_liquidity(plugin: Plugin<PluginState>) -> Result<(), Error>
                 .unwrap()
                 .as_secs();
             let mut liquidity = plugin.state().liquidity.lock();
-            liquidity.retain(|_, v| v.liquidity_age > timestamp - interval * 60);
+            let cutoff = timestamp.saturating_sub(interval.saturating_mul(60));
+            liquidity.retain(|_, v| v.liquidity_age > cutoff);
             log::info!(
                 "Refreshed {} liquidity beliefs in {}ms!",
                 liquidity.len(),
@@ -308,20 +309,20 @@ pub async fn refresh_liquidity(plugin: Plugin<PluginState>) -> Result<(), Error>
 pub async fn clear_tempbans(plugin: Plugin<PluginState>) -> Result<(), Error> {
     loop {
         {
-            plugin.state().temp_chan_bans.lock().retain(|_c, t| {
-                *t > SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs()
-                    - 600
-            });
-            plugin.state().bad_fwd_nodes.lock().retain(|_c, t| {
-                *t > SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs()
-                    - 3_600
-            });
+            let now_secs = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            plugin
+                .state()
+                .temp_chan_bans
+                .lock()
+                .retain(|_c, t| *t > now_secs.saturating_sub(600));
+            plugin
+                .state()
+                .bad_fwd_nodes
+                .lock()
+                .retain(|_c, t| *t > now_secs.saturating_sub(3_600));
         }
         time::sleep(Duration::from_secs(100)).await;
     }
@@ -347,8 +348,10 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-            let succ_age = sys_time_now - stats_delete_successes_age * 24 * 60 * 60;
-            let fail_age = sys_time_now - stats_delete_failures_age * 24 * 60 * 60;
+            let succ_age =
+                sys_time_now.saturating_sub(stats_delete_successes_age.saturating_mul(24 * 60 * 60));
+            let fail_age =
+                sys_time_now.saturating_sub(stats_delete_failures_age.saturating_mul(24 * 60 * 60));
             for (chan_id, rebs) in successes {
                 let rebs_len = rebs.len();
                 let filtered_rebs = if stats_delete_successes_age > 0 {
@@ -445,15 +448,21 @@ pub async fn clear_stats(plugin: Plugin<PluginState>) -> Result<(), Error> {
 
 pub async fn read_askrene_liquidity(plugin: Plugin<PluginState>) -> Result<(), Error> {
     let rpc_path = plugin.state().config.lock().rpc_path.clone();
-    let interval = plugin.state().config.lock().reset_liquidity_interval * 60;
     let mut rpc = ClnRpc::new(&rpc_path).await?;
     loop {
         {
+            let interval = plugin
+                .state()
+                .config
+                .lock()
+                .reset_liquidity_interval
+                .saturating_mul(60);
             let now = Instant::now();
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
+            let cutoff = timestamp.saturating_sub(interval);
             let Ok(xpay_layer_resp) = rpc
                 .call_typed(&AskrenelistlayersRequest {
                     layer: Some("xpay".to_owned()),
@@ -480,7 +489,7 @@ pub async fn read_askrene_liquidity(plugin: Plugin<PluginState>) -> Result<(), E
                 } else {
                     continue;
                 };
-                if belief_timestamp < timestamp - interval {
+                if belief_timestamp < cutoff {
                     continue;
                 }
                 counter += 1;
