@@ -101,16 +101,23 @@ const OPT_AUTOGO: DefaultBooleanConfigOption = ConfigOption::new_bool_with_defau
     "Automatically start all jobs on startup. Default is `false`",
 );
 
-#[allow(clippy::too_many_lines)]
-#[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
+fn main() -> Result<(), anyhow::Error> {
+    // SAFETY: Called on the main thread before spawning the Tokio runtime worker threads.
     unsafe {
         std::env::set_var(
             "CLN_PLUGIN_LOG",
             "cln_plugin=info,cln_rpc=info,sling=trace,debug",
         );
-    };
+    }
     log_panics::init();
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(async_main())
+}
+
+#[allow(clippy::too_many_lines)]
+async fn async_main() -> Result<(), anyhow::Error> {
     let state;
     let confplugin;
     let opt_refresh_aliasmap_interval: DefaultIntegerConfigOption =
