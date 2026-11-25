@@ -278,7 +278,7 @@ pub async fn sling(
             preimage,
             payment_secret,
             incoming_scid: last_hop.unwrap().short_channel_id.unwrap(),
-            incoming_alias: last_hop.unwrap().alias.as_ref().and_then(|a| a.remote),
+            incoming_alias: last_hop.unwrap().alias.as_ref().and_then(|a| a.local),
             amount_msat: route.last().unwrap().amount_msat.unwrap().msat(),
         };
 
