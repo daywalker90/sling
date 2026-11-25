@@ -268,77 +268,6 @@ fn read_gossip_file_chunk(
                     }
                 }
             }
-            4104 => {
-                // private_channel_announcement
-                //  `gossip_store_private_channel` (4104)
-                //   - `amount_sat`: u64 (body[0..8])
-                //   - `inner_len`: u16 (body[8..10])
-                //   - `inner_msg_type + announcement`: u16 + u8[inner_len-2] (body[10..10+inner_len])
-                if body.len() < 12 {
-                    log::warn!(
-                        "read_gossip_file_chunk: truncated private_channel_announcement ({} bytes)",
-                        body.len()
-                    );
-                    continue;
-                }
-                let inner_len = u16::from_be_bytes(body[8..10].try_into()?) as usize;
-                let Some(end) = 10usize.checked_add(inner_len) else {
-                    log::warn!("read_gossip_file_chunk: private_channel_announcement length overflow");
-                    continue;
-                };
-                if inner_len < 2 || end > body.len() {
-                    log::warn!(
-                        "read_gossip_file_chunk: invalid private_channel_announcement inner_len \
-                        {inner_len} for body len {}",
-                        body.len()
-                    );
-                    continue;
-                }
-                let (scid, chan_ann) = match parse_channel_announcement(&body[12..end]) {
-                    Ok(x) => x,
-                    Err(e) => {
-                        log::warn!(
-                            "read_gossip_file_chunk: Error parsing \
-                            channel_announcement: {e}"
-                        );
-                        continue;
-                    }
-                };
-
-                let dir_chan_0 = ShortChannelIdDir {
-                    short_channel_id: scid,
-                    direction: 0,
-                };
-                let dir_chan_1 = ShortChannelIdDir {
-                    short_channel_id: scid,
-                    direction: 1,
-                };
-
-                if !graph.has_announcement(&dir_chan_0, &chan_ann)? {
-                    if let Some(chan_state) = incomplete_channels.get_mut(&dir_chan_0) {
-                        if !chan_state.has_announcement() {
-                            chan_state.add_announcement(dir_chan_0.direction, chan_ann)?;
-                        }
-                    } else {
-                        let mut chan_state = ShortChannelIdDirStateBuilder::new();
-                        chan_state.add_announcement(dir_chan_0.direction, chan_ann)?;
-
-                        incomplete_channels.insert(dir_chan_0, chan_state);
-                    }
-                }
-                if !graph.has_announcement(&dir_chan_1, &chan_ann)? {
-                    if let Some(chan_state) = incomplete_channels.get_mut(&dir_chan_1) {
-                        if !chan_state.has_announcement() {
-                            chan_state.add_announcement(dir_chan_1.direction, chan_ann)?;
-                        }
-                    } else {
-                        let mut chan_state = ShortChannelIdDirStateBuilder::new();
-                        chan_state.add_announcement(dir_chan_1.direction, chan_ann)?;
-
-                        incomplete_channels.insert(dir_chan_1, chan_state);
-                    }
-                }
-            }
             258 => {
                 // channel_update
                 let (scid_dir, chan_up) = match parse_channel_update(body) {
@@ -370,59 +299,10 @@ fn read_gossip_file_chunk(
                     }
                 }
             }
-            4102 => {
-                //   - `gossip_store_private_update` (4102)
-                //   - `inner_len`: u16 (body[0..2])
-                //   - `inner_msg_type + update`: u16 + u8[inner_len-2] (body[2..2+inner_len])
-                if body.len() < 4 {
-                    log::warn!(
-                        "read_gossip_file_chunk: truncated private_update ({} bytes)",
-                        body.len()
-                    );
-                    continue;
-                }
-                let inner_len = u16::from_be_bytes(body[0..2].try_into()?) as usize;
-                let Some(end) = 2usize.checked_add(inner_len) else {
-                    log::warn!("read_gossip_file_chunk: private_update length overflow");
-                    continue;
-                };
-                if inner_len < 2 || end > body.len() {
-                    log::warn!(
-                        "read_gossip_file_chunk: invalid private_update inner_len \
-                        {inner_len} for body len {}",
-                        body.len()
-                    );
-                    continue;
-                }
-                let (scid_dir, chan_up) = match parse_channel_update(&body[4..end]) {
-                    Ok(x) => x,
-                    Err(e) => {
-                        log::warn!(
-                            "read_gossip_file_chunk: Error parsing \
-                            channel_update: {e}"
-                        );
-                        continue;
-                    }
-                };
-                let mut updated = false;
-                if let Some(chan_state) = graph.get_state_mut_direction(scid_dir) {
-                    chan_state.update(chan_up);
-                    updated = true;
-                }
-                if !updated {
-                    if let Some(chan_state) = incomplete_channels.get_mut(&scid_dir) {
-                        chan_state.add_update(chan_up);
-                    } else {
-                        let mut chan_state = ShortChannelIdDirStateBuilder::new();
-                        chan_state.add_update(chan_up);
-
-                        incomplete_channels.insert(scid_dir, chan_state);
-                    }
-                }
-            }
-            4101 => {
-                // gossip_store_channel_amount
-                //  - `satoshis`: u64
+            4101 | 4102 | 4104 => {
+                // 4101: gossip_store_channel_amount (unused)
+                // 4102/4104: obsolete private channel records (modern CLN omits private
+                // channels from gossip_store; local private channels are loaded from listpeerchannels)
             }
             4103 => {
                 // 4103 gossip_store_delete_chan
@@ -1038,7 +918,7 @@ mod tests {
             short_channel_id: ShortChannelId::from(pub_scid),
             direction: 0,
         };
-        assert_eq!(graph.get_state_direction(priv_dir0).unwrap().fee_per_millionth, 50);
+        assert!(graph.get_state_direction(priv_dir0).is_none());
         assert_eq!(graph.get_state_direction(pub_dir0).unwrap().fee_per_millionth, 75);
     }
 
