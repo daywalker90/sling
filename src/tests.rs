@@ -782,6 +782,53 @@ fn test_parse_jobs_content_rejects_corrupt_json() {
     assert!(parse_jobs_content("{corrupt json").is_err());
 }
 
+#[test]
+fn test_maxhops_bounds_and_no_u8_overflow() {
+    use crate::parse::{parse_job, parse_once_job};
+    use serde_json::json;
+
+    let mut job = Job::new(sling::SatDirection::Pull, 10_000, Some(100), 100);
+    job.add_maxhops(u8::MAX);
+    assert_eq!(job.get_maxhops(8), u8::MAX);
+
+    let job_default = Job::new(sling::SatDirection::Pull, 10_000, Some(100), 100);
+    assert_eq!(job_default.get_maxhops(u8::MAX), u8::MAX);
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let config = make_test_config(make_pubkey(1));
+    assert!(
+        rt.block_on(parse_job(
+            json!({
+                "scid": "100x1x0",
+                "direction": "pull",
+                "amount": 10_000,
+                "maxppm": 500,
+                "outppm": 500,
+                "maxhops": 255,
+            }),
+            &config,
+        ))
+        .is_err()
+    );
+    assert!(
+        rt.block_on(parse_once_job(
+            json!({
+                "scid": "100x1x0",
+                "direction": "pull",
+                "amount": 10_000,
+                "onceamount": 20_000,
+                "maxppm": 500,
+                "outppm": 500,
+                "maxhops": 255,
+            }),
+            &config,
+        ))
+        .is_err()
+    );
+}
+
 // Read current RSS from /proc/self/statm (Linux-specific)
 fn get_current_rss() -> Option<u64> {
     let mut file = File::open("/proc/self/statm").ok()?;
