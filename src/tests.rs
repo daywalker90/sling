@@ -772,6 +772,16 @@ fn test_waitsendpay_error_data_allows_optional_onion_fields() {
     assert!(parsed.amount_msat.is_none());
 }
 
+#[test]
+fn test_parse_jobs_content_rejects_corrupt_json() {
+    use crate::util::parse_jobs_content;
+
+    assert!(parse_jobs_content("").unwrap().is_empty());
+    assert!(parse_jobs_content("   \n  ").unwrap().is_empty());
+    assert!(parse_jobs_content("{}").unwrap().is_empty());
+    assert!(parse_jobs_content("{corrupt json").is_err());
+}
+
 // Read current RSS from /proc/self/statm (Linux-specific)
 fn get_current_rss() -> Option<u64> {
     let mut file = File::open("/proc/self/statm").ok()?;
