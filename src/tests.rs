@@ -829,6 +829,48 @@ fn test_maxhops_bounds_and_no_u8_overflow() {
     );
 }
 
+#[test]
+fn test_push_job_with_large_max_htlc_count_does_not_fail() {
+    use crate::parse::{parse_job, parse_once_job};
+    use serde_json::json;
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let mut config = make_test_config(make_pubkey(1));
+    config.max_htlc_count = u64::from(u16::MAX) + 100;
+
+    assert!(
+        rt.block_on(parse_job(
+            json!({
+                "scid": "100x1x0",
+                "direction": "push",
+                "amount": 10_000,
+                "maxppm": 500,
+                "outppm": 500,
+                "paralleljobs": 2,
+            }),
+            &config,
+        ))
+        .is_ok()
+    );
+    assert!(
+        rt.block_on(parse_once_job(
+            json!({
+                "scid": "100x1x0",
+                "direction": "push",
+                "amount": 10_000,
+                "onceamount": 20_000,
+                "maxppm": 500,
+                "outppm": 500,
+                "paralleljobs": 2,
+            }),
+            &config,
+        ))
+        .is_ok()
+    );
+}
+
 // Read current RSS from /proc/self/statm (Linux-specific)
 fn get_current_rss() -> Option<u64> {
     let mut file = File::open("/proc/self/statm").ok()?;

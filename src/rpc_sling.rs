@@ -139,7 +139,7 @@ pub async fn slinggo(
             sling::SatDirection::Pull => job.get_paralleljobs(config.paralleljobs),
             sling::SatDirection::Push => std::cmp::min(
                 job.get_paralleljobs(config.paralleljobs),
-                u16::try_from(config.max_htlc_count)?,
+                u16::try_from(config.max_htlc_count).unwrap_or(u16::MAX),
             ),
         };
         {
@@ -376,7 +376,7 @@ pub async fn slingonce(
             sling::SatDirection::Pull => job.get_paralleljobs(config.paralleljobs),
             sling::SatDirection::Push => std::cmp::min(
                 job.get_paralleljobs(config.paralleljobs),
-                u16::try_from(config.max_htlc_count)?,
+                u16::try_from(config.max_htlc_count).unwrap_or(u16::MAX),
             ),
         }
     };

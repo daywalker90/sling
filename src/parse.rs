@@ -136,8 +136,7 @@ pub async fn parse_job(
                 if pj < 1 {
                     return Err(anyhow!("paralleljobs must be atleast 1"));
                 }
-                if job.sat_direction == SatDirection::Push
-                    && pj > u16::try_from(config.max_htlc_count)?
+                if job.sat_direction == SatDirection::Push && u64::from(pj) > config.max_htlc_count
                 {
                     return Err(anyhow!(
                         "In a push job it doesn't make sense to have more \
@@ -382,8 +381,7 @@ pub async fn parse_once_job(
                 if pj < 1 {
                     return Err(anyhow!("paralleljobs must be atleast 1"));
                 }
-                if job.sat_direction == SatDirection::Push
-                    && pj > u16::try_from(config.max_htlc_count)?
+                if job.sat_direction == SatDirection::Push && u64::from(pj) > config.max_htlc_count
                 {
                     return Err(anyhow!(
                         "In a push job it doesn't make sense to have more \
