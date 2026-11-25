@@ -291,12 +291,16 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
                     .ok_or_else(|| anyhow!("{OPT_DEPLETEUPTOAMOUNT} too large"))?;
         }
         n if n.eq(OPT_MAXHOPS) => {
-            config.maxhops = u8::try_from(options_value_to_u64(
+            let mh = u8::try_from(options_value_to_u64(
                 OPT_MAXHOPS,
                 value.as_i64().unwrap(),
                 2,
                 None,
             )?)?;
+            if mh > 20 {
+                return Err(anyhow!("{OPT_MAXHOPS} must be less than or equal to 20"));
+            }
+            config.maxhops = mh;
         }
         n if n.eq(OPT_CANDIDATES_MIN_AGE) => {
             config.candidates_min_age = u32::try_from(options_value_to_u64(

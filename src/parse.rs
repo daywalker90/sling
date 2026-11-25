@@ -96,6 +96,9 @@ pub async fn parse_job(
                 if h < 2 {
                     return Err(anyhow!("maxhops must be atleast 2"));
                 }
+                if h > 20 {
+                    return Err(anyhow!("maxhops must be at most 20"));
+                }
                 job.add_maxhops(h);
             }
 
@@ -338,6 +341,9 @@ pub async fn parse_once_job(
             if let Some(h) = maxhops {
                 if h < 2 {
                     return Err(anyhow!("maxhops must be atleast 2"));
+                }
+                if h > 20 {
+                    return Err(anyhow!("maxhops must be at most 20"));
                 }
                 job.add_maxhops(h);
             }

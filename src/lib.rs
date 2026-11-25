@@ -203,9 +203,9 @@ impl Job {
     }
     pub fn get_maxhops(&self, config_maxhops: u8) -> u8 {
         if let Some(mh) = self.maxhops {
-            mh + 1
+            mh.saturating_add(1)
         } else {
-            config_maxhops + 1
+            config_maxhops.saturating_add(1)
         }
     }
     pub fn get_target(&self) -> f64 {
