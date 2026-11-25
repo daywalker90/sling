@@ -46,7 +46,7 @@ pub async fn slingjob(
 
     let (chan_id, job) = parse_job(args, &config).await?;
 
-    let _res = refresh_listpeerchannels(plugin.clone()).await;
+    refresh_listpeerchannels(plugin.clone()).await?;
     let peer_channels = plugin.state().peer_channels.lock().clone();
     let _our_listpeers_channel = get_normal_channel_from_listpeerchannels(&peer_channels, chan_id)?;
 
@@ -125,7 +125,7 @@ pub async fn slinggo(
         return Err(anyhow!("Shortchannelid not found in jobs"));
     }
 
-    let _res = refresh_listpeerchannels(plugin.clone()).await;
+    refresh_listpeerchannels(plugin.clone()).await?;
     let peer_channels = plugin.state().peer_channels.lock().clone();
 
     for (chan_id, job) in jobs {
@@ -323,7 +323,7 @@ pub async fn slingonce(
     let config_clone = plugin.state().config.lock().clone();
     let (chan_id, job) = parse_once_job(args, &config_clone).await?;
 
-    let _res = refresh_listpeerchannels(plugin.clone()).await;
+    refresh_listpeerchannels(plugin.clone()).await?;
     let peer_channels = plugin.state().peer_channels.lock().clone();
     let our_listpeers_channel = get_normal_channel_from_listpeerchannels(&peer_channels, chan_id)?;
     let other_peer = PubKeyBytes::from_pubkey(

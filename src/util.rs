@@ -47,6 +47,13 @@ use crate::{
     },
 };
 
+pub(crate) fn parse_jobs_content(content: &str) -> Result<BTreeMap<ShortChannelId, Job>, Error> {
+    if content.trim().is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    serde_json::from_str(content).map_err(|e| anyhow!("Failed to parse {JOB_FILE_NAME}: {e}"))
+}
+
 pub async fn read_jobs(
     sling_dir: &PathBuf,
     plugin: Plugin<PluginState>,
@@ -57,21 +64,25 @@ pub async fn read_jobs(
 
     create_sling_dir(sling_dir).await?;
     match jobfilecontent {
-        Ok(file) => jobs = serde_json::from_str(&file).unwrap_or(BTreeMap::new()),
-        Err(e) => {
+        Ok(file) => jobs = parse_jobs_content(&file)?,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
             log::warn!(
                 "Couldn't open {}: {}. First time using sling? Creating new file.",
-                jobfile.to_str().unwrap(),
+                jobfile.display(),
                 e
             );
             File::create(jobfile.clone()).await?;
             jobs = BTreeMap::new();
         }
+        Err(e) => {
+            return Err(anyhow!("Could not read {}: {e}", jobfile.display()));
+        }
     }
     let peer_channels = plugin.state().peer_channels.lock().clone();
-    let channels = get_all_normal_channels_from_listpeerchannels(&peer_channels);
-
-    jobs.retain(|c, _j| channels.contains_key(c));
+    if !peer_channels.is_empty() {
+        let channels = get_all_normal_channels_from_listpeerchannels(&peer_channels);
+        jobs.retain(|c, _j| channels.contains_key(c));
+    }
 
     refresh_job_excepts(plugin, sling_dir, &jobs).await?;
 
@@ -118,11 +129,9 @@ pub async fn write_job(
         }
     }
     jobs.retain(|i, _j| !jobs_to_remove.contains(i));
-    fs::write(
-        sling_dir.join(JOB_FILE_NAME),
-        serde_json::to_string_pretty(&jobs)?,
-    )
-    .await?;
+    let tmp_jobfile = sling_dir.join(format!("{JOB_FILE_NAME}.tmp"));
+    fs::write(&tmp_jobfile, serde_json::to_string_pretty(&jobs)?).await?;
+    fs::rename(&tmp_jobfile, sling_dir.join(JOB_FILE_NAME)).await?;
 
     refresh_job_excepts(plugin, &sling_dir, &jobs).await?;
 
