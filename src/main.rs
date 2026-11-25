@@ -155,7 +155,7 @@ async fn async_main() -> Result<(), anyhow::Error> {
     let opt_candidates_min_age: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
         OPT_CANDIDATES_MIN_AGE,
         0,
-        "Minium age of a candidate to rebalance with in days. Default is `0`",
+        "Minimum age of a candidate to rebalance with in blocks. Default is `0`",
     )
     .dynamic();
     let opt_paralleljobs: DefaultIntegerConfigOption = ConfigOption::new_i64_with_default(
