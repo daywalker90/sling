@@ -747,14 +747,9 @@ pub async fn slingexceptchan(
             let jobs = read_jobs(&sling_dir, plugin.clone()).await?;
             let mut config = plugin.state().config.lock();
 
-            let mut contains = false;
-            if config.exclude_chans_pull.contains(&s) || config.exclude_chans_push.contains(&s) {
-                contains = true;
-            }
-
             match command {
                 opt if opt.eq("add") => {
-                    if contains {
+                    if static_excepts.contains(&s) {
                         return Err(anyhow!("{s} is already in excepts"));
                     }
                     if jobs.contains_key(&s) {
@@ -773,10 +768,12 @@ pub async fn slingexceptchan(
                     static_excepts.insert(s);
                 }
                 opt if opt.eq("remove") => {
-                    if contains {
-                        config.exclude_chans_pull.remove(&s);
-                        config.exclude_chans_push.remove(&s);
+                    if static_excepts.contains(&s) {
                         static_excepts.remove(&s);
+                        if !jobs.contains_key(&s) {
+                            config.exclude_chans_pull.remove(&s);
+                            config.exclude_chans_push.remove(&s);
+                        }
                     } else {
                         return Err(anyhow!(
                             "ShortChannelId {s} not in excepts, nothing to remove"
