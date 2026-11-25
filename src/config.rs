@@ -261,7 +261,7 @@ fn check_option(config: &mut Config, name: &str, value: &options::Value) -> Resu
                 OPT_RESET_LIQUIDITY_INTERVAL,
                 value.as_i64().unwrap(),
                 10,
-                None,
+                Some(60),
             )?;
         }
         n if n.eq(OPT_DEPLETEUPTOPERCENT) => {
