@@ -752,6 +752,26 @@ fn test_timeout_intermediate_channels_skips_own_chans_and_pairs_scid_correctly()
     );
 }
 
+#[test]
+fn test_waitsendpay_error_data_allows_optional_onion_fields() {
+    use crate::errors::WaitsendpayErrorData;
+    use serde_json::json;
+
+    // PAY_UNPARSEABLE_ONION omits erring_channel, erring_node, failcode, failcodename, amount_msat
+    let val = json!({
+        "id": 1,
+        "payment_hash": "0000000000000000000000000000000000000000000000000000000000000001",
+        "status": "failed",
+        "created_at": 1700000000,
+        "amount_sent_msat": 100000
+    });
+    let parsed: WaitsendpayErrorData = serde_json::from_value(val).unwrap();
+    assert!(parsed.erring_channel.is_none());
+    assert!(parsed.erring_node.is_none());
+    assert!(parsed.failcodename.is_none());
+    assert!(parsed.amount_msat.is_none());
+}
+
 // Read current RSS from /proc/self/statm (Linux-specific)
 fn get_current_rss() -> Option<u64> {
     let mut file = File::open("/proc/self/statm").ok()?;

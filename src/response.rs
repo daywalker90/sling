@@ -14,7 +14,7 @@ use cln_rpc::{
         },
         responses::SendpayResponse,
     },
-    primitives::{Amount, PublicKey, Sha256, ShortChannelIdDir},
+    primitives::{Amount, PublicKey, Sha256, ShortChannelId, ShortChannelIdDir},
 };
 use sling::{Job, SatDirection};
 use tokio::time::Instant;
@@ -151,7 +151,25 @@ pub async fn waitsendpay_response(
                 .await?;
                 Ok(0)
             } else if let Some(d) = err.data {
-                let ws_error = serde_json::from_value::<WaitsendpayErrorData>(d)?;
+                let ws_error = match serde_json::from_value::<WaitsendpayErrorData>(d) {
+                    Ok(e) => e,
+                    Err(parse_err) => {
+                        log::warn!(
+                            "{task_ident}: Could not parse waitsendpay error data ({parse_err}): {}",
+                            err.message
+                        );
+                        return Ok(0);
+                    }
+                };
+
+                let err_amount_msat = ws_error
+                    .amount_msat
+                    .map_or(job.amount_msat, |a| a.msat());
+                let failcodename = ws_error
+                    .failcodename
+                    .clone()
+                    .unwrap_or_else(|| err.message.clone());
+                let erring_node = ws_error.erring_node.unwrap_or(config.pubkey);
 
                 {
                     let alias_map = plugin.state().alias_peer_map.lock();
@@ -161,26 +179,25 @@ pub async fn waitsendpay_response(
                         now.elapsed().as_secs(),
                         err.message,
                         alias_map
-                            .get(&ws_error.erring_node)
-                            .unwrap_or(&ws_error.erring_node.to_string()),
-                        ws_error.erring_channel,
+                            .get(&erring_node)
+                            .unwrap_or(&erring_node.to_string()),
+                        ws_error
+                            .erring_channel
+                            .map_or_else(|| "none".to_string(), |c| c.to_string()),
                     );
                 }
 
-                match &ws_error.failcodename {
-                    err if err.eq("WIRE_INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS")
-                        && ws_error.erring_node == config.pubkey =>
-                    {
-                        log::warn!("{task_ident}: PAYMENT DETAILS ERROR:{err:?} {route:?}");
-                        special_stop = true;
-                    }
-                    _ => (),
+                if failcodename == "WIRE_INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS"
+                    && ws_error.erring_node == Some(config.pubkey)
+                {
+                    log::warn!("{task_ident}: PAYMENT DETAILS ERROR:{failcodename:?} {route:?}");
+                    special_stop = true;
                 }
 
                 FailureReb {
-                    amount_msat: ws_error.amount_msat.unwrap().msat(),
-                    failure_reason: ws_error.failcodename.clone(),
-                    failure_node: ws_error.erring_node,
+                    amount_msat: err_amount_msat,
+                    failure_reason: failcodename.clone(),
+                    failure_node: erring_node,
                     channel_partner: match job.sat_direction {
                         SatDirection::Pull => route.first().unwrap().channel.unwrap(),
                         SatDirection::Push => route.last().unwrap().channel.unwrap(),
@@ -199,20 +216,48 @@ pub async fn waitsendpay_response(
                     ));
                 }
 
-                if ws_error.erring_channel == route.last().unwrap().channel.unwrap() {
+                let Some(erring_channel) = ws_error.erring_channel else {
+                    log::warn!(
+                        "{task_ident}: Rebalance failure without erring_channel ({failcodename}); \
+                        constricting intermediate hops"
+                    );
+                    let now_secs = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs();
+                    for dir_chan in timeout_intermediate_channels(route, config.pubkey)? {
+                        plugin.state().liquidity.lock().insert(
+                            dir_chan,
+                            Liquidity {
+                                liquidity_msat: err_amount_msat / 2,
+                                liquidity_age: now_secs,
+                            },
+                        );
+                    }
+                    return Ok(0);
+                };
+
+                if erring_channel == route.last().unwrap().channel.unwrap() {
                     log::warn!(
                         "{}: Last peer has a problem or just updated their fees? {}",
                         task_ident,
-                        ws_error.failcodename
+                        failcodename
                     );
 
-                    let last_hop = route.get(route.len() - 2).unwrap().id.unwrap();
+                    let last_hop = route
+                        .len()
+                        .checked_sub(2)
+                        .and_then(|idx| route.get(idx))
+                        .and_then(|h| h.id);
                     if err.message.contains("Too many HTLCs") {
                         my_sleep(plugin.clone(), 3, task_ident).await;
-                    } else if plugin.state().bad_fwd_nodes.lock().contains_key(&last_hop) {
+                    } else if last_hop.is_some_and(|lh| {
+                        plugin.state().bad_fwd_nodes.lock().contains_key(&lh)
+                    }) {
                         log::debug!(
-                            "{task_ident}: Last hop {last_hop} got temp banned because \
-                            of bad forwarding"
+                            "{task_ident}: Last hop {} got temp banned because \
+                            of bad forwarding",
+                            last_hop.unwrap()
                         );
                     } else {
                         plugin.state().temp_chan_bans.lock().insert(
@@ -223,7 +268,7 @@ pub async fn waitsendpay_response(
                                 .as_secs(),
                         );
                     }
-                } else if ws_error.erring_channel == route.first().unwrap().channel.unwrap() {
+                } else if erring_channel == route.first().unwrap().channel.unwrap() {
                     log::warn!("{}: First peer has a problem {}", task_ident, err.message);
                     if err.message.contains("Too many HTLCs") {
                         my_sleep(plugin.clone(), 3, task_ident).await;
@@ -236,22 +281,28 @@ pub async fn waitsendpay_response(
                                 .as_secs(),
                         );
                     }
-                } else {
+                } else if erring_channel == ShortChannelId::from(0) {
+                    log::warn!(
+                        "{task_ident}: Node-level failure at {erring_node} ({failcodename}), \
+                        skipping 0x0x0 channel constraint"
+                    );
+                } else if let Some(erring_direction) = ws_error.erring_direction {
                     let dir_chan = ShortChannelIdDir {
-                        short_channel_id: ws_error.erring_channel,
-                        direction: u32::from(ws_error.erring_direction),
+                        short_channel_id: erring_channel,
+                        direction: u32::from(erring_direction),
                     };
+                    let constrained_msat = err_amount_msat / 2;
                     log::debug!(
                         "{}: Adjusting liquidity for {} to constrain it to {}msat",
                         task_ident,
                         dir_chan,
-                        ws_error.amount_msat.unwrap().msat() / 2
+                        constrained_msat
                     );
 
                     {
                         let mut liquidity = plugin.state().liquidity.lock();
                         if let Some(liq) = liquidity.get_mut(&dir_chan) {
-                            liq.liquidity_msat = ws_error.amount_msat.unwrap().msat() / 2;
+                            liq.liquidity_msat = constrained_msat;
                             liq.liquidity_age = SystemTime::now()
                                 .duration_since(UNIX_EPOCH)
                                 .unwrap()
@@ -260,7 +311,7 @@ pub async fn waitsendpay_response(
                             liquidity.insert(
                                 dir_chan,
                                 Liquidity {
-                                    liquidity_msat: ws_error.amount_msat.unwrap().msat() / 2,
+                                    liquidity_msat: constrained_msat,
                                     liquidity_age: SystemTime::now()
                                         .duration_since(UNIX_EPOCH)
                                         .unwrap()
@@ -269,24 +320,29 @@ pub async fn waitsendpay_response(
                             );
                         }
                     }
-                    if config.has_askrene_ll {
+                    if config.has_askrene_ll && failcodename == "WIRE_TEMPORARY_CHANNEL_FAILURE" {
                         for lay in &config.inform_layers {
                             log::debug!(
                                 "{}: Informing layer `{}` about scid_dir:{} amt:{}msat constraint",
                                 task_ident,
                                 lay,
                                 dir_chan,
-                                ws_error.amount_msat.unwrap().msat() / 2
+                                constrained_msat
                             );
-                            rpc.call_typed(&AskreneinformchannelRequest {
-                                amount_msat: Amount::from_msat(
-                                    ws_error.amount_msat.unwrap().msat() / 2,
-                                ),
-                                inform: AskreneinformchannelInform::CONSTRAINED,
-                                short_channel_id_dir: dir_chan,
-                                layer: lay.clone(),
-                            })
-                            .await?;
+                            if let Err(e) = rpc
+                                .call_typed(&AskreneinformchannelRequest {
+                                    amount_msat: Amount::from_msat(constrained_msat),
+                                    inform: AskreneinformchannelInform::CONSTRAINED,
+                                    short_channel_id_dir: dir_chan,
+                                    layer: lay.clone(),
+                                })
+                                .await
+                            {
+                                log::debug!(
+                                    "{task_ident}: Could not inform askrene layer `{lay}` about \
+                                    {dir_chan}: {e}"
+                                );
+                            }
                         }
                     }
                 }

@@ -53,16 +53,16 @@ pub struct WaitsendpayErrorData {
     pub bolt12: Option<String>,
     #[serde(alias = "payment_preimage", skip_serializing_if = "Option::is_none")]
     pub payment_preimage: Option<Secret>,
-    #[serde(alias = "erring_index")]
-    pub erring_index: u8,
-    #[serde(alias = "erring_node")]
-    pub erring_node: PublicKey,
-    #[serde(alias = "erring_channel")]
-    pub erring_channel: ShortChannelId,
-    #[serde(alias = "erring_direction")]
-    pub erring_direction: u8,
-    #[serde(alias = "failcode")]
-    pub failcode: u32,
-    #[serde(alias = "failcodename")]
-    pub failcodename: String,
+    #[serde(alias = "erring_index", skip_serializing_if = "Option::is_none")]
+    pub erring_index: Option<u8>,
+    #[serde(alias = "erring_node", skip_serializing_if = "Option::is_none")]
+    pub erring_node: Option<PublicKey>,
+    #[serde(alias = "erring_channel", skip_serializing_if = "Option::is_none")]
+    pub erring_channel: Option<ShortChannelId>,
+    #[serde(alias = "erring_direction", skip_serializing_if = "Option::is_none")]
+    pub erring_direction: Option<u8>,
+    #[serde(alias = "failcode", skip_serializing_if = "Option::is_none")]
+    pub failcode: Option<u32>,
+    #[serde(alias = "failcodename", skip_serializing_if = "Option::is_none")]
+    pub failcodename: Option<String>,
 }
