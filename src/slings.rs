@@ -695,18 +695,39 @@ fn build_candidatelist(
             }
         };
 
-        let to_us_msat = Amount::msat(&channel.to_us_msat.unwrap());
-        let total_msat = Amount::msat(&channel.total_msat.unwrap());
-        let chan_out_ppm = feeppm_effective(
-            channel.fee_proportional_millionths.unwrap(),
-            u32::try_from(Amount::msat(&channel.fee_base_msat.unwrap()))?,
-            job.amount_msat,
-        );
+        let (Some(to_us_msat), Some(total_msat), Some(fee_prop), Some(fee_base)) = (
+            channel.to_us_msat,
+            channel.total_msat,
+            channel.fee_proportional_millionths,
+            channel.fee_base_msat,
+        ) else {
+            log::trace!("{task_ident}: build_candidatelist: {scid} is missing balance/fee fields");
+            continue;
+        };
+        let to_us_msat = Amount::msat(&to_us_msat);
+        let total_msat = Amount::msat(&total_msat);
+        let Ok(fee_base_u32) = u32::try_from(Amount::msat(&fee_base)) else {
+            log::trace!("{task_ident}: build_candidatelist: {scid} fee_base_msat exceeds u32::MAX");
+            continue;
+        };
+        let chan_out_ppm = feeppm_effective(fee_prop, fee_base_u32, job.amount_msat);
 
         match job.sat_direction {
             SatDirection::Pull => {
+                let Some(spendable_msat) = channel.spendable_msat.map(|a| a.msat()) else {
+                    log::trace!("{task_ident}: build_candidatelist: {scid} missing spendable_msat");
+                    continue;
+                };
+                if spendable_msat < job.amount_msat {
+                    log::trace!(
+                        "{task_ident}: build_candidatelist: {scid} spendable_msat too low: \
+                        {spendable_msat}<{}",
+                        job.amount_msat
+                    );
+                    continue;
+                }
                 let liquidity_target = max(
-                    job.amount_msat + 10_000_000,
+                    job.amount_msat.saturating_add(10_000_000),
                     min(
                         (depleteuptopercent * total_msat as f64) as u64,
                         depleteuptoamount,
@@ -730,20 +751,30 @@ fn build_candidatelist(
                 }
             }
             SatDirection::Push => {
+                let Some(receivable_msat) = channel.receivable_msat.map(|a| a.msat()) else {
+                    log::trace!("{task_ident}: build_candidatelist: {scid} missing receivable_msat");
+                    continue;
+                };
+                if receivable_msat < job.amount_msat {
+                    log::trace!(
+                        "{task_ident}: build_candidatelist: {scid} receivable_msat too low: \
+                        {receivable_msat}<{}",
+                        job.amount_msat
+                    );
+                    continue;
+                }
                 let liquidity_target = max(
-                    job.amount_msat + 10_000_000,
+                    job.amount_msat.saturating_add(10_000_000),
                     min(
                         (depleteuptopercent * total_msat as f64) as u64,
                         depleteuptoamount,
                     ),
                 );
-                if total_msat - to_us_msat <= liquidity_target {
+                let remote_msat = total_msat.saturating_sub(to_us_msat);
+                if remote_msat <= liquidity_target {
                     log::trace!(
-                        "{}: build_candidatelist: {} does not have enough liquidity: {}<={}",
-                        task_ident,
-                        scid,
-                        total_msat - to_us_msat,
-                        liquidity_target
+                        "{task_ident}: build_candidatelist: {scid} does not have enough \
+                        liquidity: {remote_msat}<={liquidity_target}"
                     );
                     continue;
                 }
