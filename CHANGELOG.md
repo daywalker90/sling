@@ -1,5 +1,27 @@
 # Changelog
 
+## [4.3.3] - 2026-11-25
+
+### Changed
+- cap per-hop CLTV delta at `500` blocks and total route CLTV delta at `1008` blocks during pathfinding to prevent excessive HTLC lockups and `sendpay` rejections
+- `sling-job` / `sling-once`: validate `target` is within `0.0..=1.0` and cap `maxhops` at `20` (matching the BOLT 4 limit)
+- `sling-candidates-min-age`: fixed option description from `days` to `blocks`
+
+### Fixed
+- **Security**: validate incoming rebalance HTLCs in `htlc_accepted` against CLN's `cltv-final`, the onion's `outgoing_cltv_value`, a per-rebalance `payment_secret`, and final-hop onion fields before releasing the preimage
+- fixed a race on fast routes where an incoming rebalance HTLC could arrive before `sendpay` returned, causing the job to stop with `WIRE_INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS`
+- `sling-once`: fixed race allowing duplicate concurrent runs on rapid calls, infinite retry loops on fatal errors, premature removal from channel exclusions when `paralleljobs > 1`, and over-rebalancing when a payment times out after its preimage was already released
+- fixed inbound-fee pathfinding so negative inbound fees can no longer mask expensive upstream channels, and fixed first-hop inbound-fee lookup for `push` jobs
+- fixed `WAITSENDPAY_TIMEOUT` liquidity updates mistakenly constraining our own first outgoing channel instead of intermediate hops
+- fixed rebalance jobs stopping on `askrene-inform-channel` errors (e.g. when the `xpay` layer does not exist yet) or when `waitsendpay` omits optional error fields (e.g. unparseable onion failures), and only inform askrene on `WIRE_TEMPORARY_CHANNEL_FAILURE`
+- fixed private channel SCID alias handling for incoming HTLC resolution (`alias.local`) and temporary channel bans
+- fixed candidate selection ignoring `spendable_msat` / `receivable_msat` (channel reserves and pending HTLCs)
+- fixed `sling-except-chan remove` being able to remove active job channels from exclusions
+- prevented `jobs.json` from being wiped on parse errors or transient `listpeerchannels` failures, and write `jobs.json` atomically
+- fixed gossip reader hangs on partial records at EOF and cleared stale closed channels after missed gossip store compactions
+- fixed `sling-reset-liquidity-interval` changes via `setconfig` not taking effect in the askrene liquidity task
+- fixed potential overflows/underflows in `sling-stats` weighted fee averages, `sling-candidates-min-age` logging, and `push` jobs with `sling-max-htlc-count > 65535`
+
 ## [4.3.2] - 2026-09-15
 
 ### Changed

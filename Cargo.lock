@@ -98,9 +98,9 @@ dependencies = [
 
 [[package]]
 name = "bitcoin-units"
-version = "0.1.101"
+version = "0.1.102"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cb95693f371d089a4b5b6fc41c6f3ea6e01ee8c15388335dfac8ea685173b51"
+checksum = "8d10cadede5bae3ffa1e712637e51ec9a06315bb9e539aef8c798c44694cac6d"
 dependencies = [
  "bitcoin-consensus-encoding",
  "serde",
@@ -739,7 +739,7 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "sling"
-version = "4.3.2"
+version = "4.3.3"
 dependencies = [
  "anyhow",
  "bitcoin",
